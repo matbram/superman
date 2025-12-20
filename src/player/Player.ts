@@ -70,6 +70,9 @@ export class Player {
   // Stop shockwave for building damage
   private onBuildingDamage: ((position: Vector3, radius: number, force: number) => void) | null = null;
 
+  // Building collision damage callback
+  private onBuildingCollision: ((buildingMesh: any, impactPosition: Vector3, speed: number) => void) | null = null;
+
   // Audio (placeholder for future implementation)
   // TODO: Add wind audio that scales with speed
 
@@ -328,26 +331,86 @@ export class Player {
   }
 
   /**
-   * Updates shockwave rings (expand and fade)
+   * Creates a distortion sphere for brake shockwave effect
+   */
+  private createDistortionSphere(): Mesh {
+    const sphere = MeshBuilder.CreateSphere('distortionSphere', {
+      diameter: 3,
+      segments: 24,
+    }, this.scene);
+
+    const material = new StandardMaterial('distortionMat', this.scene);
+    material.diffuseColor = new Color3(0.7, 0.85, 1);
+    material.emissiveColor = new Color3(0.4, 0.6, 0.9);
+    material.specularColor = new Color3(1, 1, 1);
+    material.alpha = 0.4;
+    material.backFaceCulling = false;
+
+    sphere.material = material;
+    sphere.isPickable = false;
+    sphere.visibility = 0;
+
+    return sphere;
+  }
+
+  /**
+   * Triggers brake shockwave when using LT to hard stop at high speed
+   * Called from FlightState when braking at supersonic speeds
+   */
+  public triggerBrakeShockwave(previousSpeed: number): void {
+    // Create expanding distortion sphere
+    const distortionSphere = this.createDistortionSphere();
+    distortionSphere.position.copyFrom(this.physics.position);
+    distortionSphere.scaling = new Vector3(1, 1, 1);
+    distortionSphere.visibility = 0.6;
+    this.shockwaveRings.push(distortionSphere);
+
+    // Create multiple concentric rings for visual impact
+    for (let i = 0; i < 4; i++) {
+      const ring = this.createStopShockwaveRing();
+      ring.position.copyFrom(this.physics.position);
+      ring.rotation.x = Math.PI / 2 + (Math.random() - 0.5) * 0.3;
+      ring.rotation.y = Math.random() * Math.PI * 2;
+      ring.scaling = new Vector3(0.5 + i * 0.3, 0.5 + i * 0.3, 0.5 + i * 0.3);
+      ring.visibility = 1;
+      this.shockwaveRings.push(ring);
+    }
+
+    // Strong camera shake and effect
+    const shakeIntensity = Math.min(6, previousSpeed / 25);
+    this.cameraController.addShake(shakeIntensity);
+    this.cameraController.triggerFlightStopEffect(previousSpeed);
+
+    // Trigger building damage
+    if (this.onBuildingDamage) {
+      const force = previousSpeed / 40;
+      this.onBuildingDamage(this.physics.position.clone(), STOP_SHOCKWAVE_RADIUS * 1.2, force);
+    }
+  }
+
+  /**
+   * Updates shockwave rings and distortion spheres (expand and fade)
    */
   private updateShockwaves(deltaTime: number): void {
-    const expandSpeed = 15;
-    const fadeSpeed = 3;
-
     for (let i = this.shockwaveRings.length - 1; i >= 0; i--) {
-      const ring = this.shockwaveRings[i];
+      const mesh = this.shockwaveRings[i];
 
-      // Expand the ring
-      ring.scaling.x += expandSpeed * deltaTime;
-      ring.scaling.y += expandSpeed * deltaTime;
-      ring.scaling.z += expandSpeed * deltaTime;
+      // Different expand/fade speeds for different effect types
+      const isDistortionSphere = mesh.name.includes('distortion');
+      const expandSpeed = isDistortionSphere ? 40 : 15;
+      const fadeSpeed = isDistortionSphere ? 2 : 3;
+
+      // Expand the mesh
+      mesh.scaling.x += expandSpeed * deltaTime;
+      mesh.scaling.y += expandSpeed * deltaTime;
+      mesh.scaling.z += expandSpeed * deltaTime;
 
       // Fade out
-      ring.visibility -= fadeSpeed * deltaTime;
+      mesh.visibility -= fadeSpeed * deltaTime;
 
       // Remove when invisible
-      if (ring.visibility <= 0) {
-        ring.dispose();
+      if (mesh.visibility <= 0) {
+        mesh.dispose();
         this.shockwaveRings.splice(i, 1);
       }
     }
@@ -376,6 +439,9 @@ export class Player {
 
     // Update effects
     this.updateEffects(deltaTime);
+
+    // Check for building collision damage during flight
+    this.checkBuildingCollision();
 
     // Update camera
     this.cameraController.setTarget(this.physics.position, this.getForwardDirection());
@@ -629,6 +695,50 @@ export class Player {
    */
   public setOnBuildingDamage(callback: (position: Vector3, radius: number, force: number) => void): void {
     this.onBuildingDamage = callback;
+  }
+
+  /**
+   * Sets callback for building collision damage
+   */
+  public setOnBuildingCollision(callback: (buildingMesh: any, impactPosition: Vector3, speed: number) => void): void {
+    this.onBuildingCollision = callback;
+  }
+
+  /**
+   * Checks for collision with buildings during flight and triggers damage
+   */
+  private checkBuildingCollision(): void {
+    // Only check when flying at significant speed
+    if (!this.isFlightMode || this.currentSpeed < 20) return;
+
+    // Cast ray in movement direction
+    const velocity = this.physics.velocity;
+    if (velocity.length() < 1) return;
+
+    const direction = velocity.normalize();
+    const checkDistance = Math.max(PLAYER_RADIUS * 2, this.currentSpeed * 0.05);
+
+    const result = this.physicsManager.raycast(
+      this.physics.position,
+      direction,
+      checkDistance
+    );
+
+    if (result.hit && result.mesh && result.distance < PLAYER_RADIUS * 1.5) {
+      // Check if this is a building (not ground)
+      const meshName = result.mesh.name.toLowerCase();
+      if (meshName.includes('building') || meshName.includes('tower') ||
+          meshName.includes('tier') || meshName.includes('wing')) {
+        // Trigger building collision damage
+        if (this.onBuildingCollision) {
+          this.onBuildingCollision(result.mesh, result.point, this.currentSpeed);
+        }
+
+        // Add camera shake on impact
+        const shakeIntensity = Math.min(3, this.currentSpeed / 40);
+        this.cameraController.addShake(shakeIntensity);
+      }
+    }
   }
 
   private lerp(a: number, b: number, t: number): number {

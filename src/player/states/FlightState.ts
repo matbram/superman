@@ -28,17 +28,24 @@ const MAX_ROLL = Math.PI * 0.4; // ~72 degrees
 // Speed thresholds
 const HOVER_TRANSITION_SPEED = 5; // Below this, can transition to hover
 const LANDING_HEIGHT = 3; // Height at which landing can initiate
+const BRAKE_SHOCKWAVE_THRESHOLD = 100; // Speed above which hard braking triggers shockwave
 
 export class FlightState extends BasePlayerState {
   readonly type = PlayerStateType.Flight;
 
   private currentSpeed: number = 0;
   private targetSpeed: number = 0;
+  private wasAboveBrakeThreshold: boolean = false;
+  private brakeShockwaveTriggered: boolean = false;
 
   enter(player: Player): void {
     // Initialize speed from current velocity
     this.currentSpeed = player.getVelocity().length();
     this.targetSpeed = this.currentSpeed;
+
+    // Reset brake shockwave tracking
+    this.wasAboveBrakeThreshold = this.currentSpeed > BRAKE_SHOCKWAVE_THRESHOLD;
+    this.brakeShockwaveTriggered = false;
 
     // Enable flight effects
     player.setFlightMode(true);
@@ -125,6 +132,8 @@ export class FlightState extends BasePlayerState {
   }
 
   private updateSpeed(player: Player, input: InputState, deltaTime: number): void {
+    const previousSpeed = this.currentSpeed;
+
     // RT pressure directly controls target speed (procedural acceleration)
     // More pressure = faster speed, proportional to trigger position
     if (input.flyTrigger > 0.05) {
@@ -141,6 +150,13 @@ export class FlightState extends BasePlayerState {
     if (input.descendTrigger > 0.1) {
       this.currentSpeed -= BRAKE_DECELERATION * input.descendTrigger * deltaTime;
       this.currentSpeed = Math.max(0, this.currentSpeed);
+
+      // If fully pressing LT while above threshold speed, trigger brake shockwave
+      if (input.descendTrigger > 0.7 && this.wasAboveBrakeThreshold && !this.brakeShockwaveTriggered) {
+        player.triggerBrakeShockwave(previousSpeed);
+        this.brakeShockwaveTriggered = true;
+      }
+
       // If fully pressing LT, stop almost immediately
       if (input.descendTrigger > 0.8) {
         this.currentSpeed *= 0.7;
@@ -153,6 +169,15 @@ export class FlightState extends BasePlayerState {
       // Decelerating towards target
       this.currentSpeed -= DECELERATION * deltaTime;
       this.currentSpeed = Math.max(this.currentSpeed, this.targetSpeed);
+    }
+
+    // Track if we were above brake threshold for shockwave triggering
+    if (this.currentSpeed > BRAKE_SHOCKWAVE_THRESHOLD) {
+      this.wasAboveBrakeThreshold = true;
+      this.brakeShockwaveTriggered = false; // Reset so it can trigger again
+    } else if (this.currentSpeed < BRAKE_SHOCKWAVE_THRESHOLD * 0.5) {
+      // Reset tracking when we've slowed down significantly
+      this.wasAboveBrakeThreshold = false;
     }
 
     // Update player speed for effects

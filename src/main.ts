@@ -87,6 +87,11 @@ class Game {
       this.buildingDamage.applyShockwaveDamage(position, radius, force, buildings);
     });
 
+    // Connect player building collision to damage system
+    this.player.setOnBuildingCollision((buildingMesh, impactPosition, speed) => {
+      this.buildingDamage.applyImpactDamage(buildingMesh, impactPosition, speed);
+    });
+
     // Initialize UI
     this.hud = new Hud();
     this.debugOverlay = new DebugOverlay();
