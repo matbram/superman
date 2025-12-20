@@ -15,8 +15,8 @@ import { PhysicsManager } from '../physics/physics';
 
 // Heat vision constants
 const BEAM_LENGTH = 300;
-const BEAM_WIDTH = 1.5;  // Much thicker beams
-const DAMAGE_PER_SECOND = 500;  // Massive destruction
+const BEAM_WIDTH = 1.2;  // Thick but separated beams
+const DAMAGE_PER_SECOND = 2000;  // Massive destruction - destroys buildings instantly
 
 /**
  * Heat Vision system
@@ -45,12 +45,12 @@ export class HeatVision {
     this.scene = scene;
     this.physicsManager = physicsManager;
 
-    // Create beam material - glowing red/orange
+    // Create beam material - intense pure red glow
     this.beamMaterial = new StandardMaterial('heatBeamMat', scene);
-    this.beamMaterial.diffuseColor = new Color3(1, 0.2, 0);
-    this.beamMaterial.emissiveColor = new Color3(1, 0.3, 0.1);
-    this.beamMaterial.specularColor = new Color3(1, 0.5, 0.2);
-    this.beamMaterial.alpha = 0.9;
+    this.beamMaterial.diffuseColor = new Color3(1, 0, 0);
+    this.beamMaterial.emissiveColor = new Color3(1, 0, 0);
+    this.beamMaterial.specularColor = new Color3(1, 0.2, 0.2);
+    this.beamMaterial.alpha = 0.95;
 
     // Create beam meshes (cylinders)
     this.leftBeam = MeshBuilder.CreateCylinder('leftHeatBeam', {
@@ -81,10 +81,10 @@ export class HeatVision {
   private createImpactParticles(): void {
     this.impactParticles = new ParticleSystem('heatImpact', 500, this.scene);
 
-    // Fire/spark colors - intense
-    this.impactParticles.color1 = new Color4(1, 0.8, 0.2, 1);
-    this.impactParticles.color2 = new Color4(1, 0.3, 0, 0.9);
-    this.impactParticles.colorDead = new Color4(0.5, 0.1, 0, 0);
+    // Fire/spark colors - intense red/orange
+    this.impactParticles.color1 = new Color4(1, 0.2, 0, 1);
+    this.impactParticles.color2 = new Color4(1, 0.5, 0.1, 0.9);
+    this.impactParticles.colorDead = new Color4(0.3, 0, 0, 0);
 
     this.impactParticles.minSize = 1.5;
     this.impactParticles.maxSize = 4.0;
@@ -172,8 +172,8 @@ export class HeatVision {
       Math.cos(aimYaw) * cosPitch
     ).normalize();
 
-    // Eye positions (offset from eye center - eyes are about 0.2 units apart)
-    const eyeOffset = 0.2;
+    // Eye positions (offset from eye center - wider separation for distinct beams)
+    const eyeOffset = 0.5;  // Wider separation so beams are clearly distinct
     const right = new Vector3(Math.cos(aimYaw), 0, -Math.sin(aimYaw));
 
     const leftEyePos = eyePosition.add(right.scale(-eyeOffset));
@@ -195,9 +195,10 @@ export class HeatVision {
         this.damageAccumulator += DAMAGE_PER_SECOND * deltaTime;
 
         // Deal damage frequently for massive destruction
-        if (this.damageAccumulator >= 30) {
+        if (this.damageAccumulator >= 50) {
           if (this.onBuildingDamage) {
-            this.onBuildingDamage(rayResult.mesh, hitPoint, this.damageAccumulator);
+            // Pass high damage value to trigger full building destruction
+            this.onBuildingDamage(rayResult.mesh, hitPoint, this.damageAccumulator * 2);
           }
           this.damageAccumulator = 0;
         }
@@ -219,9 +220,9 @@ export class HeatVision {
       }
     }
 
-    // Pulse beam intensity - brighter
+    // Pulse beam intensity - bright red
     const pulse = 0.9 + Math.sin(performance.now() * 0.03) * 0.1;
-    this.beamMaterial.emissiveColor = new Color3(pulse, 0.4 * pulse, 0.1 * pulse);
+    this.beamMaterial.emissiveColor = new Color3(pulse, 0, 0);
   }
 
   /**

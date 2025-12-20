@@ -119,11 +119,13 @@ export class PhysicsManager {
   /**
    * Checks if a point is on/near the ground
    */
-  public checkGrounded(position: Vector3, height: number, threshold: number = 0.1): RaycastResult {
-    // Cast ray downward from character center
+  public checkGrounded(position: Vector3, height: number, threshold: number = 0.3): RaycastResult {
+    // Cast ray downward from top of character to below feet
+    // Position is character CENTER, so we start from top (position + height/2)
+    // and cast down to below feet (total distance = height + threshold)
     const origin = position.add(new Vector3(0, height * 0.5, 0));
     const direction = Vector3.Down();
-    const maxDistance = (height * 0.5) + threshold;
+    const maxDistance = height + threshold;
 
     return this.raycast(origin, direction, maxDistance);
   }
@@ -323,16 +325,35 @@ export class PhysicsManager {
     character.groundNormal = groundCheck.normal;
 
     // Snap to ground if close and moving down (only when not flying)
-    if (character.isGrounded && velocity.y <= 0 && !character.isFlying) {
+    if (groundCheck.hit && !character.isFlying) {
       const groundY = groundCheck.point.y;
       // Position is character center, so add half height to stand ON the ground
       const targetY = groundY + character.height / 2;
-      if (character.position.y < targetY + 0.1) {
+
+      // Prevent falling through ground - enforce minimum height
+      if (character.position.y < targetY) {
+        character.position.y = targetY;
+        if (character.velocity.y < 0) {
+          character.velocity.y = 0;
+        }
+        character.isGrounded = true;
+      }
+      // Snap down to ground if close and moving down
+      else if (character.position.y < targetY + 0.15 && velocity.y <= 0) {
         character.position.y = targetY;
         if (character.velocity.y < 0) {
           character.velocity.y = 0;
         }
       }
+    }
+
+    // Absolute minimum height - never go below ground level 0
+    if (!character.isFlying && character.position.y < character.height / 2) {
+      character.position.y = character.height / 2;
+      if (character.velocity.y < 0) {
+        character.velocity.y = 0;
+      }
+      character.isGrounded = true;
     }
   }
 
