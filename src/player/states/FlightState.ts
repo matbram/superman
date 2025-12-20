@@ -8,12 +8,12 @@ import type { Player } from '../Player';
 import type { InputState } from '../../input/actionMap';
 
 // Flight physics constants
-const BASE_MAX_SPEED = 80; // m/s
-const BOOST_MAX_SPEED = 150; // m/s
-const BASE_ACCELERATION = 25; // m/s^2
-const BOOST_ACCELERATION = 50; // m/s^2
-const DECELERATION = 15; // m/s^2 (natural air drag)
-const BRAKE_DECELERATION = 40; // m/s^2
+const BASE_MAX_SPEED = 120; // m/s - faster base speed
+const BOOST_MAX_SPEED = 220; // m/s - supersonic boost
+const BASE_ACCELERATION = 40; // m/s^2 - snappier acceleration
+const BOOST_ACCELERATION = 80; // m/s^2
+const DECELERATION = 20; // m/s^2 (natural air drag)
+const BRAKE_DECELERATION = 200; // m/s^2 - abrupt stop with LT
 
 // Control constants
 const BASE_TURN_RATE = 2.5; // radians/s
@@ -145,10 +145,15 @@ export class FlightState extends BasePlayerState {
       this.targetSpeed = 0;
     }
 
-    // LT (descendTrigger) acts as brake in flight
+    // LT (descendTrigger) acts as HARD brake in flight - abrupt stop
     if (input.descendTrigger > 0.1) {
+      // Hard brake - nearly instant stop
       this.currentSpeed -= BRAKE_DECELERATION * input.descendTrigger * deltaTime;
       this.currentSpeed = Math.max(0, this.currentSpeed);
+      // If fully pressing LT, stop almost immediately
+      if (input.descendTrigger > 0.8) {
+        this.currentSpeed *= 0.7; // Additional rapid slowdown
+      }
     } else if (this.currentSpeed < this.targetSpeed) {
       // Accelerating
       this.currentSpeed += acceleration * deltaTime;

@@ -23,6 +23,13 @@ export class GroundedState extends BasePlayerState {
     // Reset flight-specific state when landing
     player.setRoll(0);
     player.setPitch(0);
+    // Reset movement velocity to prevent carrying over flight momentum
+    this.moveVelocity = Vector3.Zero();
+    // Clear any residual velocity
+    const vel = player.getVelocity();
+    vel.x = 0;
+    vel.z = 0;
+    player.setVelocity(vel);
   }
 
   update(player: Player, input: InputState, deltaTime: number): PlayerStateType | null {

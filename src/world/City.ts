@@ -36,6 +36,16 @@ const BUILDING_COLORS = [
   new Color3(0.5, 0.55, 0.6),   // Blue-gray
   new Color3(0.55, 0.45, 0.4),  // Brown
   new Color3(0.75, 0.7, 0.65),  // Off-white
+  new Color3(0.4, 0.45, 0.5),   // Dark blue-gray
+  new Color3(0.65, 0.6, 0.55),  // Warm gray
+  new Color3(0.3, 0.35, 0.4),   // Dark slate
+];
+
+// Window colors for lit windows
+const WINDOW_COLORS = [
+  new Color3(1.0, 0.95, 0.7),   // Warm yellow light
+  new Color3(0.7, 0.85, 1.0),   // Cool blue light
+  new Color3(0.9, 0.9, 0.8),    // Neutral light
 ];
 
 /**
@@ -204,7 +214,7 @@ export class City {
   }
 
   /**
-   * Creates a single building
+   * Creates a single building with windows and details
    */
   private createBuilding(
     x: number,
@@ -213,35 +223,217 @@ export class City {
     height: number,
     depth: number
   ): void {
-    // Main building body
+    const buildingId = this.buildings.length;
+    const buildingType = this.random.intRange(0, 10);
+
+    // Choose building style based on random
+    if (buildingType < 3 && height > 50) {
+      // Tiered/stepped building
+      this.createTieredBuilding(x, z, width, height, depth, buildingId);
+    } else if (buildingType < 5 && width > 15 && depth > 15) {
+      // L-shaped building
+      this.createLShapedBuilding(x, z, width, height, depth, buildingId);
+    } else {
+      // Standard building with windows
+      this.createStandardBuilding(x, z, width, height, depth, buildingId);
+    }
+
+    // Add rooftop details for taller buildings
+    if (height > 30) {
+      this.addRooftopDetails(x, z, width, height, depth);
+    }
+  }
+
+  /**
+   * Creates a standard box building with windows
+   */
+  private createStandardBuilding(
+    x: number,
+    z: number,
+    width: number,
+    height: number,
+    depth: number,
+    buildingId: number
+  ): void {
     const building = MeshBuilder.CreateBox(
-      `building_${this.buildings.length}`,
+      `building_${buildingId}`,
       { width, height, depth },
       this.scene
     );
 
-    // Position building so bottom is at sidewalk level
     building.position = new Vector3(x, height / 2 + SIDEWALK_HEIGHT, z);
 
-    // Random building color with slight variation
     const baseColor = this.random.pick(BUILDING_COLORS);
-    const material = new StandardMaterial(`buildingMat_${this.buildings.length}`, this.scene);
+    const material = new StandardMaterial(`buildingMat_${buildingId}`, this.scene);
     material.diffuseColor = baseColor;
     material.specularColor = new Color3(0.15, 0.15, 0.15);
     building.material = material;
 
-    // Add shadows
     building.receiveShadows = true;
     this.shadowGenerator.addShadowCaster(building);
-
-    // Add collision
     createCollisionBox(building, this.physicsManager);
-
     this.buildings.push(building);
 
-    // Add rooftop details for taller buildings
-    if (height > 40) {
-      this.addRooftopDetails(x, z, width, height, depth);
+    // Add windows
+    this.addBuildingWindows(x, z, width, height, depth, buildingId);
+  }
+
+  /**
+   * Creates a tiered/stepped building
+   */
+  private createTieredBuilding(
+    x: number,
+    z: number,
+    width: number,
+    height: number,
+    depth: number,
+    buildingId: number
+  ): void {
+    const numTiers = this.random.intRange(2, 4);
+    const tierHeight = height / numTiers;
+    const baseColor = this.random.pick(BUILDING_COLORS);
+
+    for (let i = 0; i < numTiers; i++) {
+      const tierScale = 1 - (i * 0.15);
+      const tierWidth = width * tierScale;
+      const tierDepth = depth * tierScale;
+      const tierY = tierHeight / 2 + SIDEWALK_HEIGHT + (i * tierHeight);
+
+      const tier = MeshBuilder.CreateBox(
+        `building_${buildingId}_tier${i}`,
+        { width: tierWidth, height: tierHeight, depth: tierDepth },
+        this.scene
+      );
+
+      tier.position = new Vector3(x, tierY, z);
+
+      const material = new StandardMaterial(`buildingMat_${buildingId}_tier${i}`, this.scene);
+      material.diffuseColor = baseColor;
+      material.specularColor = new Color3(0.15, 0.15, 0.15);
+      tier.material = material;
+
+      tier.receiveShadows = true;
+      this.shadowGenerator.addShadowCaster(tier);
+      createCollisionBox(tier, this.physicsManager);
+
+      if (i === 0) {
+        this.buildings.push(tier);
+      }
+    }
+
+    this.addBuildingWindows(x, z, width * 0.85, height * 0.7, depth * 0.85, buildingId);
+  }
+
+  /**
+   * Creates an L-shaped building
+   */
+  private createLShapedBuilding(
+    x: number,
+    z: number,
+    width: number,
+    height: number,
+    depth: number,
+    buildingId: number
+  ): void {
+    const baseColor = this.random.pick(BUILDING_COLORS);
+    const material = new StandardMaterial(`buildingMat_${buildingId}`, this.scene);
+    material.diffuseColor = baseColor;
+    material.specularColor = new Color3(0.15, 0.15, 0.15);
+
+    // Main section
+    const mainWidth = width * 0.6;
+    const main = MeshBuilder.CreateBox(
+      `building_${buildingId}_main`,
+      { width: mainWidth, height, depth },
+      this.scene
+    );
+    main.position = new Vector3(x - (width - mainWidth) / 2, height / 2 + SIDEWALK_HEIGHT, z);
+    main.material = material;
+    main.receiveShadows = true;
+    this.shadowGenerator.addShadowCaster(main);
+    createCollisionBox(main, this.physicsManager);
+    this.buildings.push(main);
+
+    // Wing section
+    const wingDepth = depth * 0.5;
+    const wingHeight = height * 0.8;
+    const wing = MeshBuilder.CreateBox(
+      `building_${buildingId}_wing`,
+      { width: width * 0.5, height: wingHeight, depth: wingDepth },
+      this.scene
+    );
+    wing.position = new Vector3(
+      x + mainWidth / 2,
+      wingHeight / 2 + SIDEWALK_HEIGHT,
+      z - (depth - wingDepth) / 2
+    );
+    wing.material = material;
+    wing.receiveShadows = true;
+    this.shadowGenerator.addShadowCaster(wing);
+    createCollisionBox(wing, this.physicsManager);
+
+    this.addBuildingWindows(x, z, width, height, depth, buildingId);
+  }
+
+  /**
+   * Adds window lights to a building
+   */
+  private addBuildingWindows(
+    x: number,
+    z: number,
+    width: number,
+    height: number,
+    depth: number,
+    buildingId: number
+  ): void {
+    const windowSize = 1.5;
+    const windowSpacingH = 4;
+    const windowSpacingV = 4;
+    const windowInset = 0.1;
+
+    const windowMaterial = new StandardMaterial(`windowMat_${buildingId}`, this.scene);
+    const windowColor = this.random.pick(WINDOW_COLORS);
+    windowMaterial.diffuseColor = windowColor.scale(0.3);
+    windowMaterial.emissiveColor = windowColor.scale(0.4);
+    windowMaterial.specularColor = new Color3(0.5, 0.5, 0.5);
+
+    // Create window strips on front and back faces
+    const numWindowsH = Math.floor((width - 4) / windowSpacingH);
+    const numWindowsV = Math.floor((height - 4) / windowSpacingV);
+
+    if (numWindowsH < 1 || numWindowsV < 1) return;
+
+    // Front face windows (merged into strips for performance)
+    for (let row = 0; row < numWindowsV; row++) {
+      // Randomly skip some rows to add variety
+      if (this.random.next() > 0.8) continue;
+
+      const stripWidth = (numWindowsH - 1) * windowSpacingH + windowSize;
+      const windowStrip = MeshBuilder.CreateBox(
+        `window_${buildingId}_front_${row}`,
+        { width: stripWidth, height: windowSize, depth: windowInset },
+        this.scene
+      );
+
+      const windowY = SIDEWALK_HEIGHT + 3 + row * windowSpacingV;
+      windowStrip.position = new Vector3(x, windowY, z + depth / 2 + windowInset / 2);
+      windowStrip.material = windowMaterial;
+    }
+
+    // Back face windows
+    for (let row = 0; row < numWindowsV; row++) {
+      if (this.random.next() > 0.8) continue;
+
+      const stripWidth = (numWindowsH - 1) * windowSpacingH + windowSize;
+      const windowStrip = MeshBuilder.CreateBox(
+        `window_${buildingId}_back_${row}`,
+        { width: stripWidth, height: windowSize, depth: windowInset },
+        this.scene
+      );
+
+      const windowY = SIDEWALK_HEIGHT + 3 + row * windowSpacingV;
+      windowStrip.position = new Vector3(x, windowY, z - depth / 2 - windowInset / 2);
+      windowStrip.material = windowMaterial;
     }
   }
 

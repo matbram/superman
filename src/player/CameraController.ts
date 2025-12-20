@@ -147,6 +147,16 @@ export class CameraController {
     // Apply spring physics for smooth following
     this.applyCameraSpring(idealPosition, deltaTime);
 
+    // Prevent camera from going below ground level
+    const minCameraHeight = 1.5; // Minimum height above ground
+    if (this.cameraPosition.y < minCameraHeight) {
+      this.cameraPosition.y = minCameraHeight;
+      // Also clamp velocity to prevent bouncing
+      if (this.cameraVelocity.y < 0) {
+        this.cameraVelocity.y = 0;
+      }
+    }
+
     // Update camera position
     this.camera.position.copyFrom(this.cameraPosition);
 
