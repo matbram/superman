@@ -110,7 +110,8 @@ export class BuildingDamage {
   private totalUpdateTime: number = 0;
 
   // Camera shake callback for immersive destruction
-  private onCameraShake: ((intensity: number) => void) | null = null;
+  private onCameraShake: ((intensity: number, position: Vector3) => void) | null = null;
+  private playerPosition: Vector3 = Vector3.Zero();
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -119,17 +120,37 @@ export class BuildingDamage {
 
   /**
    * Sets the camera shake callback for immersive destruction effects
+   * Callback receives intensity (0-1) and position of destruction
    */
-  public setOnCameraShake(callback: (intensity: number) => void): void {
+  public setOnCameraShake(callback: (intensity: number, position: Vector3) => void): void {
     this.onCameraShake = callback;
   }
 
   /**
-   * Triggers camera shake with given intensity (0-1 scale)
+   * Triggers camera shake with intensity based on distance from player
+   * @param baseIntensity Base intensity (0-1 scale)
+   * @param position World position of the destruction event
    */
-  private triggerCameraShake(intensity: number): void {
+  private triggerCameraShake(baseIntensity: number, position: Vector3): void {
     if (this.onCameraShake) {
-      this.onCameraShake(Math.min(1, intensity));
+      // Calculate distance-based intensity falloff
+      const distance = Vector3.Distance(position, this.playerPosition);
+      const maxDistance = 200;  // Shake fully fades at 200m
+      const minDistance = 10;   // Full shake within 10m
+
+      let distanceFactor = 1.0;
+      if (distance > minDistance) {
+        distanceFactor = Math.max(0, 1 - (distance - minDistance) / (maxDistance - minDistance));
+      }
+
+      // Square the distance factor for more dramatic close-range shakes
+      distanceFactor = distanceFactor * distanceFactor;
+
+      const finalIntensity = Math.min(1, baseIntensity * distanceFactor * 1.5);  // 1.5x more dramatic
+
+      if (finalIntensity > 0.05) {  // Only shake if noticeable
+        this.onCameraShake(finalIntensity, position);
+      }
     }
   }
 
@@ -255,6 +276,9 @@ export class BuildingDamage {
     const damage = speed / 10;  // More damage per speed unit
     structure.shakeTime = Math.min(1.5, structure.shakeTime + damage * 0.3);
 
+    // Camera shake for lighter damage - scales with speed
+    this.triggerCameraShake(0.2 + damage * 0.1, impactPosition);
+
     const bounds = structure.bounds;
     const buildingCenter = structure.originalPosition;
     const buildingSize = bounds.max.subtract(bounds.min);
@@ -313,7 +337,7 @@ export class BuildingDamage {
     this.spawnImpactDebris(impactPosition, speed, 15);
 
     // Camera shake for heavy damage - moderate intensity
-    this.triggerCameraShake(0.5);
+    this.triggerCameraShake(0.6, impactPosition);
   }
 
   /**
@@ -360,7 +384,7 @@ export class BuildingDamage {
     this.spawnDustCloud(impactPosition.add(new Vector3(0, height * 0.3, 0)), 6, 1.5);
 
     // Strong camera shake for full building destruction
-    this.triggerCameraShake(0.8);
+    this.triggerCameraShake(0.85, impactPosition);
 
     this.buildingStructures.delete(structure.mesh);
   }
@@ -734,6 +758,11 @@ export class BuildingDamage {
   public update(deltaTime: number, playerPosition?: Vector3): void {
     const updateStart = performance.now();
 
+    // Store player position for distance-based camera shake
+    if (playerPosition) {
+      this.playerPosition = playerPosition.clone();
+    }
+
     // Update collapsing buildings
     const now = performance.now();
     for (let i = this.collapsingBuildings.length - 1; i >= 0; i--) {
@@ -802,7 +831,7 @@ export class BuildingDamage {
           collapse.dustSpawned = true;
 
           // Big camera shake when building hits the ground!
-          this.triggerCameraShake(1.0);
+          this.triggerCameraShake(1.0, collapse.mesh.position);
         }
 
         // Scale down and sink into ground

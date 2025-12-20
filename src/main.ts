@@ -13,8 +13,10 @@ import { Atmosphere } from './world/Atmosphere';
 import { BuildingDamage } from './world/BuildingDamage';
 import { Birds } from './world/Birds';
 import { Traffic } from './world/Traffic';
+import { Enemy } from './entities/Enemy';
 import { Hud } from './ui/Hud';
 import { DebugOverlay } from './ui/DebugOverlay';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 
 // Performance logging
 const ENABLE_FRAME_PERF_LOGGING = true;
@@ -35,8 +37,13 @@ class Game {
   private buildingDamage: BuildingDamage;
   private birds: Birds;
   private traffic: Traffic;
+  private enemy: Enemy;
   private hud: Hud;
   private debugOverlay: DebugOverlay;
+
+  // Lock-on system
+  private isLockedOn: boolean = false;
+  private lockOnRange: number = 300;  // Max lock-on distance
 
   private isRunning: boolean = false;
   private instructionsElement: HTMLElement;
@@ -55,6 +62,7 @@ class Game {
     buildingDamage: 0,
     birds: 0,
     traffic: 0,
+    enemy: 0,
     render: 0,
   };
 
@@ -100,6 +108,30 @@ class Game {
     // Initialize traffic system
     this.traffic = new Traffic(this.sceneContext.scene);
 
+    // Initialize enemy AI
+    this.enemy = new Enemy(
+      this.sceneContext.scene,
+      new Vector3(150, 80, 150)  // Spawn away from player
+    );
+
+    // Connect enemy attacks to building damage
+    this.enemy.setOnAttackBuilding((position, damage) => {
+      // Find nearest building to attack position and damage it
+      const buildings = this.city.getBuildings();
+      let nearestBuilding = null;
+      let nearestDist = Infinity;
+      for (const building of buildings) {
+        const dist = Vector3.Distance(position, building.position);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestBuilding = building;
+        }
+      }
+      if (nearestBuilding && nearestDist < 100) {
+        this.buildingDamage.applyImpactDamage(nearestBuilding, position, damage);
+      }
+    });
+
     // Initialize player
     this.player = new Player(
       this.sceneContext.scene,
@@ -127,10 +159,11 @@ class Game {
       this.buildingDamage.applyImpactDamage(building, position, damage);
     });
 
-    // Connect building damage camera shake to player camera
-    this.buildingDamage.setOnCameraShake((intensity) => {
+    // Connect building damage camera shake to player camera (distance-based)
+    this.buildingDamage.setOnCameraShake((intensity, _position) => {
       // Scale shake based on intensity (0-1), multiply by base shake amount
-      this.player.addCameraShake(intensity * 3);
+      // Intensity is already distance-adjusted in BuildingDamage
+      this.player.addCameraShake(intensity * 4);  // More dramatic shake
     });
 
     // Initialize UI
@@ -196,6 +229,24 @@ class Game {
       this.debugOverlay.toggle();
     }
 
+    // Toggle lock-on to enemy
+    if (input.lockOnPressed) {
+      if (this.isLockedOn) {
+        // Release lock-on
+        this.isLockedOn = false;
+        this.enemy.setTargeted(false);
+      } else {
+        // Try to lock on if enemy is in range and alive
+        const playerPos = this.player.getPosition();
+        const enemyPos = this.enemy.getPosition();
+        const distance = Vector3.Distance(playerPos, enemyPos);
+        if (distance <= this.lockOnRange && this.enemy.isAlive()) {
+          this.isLockedOn = true;
+          this.enemy.setTargeted(true);
+        }
+      }
+    }
+
     // Update player
     t0 = performance.now();
     this.player.update(input, deltaTime);
@@ -257,6 +308,33 @@ class Game {
     t1 = performance.now();
     this.perfTimings.traffic += t1 - t0;
 
+    // Update enemy AI
+    t0 = performance.now();
+    const buildings = this.city.getBuildings();
+    this.enemy.update(deltaTime, playerPos, buildings);
+
+    // If locked on, pass lock-on info to camera and check heat vision damage
+    if (this.isLockedOn && this.enemy.isAlive()) {
+      // Check if enemy went out of range
+      const enemyPos = this.enemy.getPosition();
+      const distToEnemy = Vector3.Distance(playerPos, enemyPos);
+      if (distToEnemy > this.lockOnRange * 1.5) {
+        // Auto-release lock-on if too far
+        this.isLockedOn = false;
+        this.enemy.setTargeted(false);
+      } else if (input.heatVisionHeld) {
+        // Damage enemy with heat vision when locked on
+        const heatVisionDamage = 30 * deltaTime;  // DPS when using heat vision
+        this.enemy.takeDamage(heatVisionDamage);
+      }
+    } else if (this.isLockedOn && !this.enemy.isAlive()) {
+      // Release lock-on if enemy dies
+      this.isLockedOn = false;
+      this.enemy.setTargeted(false);
+    }
+    t1 = performance.now();
+    this.perfTimings.enemy += t1 - t0;
+
     // Update HUD
     this.hud.update(
       this.player.getCurrentStateType(),
@@ -307,6 +385,7 @@ class Game {
             buildingDamage: (this.perfTimings.buildingDamage / this.frameCount).toFixed(2) + 'ms',
             birds: (this.perfTimings.birds / this.frameCount).toFixed(2) + 'ms',
             traffic: (this.perfTimings.traffic / this.frameCount).toFixed(2) + 'ms',
+            enemy: (this.perfTimings.enemy / this.frameCount).toFixed(2) + 'ms',
             render: (this.perfTimings.render / this.frameCount).toFixed(2) + 'ms',
           }
         });
@@ -324,6 +403,7 @@ class Game {
           buildingDamage: 0,
           birds: 0,
           traffic: 0,
+          enemy: 0,
           render: 0,
         };
       }

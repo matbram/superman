@@ -29,6 +29,7 @@ export interface InputState {
   jumpHeld: boolean;      // A button - held down
   boostHeld: boolean;     // RB - boost while flying
   heatVisionHeld: boolean; // LB - heat vision (laser eyes)
+  lockOnPressed: boolean; // Tab/Y - toggle lock-on to enemy
   debugPressed: boolean;  // Backtick - toggle debug
 }
 
@@ -47,6 +48,7 @@ export function createEmptyInputState(): InputState {
     jumpHeld: false,
     boostHeld: false,
     heatVisionHeld: false,
+    lockOnPressed: false,
     debugPressed: false,
   };
 }
@@ -64,6 +66,7 @@ export const KeyboardBindings = {
   descend: ['ControlLeft', 'ControlRight'],  // Ctrl to descend (like LT)
   boost: ['KeyQ'],  // Q for boost
   heatVision: ['KeyE'],  // E for heat vision (laser eyes)
+  lockOn: ['Tab'],  // Tab to lock-on to enemy
   toggleDebug: ['Backquote'],
 } as const;
 
@@ -76,6 +79,7 @@ export const GamepadBindings = {
   jump: 0,              // A button (bottom)
   boost: 5,             // RB (right bumper)
   heatVision: 4,        // LB (left bumper) - heat vision
+  lockOn: 3,            // Y button (top) - lock-on to enemy
 
   // Sticks
   leftStickX: 0,
