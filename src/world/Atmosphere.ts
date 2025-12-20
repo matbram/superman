@@ -15,7 +15,7 @@ const SUN_DISTANCE = 800;
 const CLOUD_HEIGHT_MIN = 120;
 const CLOUD_HEIGHT_MAX = 350;
 const CLOUD_RENDER_DISTANCE = 700;
-const NUM_CLOUD_CLUSTERS = 50;
+const NUM_CLOUD_CLUSTERS = 25; // Reduced for performance
 
 /**
  * Individual cloud puff with its own properties
@@ -209,163 +209,33 @@ export class Atmosphere {
   }
 
   /**
-   * Creates a realistic volumetric cloud cluster with layered puffs
+   * Creates a volumetric cloud cluster - optimized for performance
    */
   private createCloudCluster(position: Vector3): CloudCluster {
     const puffs: CloudPuff[] = [];
+    const cloudSize = 0.8 + Math.random() * 0.6;
 
-    // Determine cloud size category
-    const cloudSize = 0.7 + Math.random() * 0.8; // 0.7 to 1.5 scale multiplier
-    const isLargeCloud = cloudSize > 1.1;
-
-    // Core puffs - dense center
-    const numCorePuffs = isLargeCloud ? 5 + Math.floor(Math.random() * 4) : 3 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < numCorePuffs; i++) {
-      const scaleX = (20 + Math.random() * 30) * cloudSize;
-      const scaleY = (12 + Math.random() * 18) * cloudSize;
-      const scaleZ = (20 + Math.random() * 30) * cloudSize;
-
-      const puff = MeshBuilder.CreateSphere(
-        `cloud_core_${this.cloudClusters.length}_${i}`,
-        { diameter: 1, segments: 6 },
-        this.scene
-      );
-
-      const offsetX = (Math.random() - 0.5) * 30 * cloudSize;
-      const offsetY = (Math.random() - 0.3) * 8 * cloudSize; // Slightly higher
-      const offsetZ = (Math.random() - 0.5) * 30 * cloudSize;
-
-      puff.position = position.add(new Vector3(offsetX, offsetY, offsetZ));
-      puff.scaling = new Vector3(scaleX, scaleY, scaleZ);
-      puff.material = this.cloudMaterials[0]; // Core material
-      puff.isPickable = false;
-      puff.receiveShadows = false;
-
-      puffs.push({
-        mesh: puff,
-        localOffset: new Vector3(offsetX, offsetY, offsetZ),
-        phase: Math.random() * Math.PI * 2,
-        bobSpeed: 0.2 + Math.random() * 0.3,
-        bobAmount: 1 + Math.random() * 2,
-      });
-    }
-
-    // Mid-layer puffs - surrounding the core
-    const numMidPuffs = isLargeCloud ? 6 + Math.floor(Math.random() * 4) : 4 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < numMidPuffs; i++) {
+    // Core puffs only - 3-4 large spheres (reduced from 25+)
+    const numPuffs = 3 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < numPuffs; i++) {
       const scaleX = (25 + Math.random() * 35) * cloudSize;
-      const scaleY = (10 + Math.random() * 15) * cloudSize;
+      const scaleY = (15 + Math.random() * 20) * cloudSize;
       const scaleZ = (25 + Math.random() * 35) * cloudSize;
 
       const puff = MeshBuilder.CreateSphere(
-        `cloud_mid_${this.cloudClusters.length}_${i}`,
-        { diameter: 1, segments: 6 },
-        this.scene
-      );
-
-      const offsetX = (Math.random() - 0.5) * 60 * cloudSize;
-      const offsetY = (Math.random() - 0.5) * 12 * cloudSize;
-      const offsetZ = (Math.random() - 0.5) * 60 * cloudSize;
-
-      puff.position = position.add(new Vector3(offsetX, offsetY, offsetZ));
-      puff.scaling = new Vector3(scaleX, scaleY, scaleZ);
-      puff.material = this.cloudMaterials[1]; // Mid material
-      puff.isPickable = false;
-      puff.receiveShadows = false;
-
-      puffs.push({
-        mesh: puff,
-        localOffset: new Vector3(offsetX, offsetY, offsetZ),
-        phase: Math.random() * Math.PI * 2,
-        bobSpeed: 0.15 + Math.random() * 0.25,
-        bobAmount: 1.5 + Math.random() * 2.5,
-      });
-    }
-
-    // Wispy outer puffs - ethereal edges
-    const numWispyPuffs = isLargeCloud ? 8 + Math.floor(Math.random() * 5) : 5 + Math.floor(Math.random() * 4);
-    for (let i = 0; i < numWispyPuffs; i++) {
-      const scaleX = (30 + Math.random() * 50) * cloudSize;
-      const scaleY = (6 + Math.random() * 12) * cloudSize;
-      const scaleZ = (30 + Math.random() * 50) * cloudSize;
-
-      const puff = MeshBuilder.CreateSphere(
-        `cloud_wispy_${this.cloudClusters.length}_${i}`,
-        { diameter: 1, segments: 5 },
-        this.scene
-      );
-
-      const offsetX = (Math.random() - 0.5) * 90 * cloudSize;
-      const offsetY = (Math.random() - 0.5) * 15 * cloudSize;
-      const offsetZ = (Math.random() - 0.5) * 90 * cloudSize;
-
-      puff.position = position.add(new Vector3(offsetX, offsetY, offsetZ));
-      puff.scaling = new Vector3(scaleX, scaleY, scaleZ);
-      puff.material = this.cloudMaterials[2]; // Wispy material
-      puff.isPickable = false;
-      puff.receiveShadows = false;
-
-      puffs.push({
-        mesh: puff,
-        localOffset: new Vector3(offsetX, offsetY, offsetZ),
-        phase: Math.random() * Math.PI * 2,
-        bobSpeed: 0.1 + Math.random() * 0.2,
-        bobAmount: 2 + Math.random() * 3,
-      });
-    }
-
-    // Smoky tendrils - very wispy edges
-    const numSmokyPuffs = isLargeCloud ? 6 + Math.floor(Math.random() * 4) : 3 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < numSmokyPuffs; i++) {
-      const scaleX = (40 + Math.random() * 60) * cloudSize;
-      const scaleY = (4 + Math.random() * 8) * cloudSize;
-      const scaleZ = (40 + Math.random() * 60) * cloudSize;
-
-      const puff = MeshBuilder.CreateSphere(
-        `cloud_smoky_${this.cloudClusters.length}_${i}`,
-        { diameter: 1, segments: 4 },
-        this.scene
-      );
-
-      const offsetX = (Math.random() - 0.5) * 120 * cloudSize;
-      const offsetY = (Math.random() - 0.6) * 20 * cloudSize; // Tend toward bottom
-      const offsetZ = (Math.random() - 0.5) * 120 * cloudSize;
-
-      puff.position = position.add(new Vector3(offsetX, offsetY, offsetZ));
-      puff.scaling = new Vector3(scaleX, scaleY, scaleZ);
-      puff.material = this.cloudMaterials[3]; // Smoky material
-      puff.isPickable = false;
-      puff.receiveShadows = false;
-
-      puffs.push({
-        mesh: puff,
-        localOffset: new Vector3(offsetX, offsetY, offsetZ),
-        phase: Math.random() * Math.PI * 2,
-        bobSpeed: 0.08 + Math.random() * 0.15,
-        bobAmount: 3 + Math.random() * 4,
-      });
-    }
-
-    // Shadow puffs on underside
-    const numShadowPuffs = isLargeCloud ? 3 + Math.floor(Math.random() * 2) : 2;
-    for (let i = 0; i < numShadowPuffs; i++) {
-      const scaleX = (35 + Math.random() * 40) * cloudSize;
-      const scaleY = (8 + Math.random() * 10) * cloudSize;
-      const scaleZ = (35 + Math.random() * 40) * cloudSize;
-
-      const puff = MeshBuilder.CreateSphere(
-        `cloud_shadow_${this.cloudClusters.length}_${i}`,
-        { diameter: 1, segments: 5 },
+        `cloud_${this.cloudClusters.length}_${i}`,
+        { diameter: 1, segments: 4 }, // Low poly
         this.scene
       );
 
       const offsetX = (Math.random() - 0.5) * 50 * cloudSize;
-      const offsetY = -10 - Math.random() * 15 * cloudSize; // Below center
+      const offsetY = (Math.random() - 0.5) * 12 * cloudSize;
       const offsetZ = (Math.random() - 0.5) * 50 * cloudSize;
 
       puff.position = position.add(new Vector3(offsetX, offsetY, offsetZ));
       puff.scaling = new Vector3(scaleX, scaleY, scaleZ);
-      puff.material = this.cloudMaterials[4]; // Shadow material
+      // Alternate between materials for variety
+      puff.material = this.cloudMaterials[i % 3];
       puff.isPickable = false;
       puff.receiveShadows = false;
 
@@ -373,8 +243,40 @@ export class Atmosphere {
         mesh: puff,
         localOffset: new Vector3(offsetX, offsetY, offsetZ),
         phase: Math.random() * Math.PI * 2,
-        bobSpeed: 0.12 + Math.random() * 0.18,
-        bobAmount: 1 + Math.random() * 2,
+        bobSpeed: 0.15 + Math.random() * 0.2,
+        bobAmount: 1.5 + Math.random() * 2,
+      });
+    }
+
+    // Add 1-2 wispy outer puffs
+    const numWispy = 1 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < numWispy; i++) {
+      const scaleX = (40 + Math.random() * 50) * cloudSize;
+      const scaleY = (8 + Math.random() * 12) * cloudSize;
+      const scaleZ = (40 + Math.random() * 50) * cloudSize;
+
+      const puff = MeshBuilder.CreateSphere(
+        `cloud_wispy_${this.cloudClusters.length}_${i}`,
+        { diameter: 1, segments: 4 },
+        this.scene
+      );
+
+      const offsetX = (Math.random() - 0.5) * 80 * cloudSize;
+      const offsetY = (Math.random() - 0.6) * 15 * cloudSize;
+      const offsetZ = (Math.random() - 0.5) * 80 * cloudSize;
+
+      puff.position = position.add(new Vector3(offsetX, offsetY, offsetZ));
+      puff.scaling = new Vector3(scaleX, scaleY, scaleZ);
+      puff.material = this.cloudMaterials[3]; // Smoky/wispy material
+      puff.isPickable = false;
+      puff.receiveShadows = false;
+
+      puffs.push({
+        mesh: puff,
+        localOffset: new Vector3(offsetX, offsetY, offsetZ),
+        phase: Math.random() * Math.PI * 2,
+        bobSpeed: 0.1 + Math.random() * 0.15,
+        bobAmount: 2 + Math.random() * 3,
       });
     }
 
@@ -382,11 +284,11 @@ export class Atmosphere {
       puffs,
       basePosition: position.clone(),
       driftSpeed: new Vector3(
-        (Math.random() - 0.5) * 3,
+        (Math.random() - 0.5) * 2,
         0,
-        (Math.random() - 0.5) * 3
+        (Math.random() - 0.5) * 2
       ),
-      rotationSpeed: (Math.random() - 0.5) * 0.02,
+      rotationSpeed: (Math.random() - 0.5) * 0.01,
       rotation: Math.random() * Math.PI * 2,
     };
 
@@ -415,29 +317,13 @@ export class Atmosphere {
     for (const cluster of this.cloudClusters) {
       // Drift clouds slowly
       cluster.basePosition.addInPlace(cluster.driftSpeed.scale(deltaTime));
-      cluster.rotation += cluster.rotationSpeed * deltaTime;
 
-      // Update each puff with organic movement
+      // Simple bobbing for each puff (no rotation for performance)
       for (const puff of cluster.puffs) {
-        // Calculate rotated offset for slow cloud rotation
-        const cos = Math.cos(cluster.rotation);
-        const sin = Math.sin(cluster.rotation);
-        const rotatedX = puff.localOffset.x * cos - puff.localOffset.z * sin;
-        const rotatedZ = puff.localOffset.x * sin + puff.localOffset.z * cos;
-
-        // Organic bobbing motion
         const bobY = Math.sin(this.time * puff.bobSpeed + puff.phase) * puff.bobAmount;
-        const bobX = Math.sin(this.time * puff.bobSpeed * 0.7 + puff.phase + 1) * puff.bobAmount * 0.3;
-        const bobZ = Math.cos(this.time * puff.bobSpeed * 0.5 + puff.phase) * puff.bobAmount * 0.3;
-
-        puff.mesh.position.x = cluster.basePosition.x + rotatedX + bobX;
+        puff.mesh.position.x = cluster.basePosition.x + puff.localOffset.x;
         puff.mesh.position.y = cluster.basePosition.y + puff.localOffset.y + bobY;
-        puff.mesh.position.z = cluster.basePosition.z + rotatedZ + bobZ;
-
-        // Subtle scale pulsing for "breathing" effect
-        const scalePulse = 1 + Math.sin(this.time * 0.5 + puff.phase) * 0.03;
-        puff.mesh.scaling.x *= scalePulse;
-        puff.mesh.scaling.z *= scalePulse;
+        puff.mesh.position.z = cluster.basePosition.z + puff.localOffset.z;
       }
 
       // Check if cluster is too far from player
