@@ -157,6 +157,7 @@ export class InputManager {
     // Face buttons
     const jumpButton = gamepad.buttons[GamepadBindings.jump];
     const boostButton = gamepad.buttons[GamepadBindings.boost];
+    const heatVisionButton = gamepad.buttons[GamepadBindings.heatVision];
 
     // Detect button press (not held from last frame)
     const wasJumpPressed = this.previousGamepadButtons[GamepadBindings.jump] ?? false;
@@ -164,6 +165,7 @@ export class InputManager {
     this.currentState.jumpHeld = jumpButton?.pressed ?? false;
     this.currentState.jumpPressed = this.currentState.jumpHeld && !wasJumpPressed;
     this.currentState.boostHeld = boostButton?.pressed ?? false;
+    this.currentState.heatVisionHeld = heatVisionButton?.pressed ?? false;
 
     // Store button states for next frame
     this.previousGamepadButtons = gamepad.buttons.map((b) => b.pressed);
@@ -207,6 +209,9 @@ export class InputManager {
     }
     if (!this.currentState.boostHeld) {
       this.currentState.boostHeld = this.isKeyHeld(KeyboardBindings.boost);
+    }
+    if (!this.currentState.heatVisionHeld) {
+      this.currentState.heatVisionHeld = this.isKeyHeld(KeyboardBindings.heatVision);
     }
 
     // Fly trigger from keyboard (Shift = full fly)

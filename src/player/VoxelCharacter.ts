@@ -140,66 +140,73 @@ export class VoxelCharacter {
   }
 
   /**
-   * Builds the torso - wider, more muscular proportions
+   * Builds the torso - wide, muscular Superman proportions
    */
   private buildBody(): void {
-    // Upper torso / chest - wider (5 voxels wide at shoulders)
+    // Upper torso / chest - very wide (6 voxels wide at shoulders), thick
     for (let y = 3; y < 5; y++) {
-      for (let x = -2; x <= 2; x++) {
-        for (let z = 0; z <= 1; z++) {
+      for (let x = -2.5; x <= 2.5; x++) {
+        for (let z = -0.5; z <= 1; z++) {
           const pos = new Vector3(
             x * VOXEL_SIZE,
             y * VOXEL_SIZE,
-            z * VOXEL_SIZE - VOXEL_SIZE * 0.5
+            z * VOXEL_SIZE
           );
           this.createVoxel(pos, this.suitMat, this.root);
         }
       }
     }
 
-    // Mid torso (4 voxels wide - tapers in)
+    // Pecs / chest muscles - extra layer in front
+    for (let x = -1.5; x <= 1.5; x++) {
+      const pos = new Vector3(x * VOXEL_SIZE, VOXEL_SIZE * 3.5, VOXEL_SIZE * 1.2);
+      this.createVoxel(pos, this.suitMat, this.root);
+    }
+
+    // Mid torso - still wide (5 voxels), muscular core
     for (let y = 1; y < 3; y++) {
-      for (let x = -1.5; x <= 1.5; x++) {
-        for (let z = 0; z <= 1; z++) {
+      for (let x = -2; x <= 2; x++) {
+        for (let z = -0.5; z <= 1; z++) {
           const pos = new Vector3(
             x * VOXEL_SIZE,
             y * VOXEL_SIZE,
-            z * VOXEL_SIZE - VOXEL_SIZE * 0.5
+            z * VOXEL_SIZE
           );
           this.createVoxel(pos, this.suitMat, this.root);
         }
       }
     }
 
-    // Waist/hips area
-    for (let x = -1; x <= 1; x++) {
-      for (let z = 0; z <= 1; z++) {
+    // Waist/hips area - still substantial
+    for (let x = -1.5; x <= 1.5; x++) {
+      for (let z = -0.5; z <= 1; z++) {
         const pos = new Vector3(
           x * VOXEL_SIZE,
           0,
-          z * VOXEL_SIZE - VOXEL_SIZE * 0.5
+          z * VOXEL_SIZE
         );
         this.createVoxel(pos, this.suitMat, this.root);
       }
     }
 
     // Belt
-    for (let x = -1.5; x <= 1.5; x++) {
+    for (let x = -2; x <= 2; x++) {
       for (let z = 0; z <= 1; z++) {
         const pos = new Vector3(
           x * VOXEL_SIZE,
           VOXEL_SIZE * 0.8,
-          z * VOXEL_SIZE - VOXEL_SIZE * 0.5
+          z * VOXEL_SIZE
         );
         this.createVoxel(pos, this.beltMat, this.root);
       }
     }
 
-    // S logo on chest (diamond shape - 5 voxels)
-    this.createVoxel(new Vector3(0, VOXEL_SIZE * 3.8, VOXEL_SIZE * 0.7), this.beltMat, this.root);
-    this.createVoxel(new Vector3(VOXEL_SIZE * 0.5, VOXEL_SIZE * 3.5, VOXEL_SIZE * 0.7), this.beltMat, this.root);
-    this.createVoxel(new Vector3(-VOXEL_SIZE * 0.5, VOXEL_SIZE * 3.5, VOXEL_SIZE * 0.7), this.beltMat, this.root);
-    this.createVoxel(new Vector3(0, VOXEL_SIZE * 3.2, VOXEL_SIZE * 0.7), this.beltMat, this.root);
+    // S logo on chest (diamond shape - larger)
+    this.createVoxel(new Vector3(0, VOXEL_SIZE * 3.8, VOXEL_SIZE * 1.4), this.beltMat, this.root);
+    this.createVoxel(new Vector3(VOXEL_SIZE * 0.6, VOXEL_SIZE * 3.5, VOXEL_SIZE * 1.4), this.beltMat, this.root);
+    this.createVoxel(new Vector3(-VOXEL_SIZE * 0.6, VOXEL_SIZE * 3.5, VOXEL_SIZE * 1.4), this.beltMat, this.root);
+    this.createVoxel(new Vector3(0, VOXEL_SIZE * 3.2, VOXEL_SIZE * 1.4), this.beltMat, this.root);
+    this.createVoxel(new Vector3(0, VOXEL_SIZE * 3.5, VOXEL_SIZE * 1.4), this.beltMat, this.root);
   }
 
   /**
@@ -255,88 +262,106 @@ export class VoxelCharacter {
   }
 
   /**
-   * Builds the arms - longer, with shoulders and hands
+   * Builds the arms - thick, muscular arms
    */
   private buildArms(): void {
-    // Left arm - 7 voxels down with shoulder
-    // Shoulder
+    // Left arm - muscular with thick biceps
+    // Shoulder cap
     this.createVoxel(new Vector3(0, VOXEL_SIZE * 0.5, 0), this.suitMat, this.leftArm);
-    // Upper arm (2 voxels thick at bicep)
+    this.createVoxel(new Vector3(0, VOXEL_SIZE * 0.5, VOXEL_SIZE * 0.5), this.suitMat, this.leftArm);
+
+    // Upper arm / bicep (thick - 2x2 voxels)
     for (let i = 0; i < 3; i++) {
-      const pos = new Vector3(0, -i * VOXEL_SIZE, 0);
-      this.createVoxel(pos, this.suitMat, this.leftArm);
-      if (i < 2) {
-        this.createVoxel(new Vector3(VOXEL_SIZE * 0.3, -i * VOXEL_SIZE, 0), this.suitMat, this.leftArm);
-      }
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.suitMat, this.leftArm);
+      this.createVoxel(new Vector3(VOXEL_SIZE * 0.5, -i * VOXEL_SIZE, 0), this.suitMat, this.leftArm);
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, VOXEL_SIZE * 0.5), this.suitMat, this.leftArm);
+      this.createVoxel(new Vector3(VOXEL_SIZE * 0.5, -i * VOXEL_SIZE, VOXEL_SIZE * 0.5), this.suitMat, this.leftArm);
     }
-    // Forearm (skin)
+    // Forearm (skin) - still thick
     for (let i = 3; i < 5; i++) {
-      const pos = new Vector3(0, -i * VOXEL_SIZE, 0);
-      this.createVoxel(pos, this.skinMat, this.leftArm);
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.skinMat, this.leftArm);
+      this.createVoxel(new Vector3(VOXEL_SIZE * 0.4, -i * VOXEL_SIZE, 0), this.skinMat, this.leftArm);
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, VOXEL_SIZE * 0.4), this.skinMat, this.leftArm);
     }
-    // Hand
-    this.createVoxel(new Vector3(0, -5 * VOXEL_SIZE, VOXEL_SIZE * 0.3), this.skinMat, this.leftArm);
+    // Hand / fist
+    this.createVoxel(new Vector3(0, -5 * VOXEL_SIZE, 0), this.skinMat, this.leftArm);
+    this.createVoxel(new Vector3(VOXEL_SIZE * 0.3, -5 * VOXEL_SIZE, 0), this.skinMat, this.leftArm);
     this.createVoxel(new Vector3(0, -5.5 * VOXEL_SIZE, 0), this.skinMat, this.leftArm);
 
     // Right arm - mirror of left
     this.createVoxel(new Vector3(0, VOXEL_SIZE * 0.5, 0), this.suitMat, this.rightArm);
+    this.createVoxel(new Vector3(0, VOXEL_SIZE * 0.5, VOXEL_SIZE * 0.5), this.suitMat, this.rightArm);
+
     for (let i = 0; i < 3; i++) {
-      const pos = new Vector3(0, -i * VOXEL_SIZE, 0);
-      this.createVoxel(pos, this.suitMat, this.rightArm);
-      if (i < 2) {
-        this.createVoxel(new Vector3(-VOXEL_SIZE * 0.3, -i * VOXEL_SIZE, 0), this.suitMat, this.rightArm);
-      }
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.suitMat, this.rightArm);
+      this.createVoxel(new Vector3(-VOXEL_SIZE * 0.5, -i * VOXEL_SIZE, 0), this.suitMat, this.rightArm);
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, VOXEL_SIZE * 0.5), this.suitMat, this.rightArm);
+      this.createVoxel(new Vector3(-VOXEL_SIZE * 0.5, -i * VOXEL_SIZE, VOXEL_SIZE * 0.5), this.suitMat, this.rightArm);
     }
     for (let i = 3; i < 5; i++) {
-      const pos = new Vector3(0, -i * VOXEL_SIZE, 0);
-      this.createVoxel(pos, this.skinMat, this.rightArm);
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.skinMat, this.rightArm);
+      this.createVoxel(new Vector3(-VOXEL_SIZE * 0.4, -i * VOXEL_SIZE, 0), this.skinMat, this.rightArm);
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, VOXEL_SIZE * 0.4), this.skinMat, this.rightArm);
     }
-    this.createVoxel(new Vector3(0, -5 * VOXEL_SIZE, VOXEL_SIZE * 0.3), this.skinMat, this.rightArm);
+    this.createVoxel(new Vector3(0, -5 * VOXEL_SIZE, 0), this.skinMat, this.rightArm);
+    this.createVoxel(new Vector3(-VOXEL_SIZE * 0.3, -5 * VOXEL_SIZE, 0), this.skinMat, this.rightArm);
     this.createVoxel(new Vector3(0, -5.5 * VOXEL_SIZE, 0), this.skinMat, this.rightArm);
   }
 
   /**
-   * Builds the legs - longer, with thighs, calves, and feet
+   * Builds the legs - thick, powerful legs
    */
   private buildLegs(): void {
-    // Left leg - 8 voxels total
-    // Upper thigh (thicker)
-    for (let i = 0; i < 2; i++) {
+    // Left leg - muscular thighs and calves
+    // Upper thigh (very thick - 2x2)
+    for (let i = 0; i < 3; i++) {
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.suitMat, this.leftLeg);
+      this.createVoxel(new Vector3(VOXEL_SIZE * 0.5, -i * VOXEL_SIZE, 0), this.suitMat, this.leftLeg);
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, VOXEL_SIZE * 0.5), this.suitMat, this.leftLeg);
+      this.createVoxel(new Vector3(VOXEL_SIZE * 0.5, -i * VOXEL_SIZE, VOXEL_SIZE * 0.5), this.suitMat, this.leftLeg);
+    }
+    // Lower thigh / knee (still thick)
+    for (let i = 3; i < 5; i++) {
       this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.suitMat, this.leftLeg);
       this.createVoxel(new Vector3(VOXEL_SIZE * 0.4, -i * VOXEL_SIZE, 0), this.suitMat, this.leftLeg);
-      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, VOXEL_SIZE * 0.3), this.suitMat, this.leftLeg);
-    }
-    // Lower thigh / knee
-    for (let i = 2; i < 4; i++) {
-      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.suitMat, this.leftLeg);
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, VOXEL_SIZE * 0.4), this.suitMat, this.leftLeg);
     }
     // Calf
-    for (let i = 4; i < 6; i++) {
+    for (let i = 5; i < 7; i++) {
       this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.suitMat, this.leftLeg);
+      this.createVoxel(new Vector3(VOXEL_SIZE * 0.3, -i * VOXEL_SIZE, 0), this.suitMat, this.leftLeg);
     }
     // Boot
-    for (let i = 6; i < 8; i++) {
+    for (let i = 7; i < 9; i++) {
       this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.bootMat, this.leftLeg);
+      this.createVoxel(new Vector3(VOXEL_SIZE * 0.3, -i * VOXEL_SIZE, 0), this.bootMat, this.leftLeg);
     }
     // Foot
-    this.createVoxel(new Vector3(0, -8 * VOXEL_SIZE, VOXEL_SIZE * 0.5), this.bootMat, this.leftLeg);
+    this.createVoxel(new Vector3(0, -9 * VOXEL_SIZE, VOXEL_SIZE * 0.5), this.bootMat, this.leftLeg);
+    this.createVoxel(new Vector3(VOXEL_SIZE * 0.3, -9 * VOXEL_SIZE, VOXEL_SIZE * 0.5), this.bootMat, this.leftLeg);
 
     // Right leg - mirror
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 3; i++) {
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.suitMat, this.rightLeg);
+      this.createVoxel(new Vector3(-VOXEL_SIZE * 0.5, -i * VOXEL_SIZE, 0), this.suitMat, this.rightLeg);
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, VOXEL_SIZE * 0.5), this.suitMat, this.rightLeg);
+      this.createVoxel(new Vector3(-VOXEL_SIZE * 0.5, -i * VOXEL_SIZE, VOXEL_SIZE * 0.5), this.suitMat, this.rightLeg);
+    }
+    for (let i = 3; i < 5; i++) {
       this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.suitMat, this.rightLeg);
       this.createVoxel(new Vector3(-VOXEL_SIZE * 0.4, -i * VOXEL_SIZE, 0), this.suitMat, this.rightLeg);
-      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, VOXEL_SIZE * 0.3), this.suitMat, this.rightLeg);
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, VOXEL_SIZE * 0.4), this.suitMat, this.rightLeg);
     }
-    for (let i = 2; i < 4; i++) {
+    for (let i = 5; i < 7; i++) {
       this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.suitMat, this.rightLeg);
+      this.createVoxel(new Vector3(-VOXEL_SIZE * 0.3, -i * VOXEL_SIZE, 0), this.suitMat, this.rightLeg);
     }
-    for (let i = 4; i < 6; i++) {
-      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.suitMat, this.rightLeg);
-    }
-    for (let i = 6; i < 8; i++) {
+    for (let i = 7; i < 9; i++) {
       this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.bootMat, this.rightLeg);
+      this.createVoxel(new Vector3(-VOXEL_SIZE * 0.3, -i * VOXEL_SIZE, 0), this.bootMat, this.rightLeg);
     }
-    this.createVoxel(new Vector3(0, -8 * VOXEL_SIZE, VOXEL_SIZE * 0.5), this.bootMat, this.rightLeg);
+    this.createVoxel(new Vector3(0, -9 * VOXEL_SIZE, VOXEL_SIZE * 0.5), this.bootMat, this.rightLeg);
+    this.createVoxel(new Vector3(-VOXEL_SIZE * 0.3, -9 * VOXEL_SIZE, VOXEL_SIZE * 0.5), this.bootMat, this.rightLeg);
   }
 
   /**
@@ -416,24 +441,33 @@ export class VoxelCharacter {
   ): void {
     // Animate limbs based on state
     if (isFlying) {
-      // Flying pose - arms forward, legs back
-      const flyPose = Math.min(1, speed / 50);
+      // Superman flying pose - arms stretched forward, legs extended back together
+      const flyPose = Math.min(1, speed / 40);
 
-      this.leftArm.rotation.x = -Math.PI * 0.4 * flyPose;
-      this.rightArm.rotation.x = -Math.PI * 0.4 * flyPose;
-      this.leftArm.rotation.z = Math.PI * 0.1 * flyPose;
-      this.rightArm.rotation.z = -Math.PI * 0.1 * flyPose;
+      // Arms forward (negative X rotation extends them forward when body is horizontal)
+      // At high speed, arms are fully extended forward
+      this.leftArm.rotation.x = -Math.PI * 0.5 * flyPose;  // Arms forward
+      this.rightArm.rotation.x = -Math.PI * 0.5 * flyPose;
+      // Arms closer together when flying fast
+      this.leftArm.rotation.z = Math.PI * 0.15 * flyPose;   // Slight inward angle
+      this.rightArm.rotation.z = -Math.PI * 0.15 * flyPose;
 
-      this.leftLeg.rotation.x = Math.PI * 0.2 * flyPose;
-      this.rightLeg.rotation.x = Math.PI * 0.2 * flyPose;
+      // Legs extended back and together (positive X rotation extends them back)
+      this.leftLeg.rotation.x = Math.PI * 0.45 * flyPose;  // Legs back
+      this.rightLeg.rotation.x = Math.PI * 0.45 * flyPose;
+      // Legs together
+      this.leftLeg.rotation.z = -Math.PI * 0.05 * flyPose;  // Slight inward
+      this.rightLeg.rotation.z = Math.PI * 0.05 * flyPose;
     } else {
-      // Standing/walking pose
+      // Standing pose - reset all rotations
       this.leftArm.rotation.x = 0;
       this.rightArm.rotation.x = 0;
       this.leftArm.rotation.z = 0;
       this.rightArm.rotation.z = 0;
       this.leftLeg.rotation.x = 0;
       this.rightLeg.rotation.x = 0;
+      this.leftLeg.rotation.z = 0;
+      this.rightLeg.rotation.z = 0;
     }
 
     // Update cape physics

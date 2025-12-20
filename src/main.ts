@@ -97,6 +97,11 @@ class Game {
       this.buildingDamage.applyImpactDamage(buildingMesh, impactPosition, speed);
     });
 
+    // Connect heat vision to damage system
+    this.player.setOnHeatVisionDamage((building, position, damage) => {
+      this.buildingDamage.applyImpactDamage(building, position, damage);
+    });
+
     // Initialize UI
     this.hud = new Hud();
     this.debugOverlay = new DebugOverlay();

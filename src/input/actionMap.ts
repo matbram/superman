@@ -28,6 +28,7 @@ export interface InputState {
   jumpPressed: boolean;   // A button - just pressed this frame
   jumpHeld: boolean;      // A button - held down
   boostHeld: boolean;     // RB - boost while flying
+  heatVisionHeld: boolean; // LB - heat vision (laser eyes)
   debugPressed: boolean;  // Backtick - toggle debug
 }
 
@@ -45,6 +46,7 @@ export function createEmptyInputState(): InputState {
     jumpPressed: false,
     jumpHeld: false,
     boostHeld: false,
+    heatVisionHeld: false,
     debugPressed: false,
   };
 }
@@ -61,6 +63,7 @@ export const KeyboardBindings = {
   fly: ['ShiftLeft', 'ShiftRight'],  // Shift to fly (like RT)
   descend: ['ControlLeft', 'ControlRight'],  // Ctrl to descend (like LT)
   boost: ['KeyQ'],  // Q for boost
+  heatVision: ['KeyE'],  // E for heat vision (laser eyes)
   toggleDebug: ['Backquote'],
 } as const;
 
@@ -72,6 +75,7 @@ export const GamepadBindings = {
   // Face buttons
   jump: 0,              // A button (bottom)
   boost: 5,             // RB (right bumper)
+  heatVision: 4,        // LB (left bumper) - heat vision
 
   // Sticks
   leftStickX: 0,

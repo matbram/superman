@@ -25,6 +25,7 @@ import { FlightState } from './states/FlightState';
 import { HoverState } from './states/HoverState';
 import { LandingState } from './states/LandingState';
 import { VoxelCharacter } from './VoxelCharacter';
+import { HeatVision } from './HeatVision';
 
 // Player physical properties
 const PLAYER_HEIGHT = 1.8;
@@ -78,6 +79,9 @@ export class Player {
   private onBuildingCollision: ((buildingMesh: any, impactPosition: Vector3, speed: number) => void) | null = null;
   private lastBuildingCollisionTime: number = 0;
 
+  // Heat vision
+  private heatVision: HeatVision;
+
   // Audio (placeholder for future implementation)
   // TODO: Add wind audio that scales with speed
 
@@ -111,6 +115,9 @@ export class Player {
     this.createSpeedParticles();
     this.createTakeoffParticles();
     this.createWindBreakEffect();
+
+    // Initialize heat vision
+    this.heatVision = new HeatVision(scene, physicsManager);
 
     // Initialize state machine
     this.states = new Map<PlayerStateType, IPlayerState>();
@@ -510,6 +517,9 @@ export class Player {
     // Check for building collision damage during flight
     this.checkBuildingCollision();
 
+    // Update heat vision
+    this.updateHeatVision(input, deltaTime);
+
     // Update camera
     this.cameraController.setTarget(this.physics.position, this.getForwardDirection());
     this.cameraController.setFlightMode(this.isFlightMode);
@@ -757,6 +767,36 @@ export class Player {
    */
   public setOnBuildingCollision(callback: (buildingMesh: any, impactPosition: Vector3, speed: number) => void): void {
     this.onBuildingCollision = callback;
+  }
+
+  /**
+   * Sets callback for heat vision building damage
+   */
+  public setOnHeatVisionDamage(callback: (building: any, position: Vector3, damage: number) => void): void {
+    this.heatVision.setOnBuildingDamage(callback);
+  }
+
+  /**
+   * Updates heat vision based on input
+   */
+  private updateHeatVision(input: InputState, deltaTime: number): void {
+    // Activate/deactivate based on input
+    if (input.heatVisionHeld) {
+      if (!this.heatVision.isHeatVisionActive()) {
+        this.heatVision.activate();
+      }
+
+      // Get head position and look direction
+      const headOffset = new Vector3(0, 2.0, 0);  // Head height
+      const headPosition = this.physics.position.add(headOffset);
+      const lookDirection = this.getForwardDirection();
+
+      this.heatVision.update(deltaTime, headPosition, lookDirection, this.yaw, this.pitch);
+    } else {
+      if (this.heatVision.isHeatVisionActive()) {
+        this.heatVision.deactivate();
+      }
+    }
   }
 
   /**
