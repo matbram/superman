@@ -784,6 +784,8 @@ export class Player {
 
   public setFlightMode(isFlying: boolean): void {
     this.isFlightMode = isFlying;
+    // Update physics to use flight collision behavior
+    this.physics.isFlying = isFlying;
   }
 
   public setBoostActive(active: boolean): void {

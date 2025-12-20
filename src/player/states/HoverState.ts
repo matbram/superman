@@ -28,6 +28,9 @@ export class HoverState extends BasePlayerState {
     player.setRoll(0);
     player.setBoostActive(false);
     player.setCurrentSpeed(0);
+
+    // Still in flight mode (prevents slide collision behavior)
+    player.setFlightMode(true);
   }
 
   exit(_player: Player): void {

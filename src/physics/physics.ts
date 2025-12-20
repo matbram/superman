@@ -45,6 +45,7 @@ export interface CharacterPhysics {
   height: number;
   isGrounded: boolean;
   groundNormal: Vector3;
+  isFlying?: boolean;  // When true, don't apply slide behavior on collision
 }
 
 /**
@@ -283,20 +284,31 @@ export class PhysicsManager {
 
       character.position = character.position.add(movementDir.scale(safeDistance));
 
-      // Slide along surface
-      const slideVelocity = this.calculateSlideVector(velocity, sweepResult.normal);
-      character.velocity = slideVelocity;
+      if (character.isFlying) {
+        // In flight mode: push away from surface, don't slide
+        // Keep most of the original velocity but deflect slightly away from surface
+        const pushForce = sweepResult.normal.scale(2);
+        character.position.addInPlace(pushForce.scale(deltaTime * 10));
 
-      // Try to apply remaining movement as slide
-      const remainingDistance = movement.length() - safeDistance;
-      if (remainingDistance > 0.01) {
-        const slideMovement = this.calculateSlideVector(movementDir, sweepResult.normal).scale(remainingDistance);
-        const slideTarget = character.position.add(slideMovement);
+        // Preserve velocity direction - player maintains control
+        // Just reduce speed slightly on impact
+        character.velocity = velocity.scale(0.95);
+      } else {
+        // Ground mode: slide along surface
+        const slideVelocity = this.calculateSlideVector(velocity, sweepResult.normal);
+        character.velocity = slideVelocity;
 
-        // Check if slide is safe
-        const slideCheck = this.sphereSweep(character.position, slideTarget, character.radius);
-        if (!slideCheck.hit || slideCheck.distance >= slideMovement.length()) {
-          character.position = slideTarget;
+        // Try to apply remaining movement as slide
+        const remainingDistance = movement.length() - safeDistance;
+        if (remainingDistance > 0.01) {
+          const slideMovement = this.calculateSlideVector(movementDir, sweepResult.normal).scale(remainingDistance);
+          const slideTarget = character.position.add(slideMovement);
+
+          // Check if slide is safe
+          const slideCheck = this.sphereSweep(character.position, slideTarget, character.radius);
+          if (!slideCheck.hit || slideCheck.distance >= slideMovement.length()) {
+            character.position = slideTarget;
+          }
         }
       }
     } else {
@@ -305,13 +317,13 @@ export class PhysicsManager {
       character.velocity = velocity;
     }
 
-    // Ground check
+    // Ground check (skip ground snapping in flight mode)
     const groundCheck = this.checkGrounded(character.position, character.height);
-    character.isGrounded = groundCheck.hit;
+    character.isGrounded = groundCheck.hit && !character.isFlying;
     character.groundNormal = groundCheck.normal;
 
-    // Snap to ground if close and moving down
-    if (character.isGrounded && velocity.y <= 0) {
+    // Snap to ground if close and moving down (only when not flying)
+    if (character.isGrounded && velocity.y <= 0 && !character.isFlying) {
       const groundY = groundCheck.point.y;
       // Position is character center, so add half height to stand ON the ground
       const targetY = groundY + character.height / 2;
@@ -358,10 +370,14 @@ export class PhysicsManager {
 
     if (maxPenetration > 0) {
       character.position.addInPlace(pushOut);
-      // Stop velocity in penetration direction
-      const velocityDot = Vector3.Dot(character.velocity, pushOut.normalize());
-      if (velocityDot < 0) {
-        character.velocity = character.velocity.subtract(pushOut.normalize().scale(velocityDot));
+
+      // In flight mode: only push position, don't modify velocity (player keeps control)
+      // In ground mode: stop velocity in penetration direction
+      if (!character.isFlying) {
+        const velocityDot = Vector3.Dot(character.velocity, pushOut.normalize());
+        if (velocityDot < 0) {
+          character.velocity = character.velocity.subtract(pushOut.normalize().scale(velocityDot));
+        }
       }
     }
   }

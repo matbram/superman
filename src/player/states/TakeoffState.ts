@@ -23,6 +23,9 @@ export class TakeoffState extends BasePlayerState {
     this.timer = 0;
     this.initialVelocity = player.getVelocity().clone();
 
+    // Enable flight physics immediately (prevents sliding on obstacles)
+    player.setFlightMode(true);
+
     // Apply initial takeoff impulse
     const velocity = player.getVelocity();
     velocity.y = TAKEOFF_SPEED;
