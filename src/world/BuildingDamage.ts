@@ -320,7 +320,7 @@ export class BuildingDamage {
 
   /**
    * Applies supersonic wake damage to nearby buildings (no direct contact needed)
-   * Damages buildings on the SIDES of the player's flight path
+   * Breaks off pieces from buildings leaving holes - NO full destruction
    */
   public applySupersonicWakeDamage(
     playerPosition: Vector3,
@@ -330,9 +330,8 @@ export class BuildingDamage {
   ): void {
     if (speed < WAKE_SPEED_THRESHOLD) return;
 
-    // Large radius that increases with speed
-    const wakeRadius = WAKE_BASE_RADIUS + (speed - WAKE_SPEED_THRESHOLD) * 0.5;
-    const wakeDamage = (speed - WAKE_SPEED_THRESHOLD) / 30;  // More damage
+    // Radius that increases with speed
+    const wakeRadius = WAKE_BASE_RADIUS + (speed - WAKE_SPEED_THRESHOLD) * 0.3;
 
     // Get normalized flight direction
     const flyDir = playerVelocity.clone();
@@ -346,28 +345,20 @@ export class BuildingDamage {
       const dz = buildingPos.z - playerPosition.z;
       const horizontalDist = Math.sqrt(dx * dx + dz * dz);
 
-      if (horizontalDist < wakeRadius && horizontalDist > 5) {
+      if (horizontalDist < wakeRadius && horizontalDist > 8) {
         // Check if building is to the SIDE of the player (not in front/behind)
         const toBuilding = new Vector3(dx, 0, dz).normalize();
 
         // Dot product - 0 means perpendicular (exactly beside player)
-        // We want buildings that are mostly perpendicular to flight direction
         const dot = Math.abs(Vector3.Dot(toBuilding, flyDir));
 
-        // Only affect buildings that are mostly to the side (dot < 0.5 means within ~60 degrees of perpendicular)
+        // Only affect buildings that are mostly to the side
         if (dot < 0.5) {
           const structure = this.getOrCreateStructure(building);
 
-          // More chunks break when closer and faster
+          // Only break 1-3 chunks at a time - creates holes, not destruction
           const proximityFactor = 1 - (horizontalDist / wakeRadius);
-          const sideFactor = 1 - (dot / 0.5);  // Stronger effect when more perpendicular
-          const chunksToBreak = Math.floor(proximityFactor * sideFactor * wakeDamage * 5) + 2;
-
-          // At very high speeds close by, destroy the whole building
-          if (speed > 150 && horizontalDist < 20 && dot < 0.3) {
-            this.destroyBuilding(structure, playerPosition, speed);
-            continue;
-          }
+          const chunksToBreak = Math.min(3, Math.floor(proximityFactor * 2) + 1);
 
           let broken = 0;
           for (const bp of structure.breakPoints) {
@@ -383,16 +374,16 @@ export class BuildingDamage {
               playerPosition.z - chunkWorldZ
             ).normalize();
 
-            // Only break chunks facing the player
-            if (Vector3.Dot(chunkToPlayer, toBuilding) > 0.2) {
-              this.breakChunk(structure, bp, playerPosition, speed * 0.7);
+            // Only break chunks facing the player - creates holes on that side
+            if (Vector3.Dot(chunkToPlayer, toBuilding) > 0.3) {
+              this.breakChunk(structure, bp, playerPosition, speed * 0.5);
               broken++;
             }
           }
 
           if (broken > 0) {
-            structure.shakeTime = Math.min(1.5, structure.shakeTime + 0.5);
-            this.spawnImpactDebris(buildingPos.add(new Vector3(0, 20, 0)), speed * 0.4, broken * 3);
+            structure.shakeTime = Math.min(0.8, structure.shakeTime + 0.3);
+            this.spawnImpactDebris(buildingPos.add(new Vector3(0, 15, 0)), speed * 0.3, broken * 2);
           }
         }
       }

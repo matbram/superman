@@ -12,17 +12,17 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator';
 
-// Character constants
-const VOXEL_SIZE = 0.15;  // Size of each voxel cube
+// Character constants - man-sized proportions
+const VOXEL_SIZE = 0.45;  // Large voxels for human-sized character
 
-// Cape physics constants
-const CAPE_SEGMENTS_X = 6;
-const CAPE_SEGMENTS_Y = 8;
-const CAPE_SEGMENT_SIZE = 0.25;
-const CAPE_GRAVITY = -15;
-const CAPE_WIND_RESISTANCE = 3;
-const CAPE_STIFFNESS = 50;
-const CAPE_DAMPING = 5;
+// Cape physics constants - fewer, larger segments for flowing cape
+const CAPE_SEGMENTS_X = 4;   // Fewer horizontal segments
+const CAPE_SEGMENTS_Y = 5;   // Fewer vertical segments
+const CAPE_SEGMENT_SIZE = 0.8;  // Much larger cape pieces
+const CAPE_GRAVITY = -12;
+const CAPE_WIND_RESISTANCE = 4;
+const CAPE_STIFFNESS = 40;
+const CAPE_DAMPING = 4;
 
 /**
  * Cape segment with physics
@@ -83,12 +83,12 @@ export class VoxelCharacter {
     this.rightLeg.parent = this.root;
     this.head.parent = this.root;
 
-    // Position limb pivots
-    this.leftArm.position = new Vector3(-0.35, 0.5, 0);
-    this.rightArm.position = new Vector3(0.35, 0.5, 0);
-    this.leftLeg.position = new Vector3(-0.12, -0.1, 0);
-    this.rightLeg.position = new Vector3(0.12, -0.1, 0);
-    this.head.position = new Vector3(0, 0.65, 0);
+    // Position limb pivots - scaled for man-sized character
+    this.leftArm.position = new Vector3(-1.0, 1.6, 0);
+    this.rightArm.position = new Vector3(1.0, 1.6, 0);
+    this.leftLeg.position = new Vector3(-0.35, -0.25, 0);
+    this.rightLeg.position = new Vector3(0.35, -0.25, 0);
+    this.head.position = new Vector3(0, 2.0, 0);
 
     // Build the character
     this.buildBody();
@@ -140,16 +140,16 @@ export class VoxelCharacter {
   }
 
   /**
-   * Builds the torso
+   * Builds the torso - wider, more muscular proportions
    */
   private buildBody(): void {
-    // Torso - 3x4x2 voxels
-    for (let y = 0; y < 4; y++) {
-      for (let x = -1; x <= 1; x++) {
+    // Upper torso / chest - wider (5 voxels wide at shoulders)
+    for (let y = 3; y < 5; y++) {
+      for (let x = -2; x <= 2; x++) {
         for (let z = 0; z <= 1; z++) {
           const pos = new Vector3(
             x * VOXEL_SIZE,
-            y * VOXEL_SIZE + 0.1,
+            y * VOXEL_SIZE,
             z * VOXEL_SIZE - VOXEL_SIZE * 0.5
           );
           this.createVoxel(pos, this.suitMat, this.root);
@@ -157,98 +157,190 @@ export class VoxelCharacter {
       }
     }
 
-    // Belt
+    // Mid torso (4 voxels wide - tapers in)
+    for (let y = 1; y < 3; y++) {
+      for (let x = -1.5; x <= 1.5; x++) {
+        for (let z = 0; z <= 1; z++) {
+          const pos = new Vector3(
+            x * VOXEL_SIZE,
+            y * VOXEL_SIZE,
+            z * VOXEL_SIZE - VOXEL_SIZE * 0.5
+          );
+          this.createVoxel(pos, this.suitMat, this.root);
+        }
+      }
+    }
+
+    // Waist/hips area
     for (let x = -1; x <= 1; x++) {
       for (let z = 0; z <= 1; z++) {
         const pos = new Vector3(
           x * VOXEL_SIZE,
-          0.1,
+          0,
+          z * VOXEL_SIZE - VOXEL_SIZE * 0.5
+        );
+        this.createVoxel(pos, this.suitMat, this.root);
+      }
+    }
+
+    // Belt
+    for (let x = -1.5; x <= 1.5; x++) {
+      for (let z = 0; z <= 1; z++) {
+        const pos = new Vector3(
+          x * VOXEL_SIZE,
+          VOXEL_SIZE * 0.8,
           z * VOXEL_SIZE - VOXEL_SIZE * 0.5
         );
         this.createVoxel(pos, this.beltMat, this.root);
       }
     }
 
-    // S logo on chest (simplified - just a yellow voxel)
-    const logoPos = new Vector3(0, 0.4, VOXEL_SIZE * 0.6);
-    this.createVoxel(logoPos, this.beltMat, this.root);
+    // S logo on chest (diamond shape - 5 voxels)
+    this.createVoxel(new Vector3(0, VOXEL_SIZE * 3.8, VOXEL_SIZE * 0.7), this.beltMat, this.root);
+    this.createVoxel(new Vector3(VOXEL_SIZE * 0.5, VOXEL_SIZE * 3.5, VOXEL_SIZE * 0.7), this.beltMat, this.root);
+    this.createVoxel(new Vector3(-VOXEL_SIZE * 0.5, VOXEL_SIZE * 3.5, VOXEL_SIZE * 0.7), this.beltMat, this.root);
+    this.createVoxel(new Vector3(0, VOXEL_SIZE * 3.2, VOXEL_SIZE * 0.7), this.beltMat, this.root);
   }
 
   /**
-   * Builds the head
+   * Builds the head - larger, more detailed with eyes
    */
   private buildHead(): void {
-    // Head - 2x2x2 voxels
-    for (let y = 0; y < 2; y++) {
-      for (let x = 0; x <= 1; x++) {
-        for (let z = 0; z <= 1; z++) {
+    // Head - 3x3x3 voxels for more realistic size
+    for (let y = 0; y < 3; y++) {
+      for (let x = -1; x <= 1; x++) {
+        for (let z = -1; z <= 1; z++) {
+          // Skip corners for rounder shape
+          if (Math.abs(x) === 1 && Math.abs(z) === 1 && (y === 0 || y === 2)) continue;
+
           const pos = new Vector3(
-            (x - 0.5) * VOXEL_SIZE,
+            x * VOXEL_SIZE,
             y * VOXEL_SIZE,
-            (z - 0.5) * VOXEL_SIZE
+            z * VOXEL_SIZE
           );
           this.createVoxel(pos, this.skinMat, this.head);
         }
       }
     }
 
-    // Hair on top
-    for (let x = 0; x <= 1; x++) {
-      for (let z = 0; z <= 1; z++) {
+    // Neck
+    this.createVoxel(new Vector3(0, -VOXEL_SIZE * 0.5, 0), this.skinMat, this.head);
+
+    // Hair on top - full coverage
+    for (let x = -1; x <= 1; x++) {
+      for (let z = -1; z <= 1; z++) {
         const pos = new Vector3(
-          (x - 0.5) * VOXEL_SIZE,
-          2 * VOXEL_SIZE,
-          (z - 0.5) * VOXEL_SIZE
+          x * VOXEL_SIZE,
+          3 * VOXEL_SIZE,
+          z * VOXEL_SIZE
         );
         this.createVoxel(pos, this.hairMat, this.head);
       }
     }
 
-    // Hair curl on front
-    const curlPos = new Vector3(0, 1.5 * VOXEL_SIZE, VOXEL_SIZE * 0.7);
-    this.createVoxel(curlPos, this.hairMat, this.head);
+    // Hair sides
+    for (let y = 2; y <= 3; y++) {
+      this.createVoxel(new Vector3(-VOXEL_SIZE, y * VOXEL_SIZE, -VOXEL_SIZE), this.hairMat, this.head);
+      this.createVoxel(new Vector3(VOXEL_SIZE, y * VOXEL_SIZE, -VOXEL_SIZE), this.hairMat, this.head);
+    }
+
+    // Iconic hair curl on forehead
+    this.createVoxel(new Vector3(0, VOXEL_SIZE * 2.5, VOXEL_SIZE * 1.2), this.hairMat, this.head);
+    this.createVoxel(new Vector3(VOXEL_SIZE * 0.3, VOXEL_SIZE * 2.8, VOXEL_SIZE * 1.1), this.hairMat, this.head);
+
+    // Eyes (blue)
+    const eyeMat = this.createMaterial('eyes', new Color3(0.2, 0.4, 0.8));
+    this.createVoxel(new Vector3(-VOXEL_SIZE * 0.5, VOXEL_SIZE * 1.5, VOXEL_SIZE * 1.1), eyeMat, this.head, new Vector3(0.6, 0.4, 0.3));
+    this.createVoxel(new Vector3(VOXEL_SIZE * 0.5, VOXEL_SIZE * 1.5, VOXEL_SIZE * 1.1), eyeMat, this.head, new Vector3(0.6, 0.4, 0.3));
   }
 
   /**
-   * Builds the arms
+   * Builds the arms - longer, with shoulders and hands
    */
   private buildArms(): void {
-    // Left arm - 5 voxels down
-    for (let i = 0; i < 5; i++) {
+    // Left arm - 7 voxels down with shoulder
+    // Shoulder
+    this.createVoxel(new Vector3(0, VOXEL_SIZE * 0.5, 0), this.suitMat, this.leftArm);
+    // Upper arm (2 voxels thick at bicep)
+    for (let i = 0; i < 3; i++) {
       const pos = new Vector3(0, -i * VOXEL_SIZE, 0);
-      const mat = i < 3 ? this.suitMat : this.skinMat;  // Sleeve then skin
-      this.createVoxel(pos, mat, this.leftArm);
+      this.createVoxel(pos, this.suitMat, this.leftArm);
+      if (i < 2) {
+        this.createVoxel(new Vector3(VOXEL_SIZE * 0.3, -i * VOXEL_SIZE, 0), this.suitMat, this.leftArm);
+      }
     }
+    // Forearm (skin)
+    for (let i = 3; i < 5; i++) {
+      const pos = new Vector3(0, -i * VOXEL_SIZE, 0);
+      this.createVoxel(pos, this.skinMat, this.leftArm);
+    }
+    // Hand
+    this.createVoxel(new Vector3(0, -5 * VOXEL_SIZE, VOXEL_SIZE * 0.3), this.skinMat, this.leftArm);
+    this.createVoxel(new Vector3(0, -5.5 * VOXEL_SIZE, 0), this.skinMat, this.leftArm);
 
-    // Right arm
-    for (let i = 0; i < 5; i++) {
+    // Right arm - mirror of left
+    this.createVoxel(new Vector3(0, VOXEL_SIZE * 0.5, 0), this.suitMat, this.rightArm);
+    for (let i = 0; i < 3; i++) {
       const pos = new Vector3(0, -i * VOXEL_SIZE, 0);
-      const mat = i < 3 ? this.suitMat : this.skinMat;
-      this.createVoxel(pos, mat, this.rightArm);
+      this.createVoxel(pos, this.suitMat, this.rightArm);
+      if (i < 2) {
+        this.createVoxel(new Vector3(-VOXEL_SIZE * 0.3, -i * VOXEL_SIZE, 0), this.suitMat, this.rightArm);
+      }
     }
+    for (let i = 3; i < 5; i++) {
+      const pos = new Vector3(0, -i * VOXEL_SIZE, 0);
+      this.createVoxel(pos, this.skinMat, this.rightArm);
+    }
+    this.createVoxel(new Vector3(0, -5 * VOXEL_SIZE, VOXEL_SIZE * 0.3), this.skinMat, this.rightArm);
+    this.createVoxel(new Vector3(0, -5.5 * VOXEL_SIZE, 0), this.skinMat, this.rightArm);
   }
 
   /**
-   * Builds the legs
+   * Builds the legs - longer, with thighs, calves, and feet
    */
   private buildLegs(): void {
-    // Left leg - 6 voxels down
-    for (let i = 0; i < 6; i++) {
-      const pos = new Vector3(0, -i * VOXEL_SIZE, 0);
-      const mat = i < 4 ? this.suitMat : this.bootMat;  // Pants then boots
-      this.createVoxel(pos, mat, this.leftLeg);
+    // Left leg - 8 voxels total
+    // Upper thigh (thicker)
+    for (let i = 0; i < 2; i++) {
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.suitMat, this.leftLeg);
+      this.createVoxel(new Vector3(VOXEL_SIZE * 0.4, -i * VOXEL_SIZE, 0), this.suitMat, this.leftLeg);
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, VOXEL_SIZE * 0.3), this.suitMat, this.leftLeg);
     }
+    // Lower thigh / knee
+    for (let i = 2; i < 4; i++) {
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.suitMat, this.leftLeg);
+    }
+    // Calf
+    for (let i = 4; i < 6; i++) {
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.suitMat, this.leftLeg);
+    }
+    // Boot
+    for (let i = 6; i < 8; i++) {
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.bootMat, this.leftLeg);
+    }
+    // Foot
+    this.createVoxel(new Vector3(0, -8 * VOXEL_SIZE, VOXEL_SIZE * 0.5), this.bootMat, this.leftLeg);
 
-    // Right leg
-    for (let i = 0; i < 6; i++) {
-      const pos = new Vector3(0, -i * VOXEL_SIZE, 0);
-      const mat = i < 4 ? this.suitMat : this.bootMat;
-      this.createVoxel(pos, mat, this.rightLeg);
+    // Right leg - mirror
+    for (let i = 0; i < 2; i++) {
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.suitMat, this.rightLeg);
+      this.createVoxel(new Vector3(-VOXEL_SIZE * 0.4, -i * VOXEL_SIZE, 0), this.suitMat, this.rightLeg);
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, VOXEL_SIZE * 0.3), this.suitMat, this.rightLeg);
     }
+    for (let i = 2; i < 4; i++) {
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.suitMat, this.rightLeg);
+    }
+    for (let i = 4; i < 6; i++) {
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.suitMat, this.rightLeg);
+    }
+    for (let i = 6; i < 8; i++) {
+      this.createVoxel(new Vector3(0, -i * VOXEL_SIZE, 0), this.bootMat, this.rightLeg);
+    }
+    this.createVoxel(new Vector3(0, -8 * VOXEL_SIZE, VOXEL_SIZE * 0.5), this.bootMat, this.rightLeg);
   }
 
   /**
-   * Builds the cape with physics segments
+   * Builds the cape with physics segments - large flowing pieces
    */
   private buildCape(): void {
     this.capeSegments = [];
@@ -257,20 +349,21 @@ export class VoxelCharacter {
       const column: CapeSegment[] = [];
 
       for (let y = 0; y < CAPE_SEGMENTS_Y; y++) {
+        // Cape segments are large flat rectangles
         const mesh = MeshBuilder.CreateBox(`cape_${x}_${y}`, {
-          width: CAPE_SEGMENT_SIZE,
-          height: CAPE_SEGMENT_SIZE * 0.1,
-          depth: CAPE_SEGMENT_SIZE,
+          width: CAPE_SEGMENT_SIZE * 0.95,
+          height: CAPE_SEGMENT_SIZE * 0.08,  // Thin like cloth
+          depth: CAPE_SEGMENT_SIZE * 0.9,
         }, this.scene);
 
         mesh.material = this.capeMat;
         mesh.isPickable = false;
 
-        // Rest position relative to shoulder attachment
+        // Rest position - start well behind the character to avoid clipping
         const restPos = new Vector3(
-          (x - CAPE_SEGMENTS_X / 2 + 0.5) * CAPE_SEGMENT_SIZE * 0.9,
-          0.5 - y * CAPE_SEGMENT_SIZE * 0.3,
-          -VOXEL_SIZE - y * CAPE_SEGMENT_SIZE * 0.8
+          (x - CAPE_SEGMENTS_X / 2 + 0.5) * CAPE_SEGMENT_SIZE * 0.85,
+          1.5 - y * CAPE_SEGMENT_SIZE * 0.5,
+          -VOXEL_SIZE * 1.5 - y * CAPE_SEGMENT_SIZE * 0.7  // Further back
         );
 
         const segment: CapeSegment = {
@@ -348,22 +441,23 @@ export class VoxelCharacter {
   }
 
   /**
-   * Updates cape physics simulation
+   * Updates cape physics simulation - keeps cape behind character
    */
   private updateCapePhysics(deltaTime: number, characterVelocity: Vector3, speed: number): void {
     const worldMatrix = this.root.getWorldMatrix();
+    const charPos = this.root.position;
 
     for (let x = 0; x < CAPE_SEGMENTS_X; x++) {
       for (let y = 0; y < CAPE_SEGMENTS_Y; y++) {
         const segment = this.capeSegments[x][y];
 
         if (y === 0) {
-          // Top row is attached to character
+          // Top row is attached to character's upper back
           const attachPoint = Vector3.TransformCoordinates(
             new Vector3(
-              (x - CAPE_SEGMENTS_X / 2 + 0.5) * CAPE_SEGMENT_SIZE * 0.9,
-              0.55,
-              -VOXEL_SIZE * 2
+              (x - CAPE_SEGMENTS_X / 2 + 0.5) * CAPE_SEGMENT_SIZE * 0.8,
+              1.6,  // Shoulder height
+              -VOXEL_SIZE * 2  // Behind the back
             ),
             worldMatrix
           );
@@ -379,19 +473,19 @@ export class VoxelCharacter {
           const windForce = characterVelocity.scale(-CAPE_WIND_RESISTANCE * deltaTime);
           segment.velocity.addInPlace(windForce);
 
-          // Extra wind at high speed
+          // Extra wind at high speed - cape streams behind
           if (speed > 30) {
             const turbulence = new Vector3(
-              (Math.random() - 0.5) * speed * 0.1,
               (Math.random() - 0.5) * speed * 0.05,
-              -speed * 0.3
+              (Math.random() - 0.5) * speed * 0.02,
+              -speed * 0.2  // Push cape back
             );
             segment.velocity.addInPlace(turbulence.scale(deltaTime));
           }
 
-          // Spring force towards segment above
+          // Spring force towards segment above - cape hangs down and back
           const above = this.capeSegments[x][y - 1];
-          const targetPos = above.position.add(new Vector3(0, -CAPE_SEGMENT_SIZE * 0.4, -CAPE_SEGMENT_SIZE * 0.5));
+          const targetPos = above.position.add(new Vector3(0, -CAPE_SEGMENT_SIZE * 0.6, -CAPE_SEGMENT_SIZE * 0.3));
           const toTarget = targetPos.subtract(segment.position);
           const springForce = toTarget.scale(CAPE_STIFFNESS * deltaTime);
           segment.velocity.addInPlace(springForce);
@@ -400,7 +494,7 @@ export class VoxelCharacter {
           segment.velocity.scaleInPlace(1 - CAPE_DAMPING * deltaTime);
 
           // Limit velocity
-          const maxVel = 50;
+          const maxVel = 40;
           if (segment.velocity.length() > maxVel) {
             segment.velocity = segment.velocity.normalize().scale(maxVel);
           }
@@ -409,10 +503,19 @@ export class VoxelCharacter {
           segment.position.addInPlace(segment.velocity.scale(deltaTime));
 
           // Constrain distance from segment above
-          const maxDist = CAPE_SEGMENT_SIZE * 0.8;
+          const maxDist = CAPE_SEGMENT_SIZE * 0.7;
           const diff = segment.position.subtract(above.position);
           if (diff.length() > maxDist) {
             segment.position = above.position.add(diff.normalize().scale(maxDist));
+          }
+
+          // Keep cape behind character - prevent clipping through body
+          const toChar = segment.position.subtract(charPos);
+          const localZ = Vector3.TransformNormal(new Vector3(0, 0, 1), worldMatrix);
+          const dotForward = Vector3.Dot(toChar, localZ);
+          if (dotForward > -0.5) {
+            // Cape is too far forward, push it back
+            segment.position.subtractInPlace(localZ.scale(dotForward + 0.5));
           }
         }
 
