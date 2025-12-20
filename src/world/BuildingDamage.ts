@@ -163,73 +163,172 @@ export class BuildingDamage {
 
   /**
    * Applies impact damage from player collision
-   * Tears chunks off at the impact point - building stays standing
+   * At high speed: fully destroys building
+   * At lower speed: tears chunks off
    */
   public applyImpactDamage(building: Mesh, impactPosition: Vector3, speed: number): void {
     const structure = this.getOrCreateStructure(building);
 
-    // Calculate damage based on speed
-    const damage = speed / 20;  // More aggressive - easier to break
+    // At supersonic speeds (100+), fully destroy the building on impact
+    if (speed > 100) {
+      this.destroyBuilding(structure, impactPosition, speed);
+      return;
+    }
+
+    // At high speeds (60+), destroy most of the building
+    if (speed > 60) {
+      this.heavyDamageBuilding(structure, impactPosition, speed);
+      return;
+    }
+
+    // Lower speeds: break chunks near impact
+    const damage = speed / 15;
     structure.shakeTime = Math.min(1.5, structure.shakeTime + damage * 0.3);
 
-    // Find breakpoints near the impact and break them
     const bounds = structure.bounds;
     const buildingCenter = structure.originalPosition;
     const buildingSize = bounds.max.subtract(bounds.min);
 
-    // Convert impact position to relative coordinates (0-1 range)
     const relativeImpact = new Vector3(
       (impactPosition.x - buildingCenter.x) / buildingSize.x,
       (impactPosition.y - bounds.min.y) / buildingSize.y,
       (impactPosition.z - buildingCenter.z) / buildingSize.z
     );
 
-    // Clamp to valid range
     relativeImpact.x = Math.max(-0.5, Math.min(0.5, relativeImpact.x));
     relativeImpact.y = Math.max(0, Math.min(1, relativeImpact.y));
     relativeImpact.z = Math.max(-0.5, Math.min(0.5, relativeImpact.z));
 
-    // Break 1-4 chunks per impact based on speed
-    const maxChunks = Math.min(4, 1 + Math.floor(damage / 1.5));
-    const impactRadius = 0.5 + damage * 0.1;  // Larger radius for more hits
+    // Break multiple chunks
+    const maxChunks = Math.min(6, 2 + Math.floor(damage));
 
-    // Find ALL breakpoints, sorted by distance to impact
     const allBreakpoints: { bp: BreakPoint; dist: number }[] = [];
-
     for (const breakPoint of structure.breakPoints) {
       if (breakPoint.broken) continue;
-
       const dx = breakPoint.relativePosition.x - relativeImpact.x;
       const dy = breakPoint.relativePosition.y - relativeImpact.y;
       const dz = breakPoint.relativePosition.z - relativeImpact.z;
-      const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-
-      allBreakpoints.push({ bp: breakPoint, dist: distance });
+      allBreakpoints.push({ bp: breakPoint, dist: Math.sqrt(dx * dx + dy * dy + dz * dz) });
     }
 
-    // Sort by distance - break closest first
     allBreakpoints.sort((a, b) => a.dist - b.dist);
 
-    // Always break at least one chunk if any are available and speed is decent
     let chunksCreated = 0;
-    for (const { bp, dist } of allBreakpoints) {
+    for (const { bp } of allBreakpoints) {
       if (chunksCreated >= maxChunks) break;
+      this.breakChunk(structure, bp, impactPosition, speed);
+      chunksCreated++;
+    }
 
-      // First chunk always breaks if within reasonable range
-      // Subsequent chunks need to be closer
-      const shouldBreak = chunksCreated === 0
-        ? (dist < impactRadius * 1.5 && speed > 25)  // First chunk: easier
-        : (dist < impactRadius && damage > bp.threshold * 0.5);  // Others: need more damage
+    this.spawnImpactDebris(impactPosition, speed, 5 + chunksCreated * 2);
+  }
 
-      if (shouldBreak) {
+  /**
+   * Heavily damages a building - breaks most chunks
+   */
+  private heavyDamageBuilding(structure: BuildingStructure, impactPosition: Vector3, speed: number): void {
+    structure.shakeTime = 2;
+
+    // Break 60-80% of breakpoints
+    const breakCount = Math.floor(structure.breakPoints.length * (0.6 + Math.random() * 0.2));
+    let broken = 0;
+
+    for (const bp of structure.breakPoints) {
+      if (bp.broken) continue;
+      if (broken >= breakCount) break;
+      this.breakChunk(structure, bp, impactPosition, speed);
+      broken++;
+    }
+
+    this.spawnImpactDebris(impactPosition, speed, 15);
+  }
+
+  /**
+   * Completely destroys a building
+   */
+  private destroyBuilding(structure: BuildingStructure, impactPosition: Vector3, speed: number): void {
+    // Break ALL breakpoints
+    for (const bp of structure.breakPoints) {
+      if (!bp.broken) {
         this.breakChunk(structure, bp, impactPosition, speed);
-        chunksCreated++;
       }
     }
 
-    // Always spawn some debris on impact
-    const debrisCount = chunksCreated > 0 ? 3 + chunksCreated * 2 : Math.floor(damage) + 2;
-    this.spawnImpactDebris(impactPosition, speed, debrisCount);
+    // Lots of debris
+    this.spawnImpactDebris(impactPosition, speed, 20);
+
+    // Collapse the building mesh
+    structure.mesh.scaling.y *= 0.15;
+    structure.mesh.position.y = structure.originalPosition.y * 0.15;
+
+    this.buildingStructures.delete(structure.mesh);
+  }
+
+  /**
+   * Applies supersonic wake damage to nearby buildings (no direct contact needed)
+   */
+  public applySupersonicWakeDamage(
+    playerPosition: Vector3,
+    playerVelocity: Vector3,
+    speed: number,
+    buildings: Mesh[]
+  ): void {
+    if (speed < 120) return;  // Only at supersonic speeds
+
+    const wakeRadius = 15 + (speed - 120) * 0.2;  // Radius increases with speed
+    const wakeDamage = (speed - 120) / 50;  // Damage scales with speed
+
+    for (const building of buildings) {
+      const buildingPos = building.position;
+      const dx = buildingPos.x - playerPosition.x;
+      const dz = buildingPos.z - playerPosition.z;
+      const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+
+      if (horizontalDist < wakeRadius && horizontalDist > 3) {
+        // Check if building is roughly beside the player (not in front/behind)
+        const toBuilding = new Vector3(dx, 0, dz).normalize();
+        const flyDir = playerVelocity.clone();
+        flyDir.y = 0;
+        flyDir.normalize();
+
+        // Dot product - 0 means perpendicular (beside player)
+        const dot = Math.abs(Vector3.Dot(toBuilding, flyDir));
+
+        if (dot < 0.7) {  // Building is mostly to the side
+          const structure = this.getOrCreateStructure(building);
+
+          // Determine how many chunks to break based on proximity
+          const proximityFactor = 1 - (horizontalDist / wakeRadius);
+          const chunksToBreak = Math.floor(proximityFactor * wakeDamage * 3) + 1;
+
+          let broken = 0;
+          for (const bp of structure.breakPoints) {
+            if (bp.broken) continue;
+            if (broken >= chunksToBreak) break;
+
+            // Break chunks on the side facing the player
+            const chunkWorldX = structure.originalPosition.x + bp.relativePosition.x * 20;
+            const chunkWorldZ = structure.originalPosition.z + bp.relativePosition.z * 20;
+            const chunkToPlayer = new Vector3(
+              playerPosition.x - chunkWorldX,
+              0,
+              playerPosition.z - chunkWorldZ
+            ).normalize();
+
+            // Only break chunks facing the player
+            if (Vector3.Dot(chunkToPlayer, toBuilding) > 0.3) {
+              this.breakChunk(structure, bp, playerPosition, speed * 0.5);
+              broken++;
+            }
+          }
+
+          if (broken > 0) {
+            structure.shakeTime = Math.min(1, structure.shakeTime + 0.3);
+            this.spawnImpactDebris(buildingPos.add(new Vector3(0, 20, 0)), speed * 0.3, broken * 2);
+          }
+        }
+      }
+    }
   }
 
   /**

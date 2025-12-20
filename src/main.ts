@@ -166,6 +166,18 @@ class Game {
       this.player.getCurrentSpeed()
     );
 
+    // Apply supersonic wake damage to nearby buildings
+    const playerSpeed = this.player.getCurrentSpeed();
+    if (playerSpeed > 120) {
+      const buildings = this.city.getBuildings();
+      this.buildingDamage.applySupersonicWakeDamage(
+        this.player.getPosition(),
+        this.player.getVelocity(),
+        playerSpeed,
+        buildings
+      );
+    }
+
     // Update building damage (debris physics)
     this.buildingDamage.update(deltaTime);
 
