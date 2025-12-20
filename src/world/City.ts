@@ -19,8 +19,9 @@ const UNLOAD_DISTANCE = 4;  // Unload chunks sooner to save memory
 const CHUNKS_PER_FRAME = 2;  // Reduced chunks per frame for smoother performance
 
 // LOD culling constants
-const LOD_FADE_START_DISTANCE = 2;  // Start fading buildings at this chunk distance
-const LOD_FADE_END_DISTANCE = 3;    // Fully faded at this chunk distance
+const LOD_FADE_START_DISTANCE = 1;  // Start fading buildings at chunk distance 1
+const LOD_FADE_END_DISTANCE = 3;    // Fully faded at chunk distance 3
+const LOD_MIN_VISIBILITY = 0.2;     // Minimum visibility for distant buildings
 
 // Performance logging
 const ENABLE_CITY_PERF_LOGGING = true;
@@ -30,10 +31,10 @@ const CITY_PERF_LOG_INTERVAL = 2000;  // Log every 2 seconds
 const SIDEWALK_HEIGHT = 0.15;
 const MIN_BUILDING_HEIGHT = 35;
 const MAX_BUILDING_HEIGHT = 140;
-const MIN_BUILDING_WIDTH = 10;
-const MAX_BUILDING_WIDTH = 30;
-const BUILDING_SPACING = 6;  // Tighter spacing for dense city
-const BUILDINGS_PER_CHUNK = 16; // More buildings per chunk
+const MIN_BUILDING_WIDTH = 8;   // Smaller min for more buildings
+const MAX_BUILDING_WIDTH = 25;  // Smaller max for tighter packing
+const BUILDING_SPACING = 4;     // Tighter spacing for denser city
+const BUILDINGS_PER_CHUNK = 24; // More buildings per chunk for density
 
 // Building style types
 enum BuildingStyle {
@@ -293,15 +294,15 @@ export class City {
       const dz = Math.abs(chunk.chunkZ - playerChunkZ);
       const chunkDistance = Math.max(dx, dz);
 
-      // Calculate LOD visibility based on distance
+      // Calculate LOD visibility based on distance (smooth fade from 1.0 to LOD_MIN_VISIBILITY)
       let lodVisibility = 1.0;
       if (chunkDistance >= LOD_FADE_END_DISTANCE) {
-        lodVisibility = 0.3;  // Very faded at far distance
+        lodVisibility = LOD_MIN_VISIBILITY;  // Minimum visibility at far distance
       } else if (chunkDistance >= LOD_FADE_START_DISTANCE) {
-        // Linear fade between start and end distance
-        const fadeProgress = (chunkDistance - LOD_FADE_START_DISTANCE) /
-                            (LOD_FADE_END_DISTANCE - LOD_FADE_START_DISTANCE);
-        lodVisibility = 1.0 - (fadeProgress * 0.7);  // Fade from 1.0 to 0.3
+        // Smooth fade between start and end distance
+        const fadeRange = LOD_FADE_END_DISTANCE - LOD_FADE_START_DISTANCE;
+        const fadeProgress = (chunkDistance - LOD_FADE_START_DISTANCE) / fadeRange;
+        lodVisibility = 1.0 - (fadeProgress * (1.0 - LOD_MIN_VISIBILITY));
       }
 
       // Smooth fade-in for buildings combined with LOD visibility
