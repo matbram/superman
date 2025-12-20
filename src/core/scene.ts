@@ -32,7 +32,7 @@ export function createScene(engine: Engine): SceneContext {
 
   // Enable fog for depth perception and speed sensation
   scene.fogMode = Scene.FOGMODE_EXP2;
-  scene.fogDensity = 0.0008;
+  scene.fogDensity = 0.0015;  // Increased fog density to mask reduced render distance
   scene.fogColor = new Color3(0.6, 0.7, 0.9);
 
   // Create ambient light (hemisphere light)
@@ -62,7 +62,7 @@ export function createScene(engine: Engine): SceneContext {
   // Create main camera (will be controlled by CameraController)
   const camera = new FreeCamera('mainCamera', new Vector3(0, 10, -20), scene);
   camera.minZ = 0.5;  // Increased to reduce z-fighting
-  camera.maxZ = 2000;
+  camera.maxZ = 1000;  // Reduced render distance for better performance
   camera.fov = 1.0;
 
   // Create procedural sky gradient

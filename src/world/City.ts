@@ -14,9 +14,13 @@ import { PhysicsManager, createCollisionBox } from '../physics/physics';
 
 // Chunk and city generation constants
 const CHUNK_SIZE = 200; // Larger chunks = fewer total chunks
-const LOAD_RADIUS = 4;  // Load chunks much further out for seamless generation
-const UNLOAD_DISTANCE = 6;  // Keep chunks loaded longer
-const CHUNKS_PER_FRAME = 3;  // Generate multiple chunks per frame when needed
+const LOAD_RADIUS = 3;  // Reduced load radius for better performance with lower render distance
+const UNLOAD_DISTANCE = 4;  // Unload chunks sooner to save memory
+const CHUNKS_PER_FRAME = 2;  // Reduced chunks per frame for smoother performance
+
+// LOD culling constants
+const LOD_FADE_START_DISTANCE = 2;  // Start fading buildings at this chunk distance
+const LOD_FADE_END_DISTANCE = 3;    // Fully faded at this chunk distance
 
 // Performance logging
 const ENABLE_CITY_PERF_LOGGING = true;
@@ -282,31 +286,50 @@ export class City {
       }
     }
 
-    // Update fade-in for chunks and unload distant ones
+    // Update fade-in for chunks, apply LOD culling, and unload distant ones
     const now = performance.now();
     for (const [key, chunk] of this.chunks.entries()) {
       const dx = Math.abs(chunk.chunkX - playerChunkX);
       const dz = Math.abs(chunk.chunkZ - playerChunkZ);
+      const chunkDistance = Math.max(dx, dz);
 
-      // Smooth fade-in for buildings
+      // Calculate LOD visibility based on distance
+      let lodVisibility = 1.0;
+      if (chunkDistance >= LOD_FADE_END_DISTANCE) {
+        lodVisibility = 0.3;  // Very faded at far distance
+      } else if (chunkDistance >= LOD_FADE_START_DISTANCE) {
+        // Linear fade between start and end distance
+        const fadeProgress = (chunkDistance - LOD_FADE_START_DISTANCE) /
+                            (LOD_FADE_END_DISTANCE - LOD_FADE_START_DISTANCE);
+        lodVisibility = 1.0 - (fadeProgress * 0.7);  // Fade from 1.0 to 0.3
+      }
+
+      // Smooth fade-in for buildings combined with LOD visibility
       if (!chunk.fullyVisible) {
         chunk.fadeProgress = Math.min(1, chunk.fadeProgress + 0.03);  // Fade in over ~33 frames
 
-        // Apply visibility to all building meshes
+        // Apply visibility to all building meshes (fade-in * LOD visibility)
         for (const mesh of chunk.collisionMeshes) {
           if (mesh.name.startsWith('building_')) {
-            mesh.visibility = chunk.fadeProgress;
+            mesh.visibility = chunk.fadeProgress * lodVisibility;
           }
         }
 
         if (chunk.fadeProgress >= 1) {
           chunk.fullyVisible = true;
         }
+      } else {
+        // Apply LOD visibility to fully loaded chunks
+        for (const mesh of chunk.collisionMeshes) {
+          if (mesh.name.startsWith('building_')) {
+            mesh.visibility = lodVisibility;
+          }
+        }
       }
 
       // Unload distant chunks
       if (dx > UNLOAD_DISTANCE || dz > UNLOAD_DISTANCE) {
-        if (now - chunk.lastAccess > 5000) {  // Longer delay before unloading
+        if (now - chunk.lastAccess > 3000) {  // Faster unloading for reduced memory
           this.unloadChunk(key);
         }
       }
