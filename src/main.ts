@@ -43,7 +43,6 @@ class Game {
 
   // Lock-on system
   private isLockedOn: boolean = false;
-  private lockOnRange: number = 300;  // Max lock-on distance
 
   private isRunning: boolean = false;
   private instructionsElement: HTMLElement;
@@ -111,7 +110,7 @@ class Game {
     // Initialize enemy AI
     this.enemy = new Enemy(
       this.sceneContext.scene,
-      new Vector3(150, 80, 150)  // Spawn away from player
+      new Vector3(10, 5, 10)  // Spawn right next to player
     );
 
     // Connect enemy attacks to building damage
@@ -236,11 +235,8 @@ class Game {
         this.isLockedOn = false;
         this.enemy.setTargeted(false);
       } else {
-        // Try to lock on if enemy is in range and alive
-        const playerPos = this.player.getPosition();
-        const enemyPos = this.enemy.getPosition();
-        const distance = Vector3.Distance(playerPos, enemyPos);
-        if (distance <= this.lockOnRange && this.enemy.isAlive()) {
+        // Try to lock on if enemy is alive (no distance limit)
+        if (this.enemy.isAlive()) {
           this.isLockedOn = true;
           this.enemy.setTargeted(true);
         }
@@ -313,16 +309,9 @@ class Game {
     const buildings = this.city.getBuildings();
     this.enemy.update(deltaTime, playerPos, buildings);
 
-    // If locked on, pass lock-on info to camera and check heat vision damage
+    // If locked on, check heat vision damage
     if (this.isLockedOn && this.enemy.isAlive()) {
-      // Check if enemy went out of range
-      const enemyPos = this.enemy.getPosition();
-      const distToEnemy = Vector3.Distance(playerPos, enemyPos);
-      if (distToEnemy > this.lockOnRange * 1.5) {
-        // Auto-release lock-on if too far
-        this.isLockedOn = false;
-        this.enemy.setTargeted(false);
-      } else if (input.heatVisionHeld) {
+      if (input.heatVisionHeld) {
         // Damage enemy with heat vision when locked on
         const heatVisionDamage = 30 * deltaTime;  // DPS when using heat vision
         this.enemy.takeDamage(heatVisionDamage);

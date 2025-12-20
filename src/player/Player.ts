@@ -317,18 +317,18 @@ export class Player {
    * Creates a shockwave ring mesh for visual effect
    */
   private createShockwaveRing(): Mesh {
-    // Create a torus (ring) for the shockwave
+    // Create a much larger, more dramatic torus for the shockwave
     const ring = MeshBuilder.CreateTorus('shockwave', {
-      diameter: 2,
-      thickness: 0.15,
-      tessellation: 32,
+      diameter: 12,
+      thickness: 0.8,
+      tessellation: 48,
     }, this.scene);
 
     const material = new StandardMaterial('shockwaveMat', this.scene);
-    material.diffuseColor = new Color3(0.8, 0.9, 1);
-    material.emissiveColor = new Color3(0.5, 0.7, 1);
+    material.diffuseColor = new Color3(0.9, 0.95, 1);
+    material.emissiveColor = new Color3(0.7, 0.85, 1);
     material.specularColor = new Color3(1, 1, 1);
-    material.alpha = 0.8;
+    material.alpha = 0.9;
 
     ring.material = material;
     ring.isPickable = false;
@@ -345,31 +345,40 @@ export class Player {
     ring.position.copyFrom(this.physics.position);
     ring.rotation.x = Math.PI / 2; // Lay flat perpendicular to flight direction
     ring.rotation.y = this.yaw;
-    ring.scaling = new Vector3(1, 1, 1);
+    ring.scaling = new Vector3(2, 2, 2);
     ring.visibility = 1;
 
     this.shockwaveRings.push(ring);
 
-    // Add camera shake for impact
-    this.cameraController.addShake(1.5);
+    // Spawn a second ring slightly delayed for dramatic layered effect
+    const ring2 = this.createShockwaveRing();
+    ring2.position.copyFrom(this.physics.position);
+    ring2.rotation.x = Math.PI / 2;
+    ring2.rotation.y = this.yaw;
+    ring2.scaling = new Vector3(1.5, 1.5, 1.5);
+    ring2.visibility = 0.8;
+    this.shockwaveRings.push(ring2);
+
+    // Add strong camera shake for impact
+    this.cameraController.addShake(2.5);
   }
 
   /**
-   * Creates a destructive stop shockwave ring (red/orange, larger)
+   * Creates a destructive stop shockwave ring (larger, more dramatic)
    */
   private createStopShockwaveRing(): Mesh {
     const ring = MeshBuilder.CreateTorus('stopShockwave', {
-      diameter: 5,
-      thickness: 0.4,
-      tessellation: 48,
+      diameter: 18,
+      thickness: 1.2,
+      tessellation: 64,
     }, this.scene);
 
     const material = new StandardMaterial('stopShockwaveMat', this.scene);
-    // Use same blue/white colors as normal shockwave for consistency
-    material.diffuseColor = new Color3(0.8, 0.9, 1);
-    material.emissiveColor = new Color3(0.5, 0.7, 1);
+    // Bright blue/white for dramatic effect
+    material.diffuseColor = new Color3(0.9, 0.95, 1);
+    material.emissiveColor = new Color3(0.7, 0.85, 1);
     material.specularColor = new Color3(1, 1, 1);
-    material.alpha = 0.85;
+    material.alpha = 0.95;
 
     ring.material = material;
     ring.isPickable = false;
@@ -382,19 +391,19 @@ export class Player {
    * Spawns a destructive stop shockwave when abruptly stopping from high speed
    */
   private spawnStopShockwave(previousSpeed: number): void {
-    // Create multiple expanding rings for dramatic effect
-    for (let i = 0; i < 3; i++) {
+    // Create multiple expanding rings for very dramatic effect
+    for (let i = 0; i < 5; i++) {
       const ring = this.createStopShockwaveRing();
       ring.position.copyFrom(this.physics.position);
       ring.rotation.x = Math.PI / 2;
-      ring.scaling = new Vector3(1 + i * 0.5, 1 + i * 0.5, 1 + i * 0.5);
-      ring.visibility = 1;
+      ring.scaling = new Vector3(1.5 + i * 0.8, 1.5 + i * 0.8, 1.5 + i * 0.8);
+      ring.visibility = 1 - i * 0.1;
 
       this.shockwaveRings.push(ring);
     }
 
-    // Intense camera shake
-    const shakeIntensity = Math.min(5, previousSpeed / 30);
+    // Intense camera shake - bigger effect
+    const shakeIntensity = Math.min(8, previousSpeed / 20);
     this.cameraController.addShake(shakeIntensity);
 
     // Trigger building damage in radius
@@ -469,12 +478,13 @@ export class Player {
     for (let i = this.shockwaveRings.length - 1; i >= 0; i--) {
       const mesh = this.shockwaveRings[i];
 
-      // Different expand/fade speeds for different effect types
+      // Different expand/fade speeds for different effect types - MUCH faster and dramatic
       const isDistortionSphere = mesh.name.includes('distortion');
-      const expandSpeed = isDistortionSphere ? 40 : 15;
-      const fadeSpeed = isDistortionSphere ? 2 : 3;
+      const isStopShockwave = mesh.name.includes('stop');
+      const expandSpeed = isDistortionSphere ? 80 : (isStopShockwave ? 60 : 45);
+      const fadeSpeed = isDistortionSphere ? 2.5 : 2;
 
-      // Expand the mesh
+      // Expand the mesh rapidly
       mesh.scaling.x += expandSpeed * deltaTime;
       mesh.scaling.y += expandSpeed * deltaTime;
       mesh.scaling.z += expandSpeed * deltaTime;
