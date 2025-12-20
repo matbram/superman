@@ -18,9 +18,10 @@ const CLOUD_RENDER_DISTANCE = 700;
 const NUM_CLOUD_CLUSTERS = 25; // Reduced for performance
 
 // Cloud dispersion constants
-const CLOUD_DISPERSE_RADIUS = 30; // How close player needs to be to disperse clouds
-const CLOUD_DISPERSE_SPEED = 80; // How fast clouds push away
-const CLOUD_RECOVER_SPEED = 15; // How fast clouds return to normal
+const CLOUD_DISPERSE_RADIUS = 40; // How close player needs to be to disperse clouds
+const CLOUD_DISPERSE_SPEED = 120; // How fast clouds push away
+const CLOUD_RECOVER_SPEED = 8; // How fast clouds return to normal (slower = more dramatic)
+const CLOUD_SCATTER_VARIANCE = 0.6; // How much individual puffs scatter in random directions
 
 /**
  * Individual cloud puff with its own properties
@@ -31,10 +32,12 @@ interface CloudPuff {
   phase: number;
   bobSpeed: number;
   bobAmount: number;
-  // Dispersion state
+  // Dispersion state - each puff has its own scatter behavior
   disperseOffset: Vector3;
   disperseScale: number;
   originalScale: Vector3;
+  scatterDirection: Vector3;  // Random unique scatter direction for this puff
+  disperseVelocity: Vector3;  // Current velocity for momentum-based movement
 }
 
 /**
@@ -257,6 +260,12 @@ export class Atmosphere {
         disperseOffset: Vector3.Zero(),
         disperseScale: 1,
         originalScale: new Vector3(scaleX, scaleY, scaleZ),
+        scatterDirection: new Vector3(
+          (Math.random() - 0.5) * 2,
+          (Math.random() - 0.3),  // Bias upward slightly
+          (Math.random() - 0.5) * 2
+        ).normalize(),
+        disperseVelocity: Vector3.Zero(),
       });
     }
 
@@ -292,6 +301,12 @@ export class Atmosphere {
         disperseOffset: Vector3.Zero(),
         disperseScale: 1,
         originalScale: new Vector3(scaleX, scaleY, scaleZ),
+        scatterDirection: new Vector3(
+          (Math.random() - 0.5) * 2,
+          (Math.random() - 0.3),
+          (Math.random() - 0.5) * 2
+        ).normalize(),
+        disperseVelocity: Vector3.Zero(),
       });
     }
 
@@ -353,25 +368,48 @@ export class Atmosphere {
 
         if (dist < CLOUD_DISPERSE_RADIUS && speed > 30) {
           // Player is flying through this cloud puff - disperse it!
-          const disperseStrength = (1 - dist / CLOUD_DISPERSE_RADIUS) * (speed / 100);
+          const disperseStrength = (1 - dist / CLOUD_DISPERSE_RADIUS) * (speed / 80);
 
-          // Push cloud away from player in direction player is moving
+          // Main push direction: away from player
           const pushDir = new Vector3(dx, dy, dz).normalize();
-          // Also add component in player's velocity direction
+
+          // Add player's velocity direction for wake effect
           if (velocity.length() > 1) {
             const velDir = velocity.normalize();
-            pushDir.addInPlace(velDir.scale(0.5));
-            pushDir.normalize();
+            pushDir.addInPlace(velDir.scale(0.7));
           }
 
-          puff.disperseOffset.addInPlace(pushDir.scale(CLOUD_DISPERSE_SPEED * disperseStrength * deltaTime));
+          // Add this puff's unique scatter direction for breakpoint effect
+          // Each puff scatters in a different direction!
+          pushDir.addInPlace(puff.scatterDirection.scale(CLOUD_SCATTER_VARIANCE));
+          pushDir.normalize();
 
-          // Shrink the cloud as it disperses
-          puff.disperseScale = Math.max(0.3, puff.disperseScale - disperseStrength * 2 * deltaTime);
+          // Apply force to velocity (momentum-based movement)
+          const force = pushDir.scale(CLOUD_DISPERSE_SPEED * disperseStrength * deltaTime);
+          puff.disperseVelocity.addInPlace(force);
+
+          // Shrink the cloud as it disperses - each puff shrinks differently
+          const shrinkRate = (1.5 + puff.scatterDirection.y) * disperseStrength * deltaTime;
+          puff.disperseScale = Math.max(0.2, puff.disperseScale - shrinkRate);
         } else {
-          // Recover: slowly return to original position and scale
-          puff.disperseOffset.scaleInPlace(1 - CLOUD_RECOVER_SPEED * deltaTime * 0.1);
-          puff.disperseScale = Math.min(1, puff.disperseScale + CLOUD_RECOVER_SPEED * deltaTime * 0.05);
+          // Apply drag to velocity
+          puff.disperseVelocity.scaleInPlace(1 - 3 * deltaTime);
+
+          // Recover: slowly return to original scale
+          puff.disperseScale = Math.min(1, puff.disperseScale + CLOUD_RECOVER_SPEED * deltaTime * 0.03);
+
+          // Pull back to original position (spring force)
+          const returnForce = puff.disperseOffset.scale(-CLOUD_RECOVER_SPEED * deltaTime * 0.02);
+          puff.disperseVelocity.addInPlace(returnForce);
+        }
+
+        // Apply velocity to offset (momentum)
+        puff.disperseOffset.addInPlace(puff.disperseVelocity.scale(deltaTime));
+
+        // Limit max offset
+        const maxOffset = 60;
+        if (puff.disperseOffset.length() > maxOffset) {
+          puff.disperseOffset.normalize().scaleInPlace(maxOffset);
         }
 
         // Apply position with dispersion offset
@@ -402,6 +440,7 @@ export class Atmosphere {
         for (const puff of cluster.puffs) {
           puff.mesh.position = cluster.basePosition.add(puff.localOffset);
           puff.disperseOffset = Vector3.Zero();
+          puff.disperseVelocity = Vector3.Zero();
           puff.disperseScale = 1;
         }
       }

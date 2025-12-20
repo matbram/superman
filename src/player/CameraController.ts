@@ -11,7 +11,9 @@ import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera';
 const GROUND_CAMERA_DISTANCE = 8;
 const GROUND_CAMERA_HEIGHT = 3;
 const FLIGHT_CAMERA_DISTANCE = 12;
+const FLIGHT_CAMERA_DISTANCE_FAST = 6;  // Closer camera at high speed
 const FLIGHT_CAMERA_HEIGHT = 2;
+const FAST_FLIGHT_SPEED_THRESHOLD = 80;  // Speed at which camera gets closer
 
 const BASE_FOV = 1.0; // ~57 degrees
 const MAX_FOV = 1.4; // ~80 degrees at max speed
@@ -120,7 +122,14 @@ export class CameraController {
    */
   public update(deltaTime: number): void {
     // Calculate target camera parameters based on mode
-    const targetDistance = this.isFlightMode ? FLIGHT_CAMERA_DISTANCE : GROUND_CAMERA_DISTANCE;
+    // At high flight speed, bring camera closer to see the character better
+    let targetDistance: number;
+    if (this.isFlightMode) {
+      const speedFactor = Math.min(1, Math.max(0, (this.speed - FAST_FLIGHT_SPEED_THRESHOLD) / 70));
+      targetDistance = FLIGHT_CAMERA_DISTANCE - (FLIGHT_CAMERA_DISTANCE - FLIGHT_CAMERA_DISTANCE_FAST) * speedFactor;
+    } else {
+      targetDistance = GROUND_CAMERA_DISTANCE;
+    }
     const targetHeight = this.isFlightMode ? FLIGHT_CAMERA_HEIGHT : GROUND_CAMERA_HEIGHT;
 
     // Smooth transition between modes
