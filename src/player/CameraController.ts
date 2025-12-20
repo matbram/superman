@@ -7,25 +7,26 @@
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera';
 
-// Camera configuration
-const GROUND_CAMERA_DISTANCE = 8;
-const GROUND_CAMERA_HEIGHT = 3;
-const FLIGHT_CAMERA_DISTANCE = 12;
-const FLIGHT_CAMERA_DISTANCE_FAST = 6;  // Closer camera at high speed
-const FLIGHT_CAMERA_HEIGHT = 2;
-const FAST_FLIGHT_SPEED_THRESHOLD = 80;  // Speed at which camera gets closer
+// Camera configuration - tighter and more responsive
+const GROUND_CAMERA_DISTANCE = 7;
+const GROUND_CAMERA_HEIGHT = 2.5;
+const FLIGHT_CAMERA_DISTANCE = 10;
+const FLIGHT_CAMERA_DISTANCE_FAST = 5;  // Closer camera at high speed
+const FLIGHT_CAMERA_HEIGHT = 1.5;
+const FAST_FLIGHT_SPEED_THRESHOLD = 70;  // Speed at which camera gets closer
 
 const BASE_FOV = 1.0; // ~57 degrees
-const MAX_FOV = 1.4; // ~80 degrees at max speed
-const FOV_SPEED_SCALE = 150; // Speed at which max FOV is reached
+const MAX_FOV = 1.35; // ~77 degrees at max speed
+const FOV_SPEED_SCALE = 120; // Speed at which max FOV is reached
 
-const CAMERA_SPRING_STIFFNESS = 8;
-const CAMERA_SPRING_DAMPING = 4;
-const CAMERA_LAG_FACTOR = 0.15; // How much camera lags behind at speed
+// Tighter spring physics for more responsive camera
+const CAMERA_SPRING_STIFFNESS = 14;  // Increased from 8 for snappier response
+const CAMERA_SPRING_DAMPING = 6;     // Increased from 4 for less wobble
+const CAMERA_LAG_FACTOR = 0.08;      // Reduced from 0.15 for tighter follow
 
 // Camera orbit limits
-const MIN_PITCH = -Math.PI * 0.4; // Looking down
-const MAX_PITCH = Math.PI * 0.3; // Looking up
+const MIN_PITCH = -Math.PI * 0.45; // Looking down (more range)
+const MAX_PITCH = Math.PI * 0.35;  // Looking up (more range)
 
 export class CameraController {
   private camera: FreeCamera;
@@ -132,17 +133,17 @@ export class CameraController {
     }
     const targetHeight = this.isFlightMode ? FLIGHT_CAMERA_HEIGHT : GROUND_CAMERA_HEIGHT;
 
-    // Smooth transition between modes
-    this.currentDistance = this.lerp(this.currentDistance, targetDistance, 3 * deltaTime);
-    this.currentHeight = this.lerp(this.currentHeight, targetHeight, 3 * deltaTime);
+    // Smooth transition between modes - faster for tighter response
+    this.currentDistance = this.lerp(this.currentDistance, targetDistance, 6 * deltaTime);
+    this.currentHeight = this.lerp(this.currentHeight, targetHeight, 6 * deltaTime);
 
     // Update flight stop effect
     this.updateFlightStopEffect(deltaTime);
 
-    // Update FOV based on speed + flight stop effect
+    // Update FOV based on speed + flight stop effect - faster transitions
     const speedRatio = Math.min(1, this.speed / FOV_SPEED_SCALE);
     const targetFOV = BASE_FOV + (MAX_FOV - BASE_FOV) * speedRatio * speedRatio + this.flightStopFOVBoost;
-    this.currentFOV = this.lerp(this.currentFOV, targetFOV, 5 * deltaTime);
+    this.currentFOV = this.lerp(this.currentFOV, targetFOV, 8 * deltaTime);
     this.camera.fov = this.currentFOV;
 
     // Calculate camera lag based on speed (camera trails behind more at high speed)

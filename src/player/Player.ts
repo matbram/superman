@@ -712,6 +712,13 @@ export class Player {
     this.cameraController.rotatePitch(delta);
   }
 
+  /**
+   * Adds camera shake - can be called externally for effects like building destruction
+   */
+  public addCameraShake(intensity: number): void {
+    this.cameraController.addShake(intensity);
+  }
+
   public isGrounded(): boolean {
     return this.physics.isGrounded;
   }

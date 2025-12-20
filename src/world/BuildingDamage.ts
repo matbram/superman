@@ -109,9 +109,28 @@ export class BuildingDamage {
   private frameCount: number = 0;
   private totalUpdateTime: number = 0;
 
+  // Camera shake callback for immersive destruction
+  private onCameraShake: ((intensity: number) => void) | null = null;
+
   constructor(scene: Scene) {
     this.scene = scene;
     this.createDebrisMaterials();
+  }
+
+  /**
+   * Sets the camera shake callback for immersive destruction effects
+   */
+  public setOnCameraShake(callback: (intensity: number) => void): void {
+    this.onCameraShake = callback;
+  }
+
+  /**
+   * Triggers camera shake with given intensity (0-1 scale)
+   */
+  private triggerCameraShake(intensity: number): void {
+    if (this.onCameraShake) {
+      this.onCameraShake(Math.min(1, intensity));
+    }
   }
 
   /**
@@ -292,6 +311,9 @@ export class BuildingDamage {
     }
 
     this.spawnImpactDebris(impactPosition, speed, 15);
+
+    // Camera shake for heavy damage - moderate intensity
+    this.triggerCameraShake(0.5);
   }
 
   /**
@@ -336,6 +358,9 @@ export class BuildingDamage {
     // Initial dust cloud at impact - bigger and longer lasting
     this.spawnDustCloud(impactPosition, 8, 2);
     this.spawnDustCloud(impactPosition.add(new Vector3(0, height * 0.3, 0)), 6, 1.5);
+
+    // Strong camera shake for full building destruction
+    this.triggerCameraShake(0.8);
 
     this.buildingStructures.delete(structure.mesh);
   }
@@ -775,6 +800,9 @@ export class BuildingDamage {
           // Final debris burst - reduced
           this.spawnImpactDebris(collapse.mesh.position, 30, 12);
           collapse.dustSpawned = true;
+
+          // Big camera shake when building hits the ground!
+          this.triggerCameraShake(1.0);
         }
 
         // Scale down and sink into ground

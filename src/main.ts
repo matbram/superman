@@ -127,6 +127,12 @@ class Game {
       this.buildingDamage.applyImpactDamage(building, position, damage);
     });
 
+    // Connect building damage camera shake to player camera
+    this.buildingDamage.setOnCameraShake((intensity) => {
+      // Scale shake based on intensity (0-1), multiply by base shake amount
+      this.player.addCameraShake(intensity * 3);
+    });
+
     // Initialize UI
     this.hud = new Hud();
     this.debugOverlay = new DebugOverlay();
