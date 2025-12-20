@@ -27,7 +27,8 @@ export class GroundedState extends BasePlayerState {
 
   update(player: Player, input: InputState, deltaTime: number): PlayerStateType | null {
     // Check for state transitions
-    if (input.jumpPressed || input.toggleFlightPressed) {
+    // Jump or press RT (fly trigger) to take off
+    if (input.jumpPressed || input.flyTrigger > 0.3) {
       return PlayerStateType.Takeoff;
     }
 

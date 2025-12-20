@@ -167,11 +167,11 @@ class Game {
     if (Math.abs(input.moveX) > 0.1 || Math.abs(input.moveY) > 0.1) {
       parts.push(`Move: ${input.moveX.toFixed(1)},${input.moveY.toFixed(1)}`);
     }
-    if (input.throttle > 0.1) {
-      parts.push(`Throttle: ${input.throttle.toFixed(1)}`);
+    if (input.flyTrigger > 0.1) {
+      parts.push(`Fly: ${input.flyTrigger.toFixed(1)}`);
     }
-    if (input.brake > 0.1) {
-      parts.push(`Brake: ${input.brake.toFixed(1)}`);
+    if (input.descendTrigger > 0.1) {
+      parts.push(`Descend: ${input.descendTrigger.toFixed(1)}`);
     }
     if (input.boostHeld) {
       parts.push('BOOST');

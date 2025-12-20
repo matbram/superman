@@ -77,16 +77,17 @@ export class FlightState extends BasePlayerState {
   }
 
   private checkTransitions(player: Player, input: InputState): PlayerStateType | null {
-    // Land if pressing toggle flight near ground and moving slowly
-    if (input.toggleFlightPressed) {
+    // Land if pressing LT (descend) near ground and moving slowly
+    if (input.descendTrigger > 0.5) {
       const height = player.getHeightAboveGround();
       if (height < LANDING_HEIGHT * 2 && this.currentSpeed < 20) {
         return PlayerStateType.Landing;
       }
     }
 
-    // Transition to hover if very slow and no throttle
-    if (this.currentSpeed < HOVER_TRANSITION_SPEED && input.throttle < 0.1 && input.moveY <= 0) {
+    // Transition to hover if very slow and no fly trigger - this is the key behavior:
+    // Releasing RT should transition to hover, not continue flying
+    if (this.currentSpeed < HOVER_TRANSITION_SPEED && input.flyTrigger < 0.1) {
       return PlayerStateType.Hover;
     }
 
@@ -136,18 +137,17 @@ export class FlightState extends BasePlayerState {
     const maxSpeed = this.isBoosting ? BOOST_MAX_SPEED : BASE_MAX_SPEED;
     const acceleration = this.isBoosting ? BOOST_ACCELERATION : BASE_ACCELERATION;
 
-    // Throttle input accelerates
-    if (input.throttle > 0.1 || input.moveY > 0.1) {
-      const throttleAmount = Math.max(input.throttle, input.moveY > 0 ? input.moveY : 0);
-      this.targetSpeed = maxSpeed * throttleAmount;
+    // RT (flyTrigger) controls acceleration - analog input for gradual speed control
+    if (input.flyTrigger > 0.1) {
+      this.targetSpeed = maxSpeed * input.flyTrigger;
     } else {
-      // Natural deceleration when no input
+      // No fly trigger = decelerate to hover
       this.targetSpeed = 0;
     }
 
-    // Brake input
-    if (input.brake > 0.1) {
-      this.currentSpeed -= BRAKE_DECELERATION * input.brake * deltaTime;
+    // LT (descendTrigger) acts as brake in flight
+    if (input.descendTrigger > 0.1) {
+      this.currentSpeed -= BRAKE_DECELERATION * input.descendTrigger * deltaTime;
       this.currentSpeed = Math.max(0, this.currentSpeed);
     } else if (this.currentSpeed < this.targetSpeed) {
       // Accelerating

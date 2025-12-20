@@ -17,25 +17,25 @@ const CITY_BLOCKS_X = 3;
 const CITY_BLOCKS_Z = 3;
 const BLOCK_SIZE = 60; // meters
 const STREET_WIDTH = 15; // meters
-const SIDEWALK_WIDTH = 3; // meters
-const SIDEWALK_HEIGHT = 0.2; // meters
+const SIDEWALK_WIDTH = 3; // meters (for building offset)
+const SIDEWALK_HEIGHT = 0.15; // meters
 
 // Building size ranges
-const MIN_BUILDING_HEIGHT = 15;
+const MIN_BUILDING_HEIGHT = 20;
 const MAX_BUILDING_HEIGHT = 80;
-const MIN_BUILDING_WIDTH = 10;
+const MIN_BUILDING_WIDTH = 12;
 const MAX_BUILDING_WIDTH = 25;
-const BUILDING_SPACING = 5;
+const BUILDING_SPACING = 8;
 
 // Colors
-const ROAD_COLOR = new Color3(0.15, 0.15, 0.15);
-const SIDEWALK_COLOR = new Color3(0.5, 0.5, 0.5);
+const ROAD_COLOR = new Color3(0.2, 0.2, 0.2);
+const SIDEWALK_COLOR = new Color3(0.55, 0.55, 0.55);
 const BUILDING_COLORS = [
-  new Color3(0.6, 0.6, 0.65),   // Gray
-  new Color3(0.55, 0.5, 0.45),  // Tan
-  new Color3(0.4, 0.45, 0.5),   // Blue-gray
-  new Color3(0.5, 0.4, 0.35),   // Brown
-  new Color3(0.65, 0.6, 0.55),  // Light gray
+  new Color3(0.7, 0.7, 0.75),   // Light Gray
+  new Color3(0.6, 0.55, 0.5),   // Tan
+  new Color3(0.5, 0.55, 0.6),   // Blue-gray
+  new Color3(0.55, 0.45, 0.4),  // Brown
+  new Color3(0.75, 0.7, 0.65),  // Off-white
 ];
 
 /**
@@ -76,7 +76,6 @@ export class City {
   private random: SeededRandom;
 
   private buildings: Mesh[] = [];
-  private roads: Mesh[] = [];
   private sidewalks: Mesh[] = [];
 
   constructor(
@@ -102,32 +101,58 @@ export class City {
     const offsetX = -totalWidth / 2;
     const offsetZ = -totalDepth / 2;
 
+    // Create unified ground first (prevents z-fighting)
+    this.createUnifiedGround(totalWidth, totalDepth);
+
     // Create road material
     const roadMaterial = new StandardMaterial('roadMaterial', this.scene);
     roadMaterial.diffuseColor = ROAD_COLOR;
-    roadMaterial.specularColor = new Color3(0.1, 0.1, 0.1);
+    roadMaterial.specularColor = new Color3(0.05, 0.05, 0.05);
 
     // Create sidewalk material
     const sidewalkMaterial = new StandardMaterial('sidewalkMaterial', this.scene);
     sidewalkMaterial.diffuseColor = SIDEWALK_COLOR;
-    sidewalkMaterial.specularColor = new Color3(0.2, 0.2, 0.2);
+    sidewalkMaterial.specularColor = new Color3(0.1, 0.1, 0.1);
 
-    // Generate grid of blocks
+    // Generate grid of blocks with sidewalks
     for (let bx = 0; bx < CITY_BLOCKS_X; bx++) {
       for (let bz = 0; bz < CITY_BLOCKS_Z; bz++) {
         const blockX = offsetX + bx * (BLOCK_SIZE + STREET_WIDTH) + BLOCK_SIZE / 2;
         const blockZ = offsetZ + bz * (BLOCK_SIZE + STREET_WIDTH) + BLOCK_SIZE / 2;
+
+        // Create sidewalk for this block
+        this.createSidewalk(blockX, blockZ, BLOCK_SIZE, sidewalkMaterial);
 
         // Generate buildings in this block
         this.generateBlock(blockX, blockZ);
       }
     }
 
-    // Generate streets
-    this.generateStreets(offsetX, offsetZ, totalWidth, totalDepth, roadMaterial, sidewalkMaterial);
+    // Add road markings (no overlapping surfaces)
+    this.addRoadMarkings(offsetX, offsetZ, totalWidth, totalDepth);
+  }
 
-    // Generate perimeter ground
-    this.generatePerimeterGround(totalWidth, totalDepth);
+  /**
+   * Creates unified ground plane (no overlapping surfaces)
+   */
+  private createUnifiedGround(totalWidth: number, totalDepth: number): void {
+    const groundSize = Math.max(totalWidth, totalDepth) + 500;
+
+    const ground = MeshBuilder.CreateGround(
+      'cityGround',
+      { width: groundSize, height: groundSize },
+      this.scene
+    );
+    ground.position.y = 0;
+
+    const groundMaterial = new StandardMaterial('groundMaterial', this.scene);
+    groundMaterial.diffuseColor = new Color3(0.25, 0.35, 0.2); // Grass color
+    groundMaterial.specularColor = new Color3(0.05, 0.05, 0.05);
+
+    ground.material = groundMaterial;
+    ground.receiveShadows = true;
+    ground.isPickable = true;
+    createCollisionBox(ground, this.physicsManager);
   }
 
   /**
@@ -195,12 +220,14 @@ export class City {
       this.scene
     );
 
-    building.position = new Vector3(x, height / 2, z);
+    // Position building so bottom is at sidewalk level
+    building.position = new Vector3(x, height / 2 + SIDEWALK_HEIGHT, z);
 
-    // Random building color
+    // Random building color with slight variation
+    const baseColor = this.random.pick(BUILDING_COLORS);
     const material = new StandardMaterial(`buildingMat_${this.buildings.length}`, this.scene);
-    material.diffuseColor = this.random.pick(BUILDING_COLORS);
-    material.specularColor = new Color3(0.1, 0.1, 0.1);
+    material.diffuseColor = baseColor;
+    material.specularColor = new Color3(0.15, 0.15, 0.15);
     building.material = material;
 
     // Add shadows
@@ -216,9 +243,6 @@ export class City {
     if (height > 40) {
       this.addRooftopDetails(x, z, width, height, depth);
     }
-
-    // Add window details (simple strip pattern)
-    this.addWindowStrips(building, width, height, depth);
   }
 
   /**
@@ -231,7 +255,6 @@ export class City {
     height: number,
     depth: number
   ): void {
-    // Add a smaller structure on top (like AC units or elevator shaft)
     const rooftopWidth = width * 0.3;
     const rooftopDepth = depth * 0.3;
     const rooftopHeight = this.random.range(3, 6);
@@ -242,92 +265,14 @@ export class City {
       this.scene
     );
 
-    rooftop.position = new Vector3(x, height + rooftopHeight / 2, z);
+    rooftop.position = new Vector3(x, height + SIDEWALK_HEIGHT + rooftopHeight / 2, z);
 
     const material = new StandardMaterial(`rooftopMat_${this.buildings.length}`, this.scene);
-    material.diffuseColor = new Color3(0.4, 0.4, 0.4);
+    material.diffuseColor = new Color3(0.35, 0.35, 0.35);
     rooftop.material = material;
 
     this.shadowGenerator.addShadowCaster(rooftop);
     createCollisionBox(rooftop, this.physicsManager);
-  }
-
-  /**
-   * Adds window strip details to building
-   */
-  private addWindowStrips(
-    building: Mesh,
-    width: number,
-    height: number,
-    depth: number
-  ): void {
-    // Create dark strips for windows (simplified)
-    const stripHeight = 1;
-    const floorHeight = 4;
-    const numFloors = Math.floor(height / floorHeight);
-
-    // Only add a few strips to reduce geometry
-    const stripInterval = Math.max(1, Math.floor(numFloors / 5));
-
-    for (let i = 1; i < numFloors; i += stripInterval) {
-      const stripY = i * floorHeight;
-
-      // Front strip
-      const strip = MeshBuilder.CreateBox(
-        `windowStrip_${this.buildings.length}_${i}`,
-        { width: width * 0.9, height: stripHeight, depth: 0.1 },
-        this.scene
-      );
-
-      strip.position = new Vector3(
-        building.position.x,
-        stripY,
-        building.position.z + depth / 2 + 0.05
-      );
-
-      const windowMat = new StandardMaterial(`windowMat_${i}`, this.scene);
-      windowMat.diffuseColor = new Color3(0.2, 0.25, 0.3);
-      windowMat.specularColor = new Color3(0.3, 0.3, 0.4);
-      strip.material = windowMat;
-
-      strip.parent = building;
-    }
-  }
-
-  /**
-   * Generates the street grid
-   */
-  private generateStreets(
-    offsetX: number,
-    offsetZ: number,
-    totalWidth: number,
-    totalDepth: number,
-    roadMaterial: StandardMaterial,
-    sidewalkMaterial: StandardMaterial
-  ): void {
-    // Create main road plane covering entire city
-    const mainRoad = MeshBuilder.CreateGround(
-      'mainRoad',
-      { width: totalWidth + STREET_WIDTH * 2, height: totalDepth + STREET_WIDTH * 2 },
-      this.scene
-    );
-    mainRoad.position = new Vector3(0, 0.01, 0); // Slightly above ground
-    mainRoad.material = roadMaterial;
-    mainRoad.receiveShadows = true;
-    this.roads.push(mainRoad);
-
-    // Create sidewalks around each block
-    for (let bx = 0; bx < CITY_BLOCKS_X; bx++) {
-      for (let bz = 0; bz < CITY_BLOCKS_Z; bz++) {
-        const blockX = offsetX + bx * (BLOCK_SIZE + STREET_WIDTH) + BLOCK_SIZE / 2;
-        const blockZ = offsetZ + bz * (BLOCK_SIZE + STREET_WIDTH) + BLOCK_SIZE / 2;
-
-        this.createSidewalk(blockX, blockZ, BLOCK_SIZE, sidewalkMaterial);
-      }
-    }
-
-    // Add road markings
-    this.addRoadMarkings(offsetX, offsetZ, totalWidth, totalDepth);
   }
 
   /**
@@ -360,89 +305,34 @@ export class City {
   }
 
   /**
-   * Adds road lane markings
+   * Adds road lane markings (simplified, no z-fighting)
    */
   private addRoadMarkings(
     offsetX: number,
     offsetZ: number,
-    totalWidth: number,
-    totalDepth: number
+    _totalWidth: number,
+    _totalDepth: number
   ): void {
     const markingMaterial = new StandardMaterial('markingMaterial', this.scene);
-    markingMaterial.diffuseColor = new Color3(1, 1, 0.8);
-    markingMaterial.emissiveColor = new Color3(0.2, 0.2, 0.1);
+    markingMaterial.diffuseColor = new Color3(1, 1, 0.7);
+    markingMaterial.emissiveColor = new Color3(0.3, 0.3, 0.1);
 
-    // Horizontal streets
-    for (let i = 0; i <= CITY_BLOCKS_Z; i++) {
-      const z = offsetZ + i * (BLOCK_SIZE + STREET_WIDTH) - STREET_WIDTH / 2;
-
-      // Create dashed center line
-      const dashLength = 3;
-      const gapLength = 3;
-      let x = offsetX - STREET_WIDTH;
-
-      while (x < offsetX + totalWidth + STREET_WIDTH) {
-        const dash = MeshBuilder.CreateBox(
-          `marking_h_${i}_${x}`,
-          { width: dashLength, height: 0.02, depth: 0.2 },
-          this.scene
-        );
-        dash.position = new Vector3(x + dashLength / 2, 0.02, z);
-        dash.material = markingMaterial;
-        x += dashLength + gapLength;
-      }
-    }
-
-    // Vertical streets
+    // Simplified road markings - just at intersections
     for (let i = 0; i <= CITY_BLOCKS_X; i++) {
-      const x = offsetX + i * (BLOCK_SIZE + STREET_WIDTH) - STREET_WIDTH / 2;
+      for (let j = 0; j <= CITY_BLOCKS_Z; j++) {
+        const x = offsetX + i * (BLOCK_SIZE + STREET_WIDTH) - STREET_WIDTH / 2;
+        const z = offsetZ + j * (BLOCK_SIZE + STREET_WIDTH) - STREET_WIDTH / 2;
 
-      const dashLength = 3;
-      const gapLength = 3;
-      let z = offsetZ - STREET_WIDTH;
-
-      while (z < offsetZ + totalDepth + STREET_WIDTH) {
-        const dash = MeshBuilder.CreateBox(
-          `marking_v_${i}_${z}`,
-          { width: 0.2, height: 0.02, depth: dashLength },
+        // Crosswalk marking
+        const crosswalk = MeshBuilder.CreateBox(
+          `crosswalk_${i}_${j}`,
+          { width: STREET_WIDTH - 2, height: 0.05, depth: 2 },
           this.scene
         );
-        dash.position = new Vector3(x, 0.02, z + dashLength / 2);
-        dash.material = markingMaterial;
-        z += dashLength + gapLength;
+        crosswalk.position = new Vector3(x, 0.025, z);
+        crosswalk.material = markingMaterial;
       }
     }
-  }
-
-  /**
-   * Generates ground around the city perimeter
-   */
-  private generatePerimeterGround(totalWidth: number, totalDepth: number): void {
-    const perimeterSize = 200;
-
-    const perimeterMaterial = new StandardMaterial('perimeterMaterial', this.scene);
-    perimeterMaterial.diffuseColor = new Color3(0.3, 0.4, 0.25); // Grass-like
-    perimeterMaterial.specularColor = new Color3(0.1, 0.1, 0.1);
-
-    // Create ground planes around city
-    const positions = [
-      { x: 0, z: totalDepth / 2 + perimeterSize / 2, w: totalWidth + perimeterSize * 2, d: perimeterSize }, // North
-      { x: 0, z: -totalDepth / 2 - perimeterSize / 2, w: totalWidth + perimeterSize * 2, d: perimeterSize }, // South
-      { x: totalWidth / 2 + perimeterSize / 2, z: 0, w: perimeterSize, d: totalDepth }, // East
-      { x: -totalWidth / 2 - perimeterSize / 2, z: 0, w: perimeterSize, d: totalDepth }, // West
-    ];
-
-    positions.forEach((pos, i) => {
-      const ground = MeshBuilder.CreateGround(
-        `perimeterGround_${i}`,
-        { width: pos.w, height: pos.d },
-        this.scene
-      );
-      ground.position = new Vector3(pos.x, 0, pos.z);
-      ground.material = perimeterMaterial;
-      ground.receiveShadows = true;
-      createCollisionBox(ground, this.physicsManager);
-    });
   }
 
   /**
@@ -453,28 +343,70 @@ export class City {
   }
 
   /**
-   * Gets a random rooftop position for spawning
+   * Checks if a position collides with any building
+   */
+  public isPositionInsideBuilding(pos: Vector3, radius: number = 1): boolean {
+    for (const building of this.buildings) {
+      const bounds = building.getBoundingInfo().boundingBox;
+      const min = bounds.minimumWorld;
+      const max = bounds.maximumWorld;
+
+      // Check if position (with radius) is inside building bounds
+      if (
+        pos.x + radius > min.x && pos.x - radius < max.x &&
+        pos.z + radius > min.z && pos.z - radius < max.z &&
+        pos.y < max.y && pos.y > min.y - 2
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Finds a safe spawn position on a street (not inside buildings)
+   */
+  public getSpawnPosition(): Vector3 {
+    const totalWidth = CITY_BLOCKS_X * (BLOCK_SIZE + STREET_WIDTH);
+    const totalDepth = CITY_BLOCKS_Z * (BLOCK_SIZE + STREET_WIDTH);
+    const offsetX = -totalWidth / 2;
+    const offsetZ = -totalDepth / 2;
+
+    // Try to spawn on a street intersection
+    for (let attempt = 0; attempt < 20; attempt++) {
+      // Pick a random street intersection
+      const streetX = this.random.intRange(0, CITY_BLOCKS_X);
+      const streetZ = this.random.intRange(0, CITY_BLOCKS_Z);
+
+      const x = offsetX + streetX * (BLOCK_SIZE + STREET_WIDTH) - STREET_WIDTH / 2;
+      const z = offsetZ + streetZ * (BLOCK_SIZE + STREET_WIDTH) - STREET_WIDTH / 2;
+
+      const testPos = new Vector3(x, 2, z);
+
+      if (!this.isPositionInsideBuilding(testPos, 2)) {
+        return testPos;
+      }
+    }
+
+    // Fallback: spawn outside the city
+    return new Vector3(-totalWidth / 2 - 20, 2, -totalDepth / 2 - 20);
+  }
+
+  /**
+   * Gets a safe position on a building rooftop
    */
   public getRandomRooftopPosition(): Vector3 {
     if (this.buildings.length === 0) {
-      return new Vector3(0, 10, 0);
+      return new Vector3(0, 20, 0);
     }
 
     const building = this.random.pick(this.buildings);
     const bounds = building.getBoundingInfo().boundingBox;
-    const height = bounds.maximum.y - bounds.minimum.y;
 
     return new Vector3(
       building.position.x,
-      building.position.y + height / 2 + 2,
+      bounds.maximumWorld.y + 2,
       building.position.z
     );
-  }
-
-  /**
-   * Gets the spawn position (ground level near center)
-   */
-  public getSpawnPosition(): Vector3 {
-    return new Vector3(0, 2, 0);
   }
 }

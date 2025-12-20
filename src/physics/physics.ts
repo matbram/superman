@@ -130,6 +130,7 @@ export class PhysicsManager {
   /**
    * Performs sphere sweep for collision detection
    * Used for character movement and flight collision
+   * Uses continuous collision detection for high-speed movement
    */
   public sphereSweep(
     start: Vector3,
@@ -149,14 +150,56 @@ export class PhysicsManager {
       };
     }
 
-    // Simplified: use raycast from multiple points to approximate sphere
-    // TODO: Replace with proper sphere sweep when Havok is integrated
+    const normalizedDir = direction.normalize();
+
+    // For high-speed movement, subdivide into smaller steps
+    // This prevents tunneling through thin objects
+    const maxStepSize = radius * 2;
+    const numSteps = Math.max(1, Math.ceil(distance / maxStepSize));
+    const stepSize = distance / numSteps;
+
+    let currentStart = start.clone();
+    let totalDistance = 0;
+
+    for (let step = 0; step < numSteps; step++) {
+      const stepEnd = currentStart.add(normalizedDir.scale(stepSize));
+      const stepResult = this.sphereSweepStep(currentStart, stepEnd, radius, normalizedDir, stepSize);
+
+      if (stepResult.hit) {
+        stepResult.distance += totalDistance;
+        return stepResult;
+      }
+
+      currentStart = stepEnd;
+      totalDistance += stepSize;
+    }
+
+    return {
+      hit: false,
+      point: end.clone(),
+      normal: Vector3.Up(),
+      distance,
+      mesh: null,
+    };
+  }
+
+  /**
+   * Performs a single step of sphere sweep with comprehensive ray coverage
+   */
+  private sphereSweepStep(
+    start: Vector3,
+    end: Vector3,
+    radius: number,
+    direction: Vector3,
+    distance: number
+  ): RaycastResult {
     const results: RaycastResult[] = [];
+    const checkDist = distance + radius;
 
     // Center ray
-    results.push(this.raycast(start, direction.normalize(), distance));
+    results.push(this.raycast(start, direction, checkDist));
 
-    // Offset rays for sphere approximation
+    // Cardinal direction offsets
     const offsets = [
       new Vector3(radius, 0, 0),
       new Vector3(-radius, 0, 0),
@@ -166,19 +209,40 @@ export class PhysicsManager {
       new Vector3(0, 0, -radius),
     ];
 
+    // Diagonal offsets for better coverage
+    const diagRadius = radius * 0.707;
+    offsets.push(
+      new Vector3(diagRadius, diagRadius, 0),
+      new Vector3(-diagRadius, diagRadius, 0),
+      new Vector3(diagRadius, -diagRadius, 0),
+      new Vector3(-diagRadius, -diagRadius, 0),
+      new Vector3(0, diagRadius, diagRadius),
+      new Vector3(0, -diagRadius, diagRadius),
+      new Vector3(0, diagRadius, -diagRadius),
+      new Vector3(0, -diagRadius, -diagRadius),
+      new Vector3(diagRadius, 0, diagRadius),
+      new Vector3(-diagRadius, 0, diagRadius),
+      new Vector3(diagRadius, 0, -diagRadius),
+      new Vector3(-diagRadius, 0, -diagRadius)
+    );
+
     for (const offset of offsets) {
       const offsetStart = start.add(offset);
-      results.push(this.raycast(offsetStart, direction.normalize(), distance));
+      results.push(this.raycast(offsetStart, direction, checkDist));
     }
 
     // Return closest hit
     let closestHit: RaycastResult | null = null;
     for (const result of results) {
-      if (result.hit) {
+      if (result.hit && result.distance < checkDist) {
         if (!closestHit || result.distance < closestHit.distance) {
           closestHit = result;
         }
       }
+    }
+
+    if (closestHit) {
+      closestHit.distance = Math.max(0, closestHit.distance - radius);
     }
 
     return closestHit ?? {

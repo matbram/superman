@@ -49,6 +49,10 @@ export class CameraController {
   private isFlightMode: boolean = false;
   private speed: number = 0;
 
+  // Flight stop effect
+  private flightStopEffect: number = 0; // 0-1, decays over time
+  private flightStopFOVBoost: number = 0;
+
   constructor(camera: FreeCamera) {
     this.camera = camera;
     this.cameraPosition = camera.position.clone();
@@ -123,9 +127,12 @@ export class CameraController {
     this.currentDistance = this.lerp(this.currentDistance, targetDistance, 3 * deltaTime);
     this.currentHeight = this.lerp(this.currentHeight, targetHeight, 3 * deltaTime);
 
-    // Update FOV based on speed
+    // Update flight stop effect
+    this.updateFlightStopEffect(deltaTime);
+
+    // Update FOV based on speed + flight stop effect
     const speedRatio = Math.min(1, this.speed / FOV_SPEED_SCALE);
-    const targetFOV = BASE_FOV + (MAX_FOV - BASE_FOV) * speedRatio * speedRatio;
+    const targetFOV = BASE_FOV + (MAX_FOV - BASE_FOV) * speedRatio * speedRatio + this.flightStopFOVBoost;
     this.currentFOV = this.lerp(this.currentFOV, targetFOV, 5 * deltaTime);
     this.camera.fov = this.currentFOV;
 
@@ -216,5 +223,32 @@ export class CameraController {
       (Math.random() - 0.5) * intensity
     );
     this.cameraVelocity.addInPlace(shakeOffset);
+  }
+
+  /**
+   * Triggers the flight stop camera effect
+   * Creates a dramatic zoom/shake when player stops flying
+   */
+  public triggerFlightStopEffect(previousSpeed: number): void {
+    // Scale effect based on how fast we were going
+    const intensity = Math.min(1, previousSpeed / 80);
+    this.flightStopEffect = intensity;
+    this.flightStopFOVBoost = 0.3 * intensity; // Temporary FOV increase
+
+    // Add dramatic camera push and shake
+    const pushBack = this.targetForward.scale(-3 * intensity);
+    this.cameraVelocity.addInPlace(pushBack);
+    this.addShake(2 * intensity);
+  }
+
+  /**
+   * Updates flight stop effect decay
+   */
+  private updateFlightStopEffect(deltaTime: number): void {
+    if (this.flightStopEffect > 0) {
+      // Decay the effect
+      this.flightStopEffect = Math.max(0, this.flightStopEffect - deltaTime * 3);
+      this.flightStopFOVBoost = Math.max(0, this.flightStopFOVBoost - deltaTime * 2);
+    }
   }
 }

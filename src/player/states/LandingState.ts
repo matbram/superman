@@ -31,8 +31,8 @@ export class LandingState extends BasePlayerState {
   }
 
   update(player: Player, input: InputState, deltaTime: number): PlayerStateType | null {
-    // Check for abort landing (take off again)
-    if (input.jumpPressed || input.toggleFlightPressed) {
+    // Check for abort landing (take off again) - press RT or jump
+    if (input.jumpPressed || input.flyTrigger > 0.3) {
       return PlayerStateType.Takeoff;
     }
 

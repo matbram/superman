@@ -48,8 +48,8 @@ export class TakeoffState extends BasePlayerState {
 
     // Transition to flight after takeoff duration
     if (this.timer >= TAKEOFF_DURATION) {
-      // Check if player wants to hover (no throttle input)
-      if (input.throttle < 0.1 && Math.abs(input.moveY) < 0.1) {
+      // Check if player wants to hover (no fly trigger input)
+      if (input.flyTrigger < 0.1) {
         return PlayerStateType.Hover;
       }
       return PlayerStateType.Flight;

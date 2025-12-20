@@ -52,8 +52,8 @@ export class HoverState extends BasePlayerState {
   }
 
   private checkTransitions(player: Player, input: InputState): PlayerStateType | null {
-    // Transition to flight when accelerating
-    if (input.throttle > 0.3 || input.moveY > 0.5) {
+    // Transition to flight when pressing RT (flyTrigger)
+    if (input.flyTrigger > 0.3) {
       return PlayerStateType.Flight;
     }
 
@@ -62,8 +62,8 @@ export class HoverState extends BasePlayerState {
       return PlayerStateType.Flight;
     }
 
-    // Transition to landing when pressing toggle near ground
-    if (input.toggleFlightPressed) {
+    // Transition to landing when pressing LT (descendTrigger) near ground
+    if (input.descendTrigger > 0.5) {
       const height = player.getHeightAboveGround();
       if (height < 10) {
         return PlayerStateType.Landing;
@@ -103,11 +103,11 @@ export class HoverState extends BasePlayerState {
       player.setYaw(currentYaw + angleDiff * 3 * deltaTime);
     }
 
-    // Vertical movement from triggers/jump
+    // Vertical movement: jump to ascend, LT (descendTrigger) to descend
     if (input.jumpHeld) {
       targetVelocity.y = HOVER_ASCEND_SPEED;
-    } else if (input.brake > 0.1) {
-      targetVelocity.y = -HOVER_ASCEND_SPEED * input.brake;
+    } else if (input.descendTrigger > 0.1) {
+      targetVelocity.y = -HOVER_ASCEND_SPEED * input.descendTrigger;
     }
 
     // Smoothly approach target velocity

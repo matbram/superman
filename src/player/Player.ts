@@ -270,9 +270,17 @@ export class Player {
       return;
     }
 
+    const previousStateType = this.currentState.type;
+    const previousSpeed = this.currentSpeed;
+
     this.currentState.exit(this);
     this.currentState = newState;
     this.currentState.enter(this);
+
+    // Trigger flight stop camera effect when transitioning from Flight to Hover
+    if (previousStateType === PlayerStateType.Flight && newStateType === PlayerStateType.Hover) {
+      this.cameraController.triggerFlightStopEffect(previousSpeed);
+    }
   }
 
   /**
