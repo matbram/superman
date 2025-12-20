@@ -13,17 +13,17 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 
 // Debris constants
-const MAX_DEBRIS_PIECES = 150;
+const MAX_DEBRIS_PIECES = 200;
 const DEBRIS_CLEANUP_DISTANCE = 300;  // Only cleanup debris when player is this far away
-const GRAVITY = -35;
+const GRAVITY = -20;  // Slower gravity for more dramatic falling debris
 
 // Wake damage constants
 const WAKE_BASE_RADIUS = 40;  // Much larger base radius for side damage
 const WAKE_SPEED_THRESHOLD = 80;  // Lower threshold - starts earlier
 
-// Collapse constants
-const COLLAPSE_TILT_SPEED = 0.8;  // How fast buildings tip over
-const COLLAPSE_FALL_SPEED = 2.0;  // How fast buildings fall after tipping
+// Collapse constants - much slower for dramatic effect
+const COLLAPSE_TILT_SPEED = 0.15;  // Slow dramatic tipping
+const COLLAPSE_FALL_SPEED = 0.4;   // Slow fall after tipping
 
 /**
  * Structural breakpoint - defines where a building can break
@@ -69,6 +69,8 @@ interface CollapsingBuilding {
   fallProgress: number;    // 0 = standing, 1 = fallen
   height: number;          // Building height for pivot calculation
   dustSpawned: boolean;    // Whether we've spawned the big dust cloud
+  lastDustTime: number;    // Track continuous dust spawning
+  debrisSpawned: number;   // Track debris spawned during collapse
 }
 
 /**
@@ -310,10 +312,13 @@ export class BuildingDamage {
       fallProgress: 0,
       height: height,
       dustSpawned: false,
+      lastDustTime: 0,
+      debrisSpawned: 0,
     });
 
-    // Initial dust cloud at impact
-    this.spawnDustCloud(impactPosition, 5, 1);
+    // Initial dust cloud at impact - bigger and longer lasting
+    this.spawnDustCloud(impactPosition, 8, 2);
+    this.spawnDustCloud(impactPosition.add(new Vector3(0, height * 0.3, 0)), 6, 1.5);
 
     this.buildingStructures.delete(structure.mesh);
   }
@@ -519,54 +524,55 @@ export class BuildingDamage {
   }
 
   /**
-   * Spawns a large dust cloud for building collapse
+   * Spawns a massive dust cloud for building collapse - dramatic billowing smoke
    */
   private spawnCollapseDust(position: Vector3, buildingHeight: number): void {
-    const particles = new ParticleSystem(`collapse_dust_${Date.now()}`, 200, this.scene);
+    const particles = new ParticleSystem(`collapse_dust_${Date.now()}`, 500, this.scene);
 
-    // Large ground-level emission
-    particles.createCylinderEmitter(buildingHeight * 0.3, buildingHeight * 0.1, 0, 0);
+    // Large ground-level emission - massive spread
+    particles.createCylinderEmitter(buildingHeight * 0.5, buildingHeight * 0.2, 0, 0);
 
-    // Dust colors
-    particles.color1 = new Color4(0.65, 0.55, 0.45, 0.7);
-    particles.color2 = new Color4(0.5, 0.45, 0.4, 0.5);
-    particles.colorDead = new Color4(0.4, 0.35, 0.3, 0);
+    // Dust colors - thick smoke/dust
+    particles.color1 = new Color4(0.6, 0.5, 0.4, 0.85);
+    particles.color2 = new Color4(0.45, 0.4, 0.35, 0.7);
+    particles.colorDead = new Color4(0.35, 0.3, 0.25, 0);
 
-    // Large billowing particles
-    particles.minSize = 8;
-    particles.maxSize = 20;
+    // Massive billowing particles
+    particles.minSize = 15;
+    particles.maxSize = 40;
 
-    particles.minLifeTime = 3;
-    particles.maxLifeTime = 6;
+    particles.minLifeTime = 5;
+    particles.maxLifeTime = 10;
 
-    // Spread outward and up
-    particles.direction1 = new Vector3(-15, 5, -15);
-    particles.direction2 = new Vector3(15, 25, 15);
+    // Spread outward and up dramatically
+    particles.direction1 = new Vector3(-25, 8, -25);
+    particles.direction2 = new Vector3(25, 40, 25);
 
-    particles.minEmitPower = 5;
-    particles.maxEmitPower = 15;
+    particles.minEmitPower = 8;
+    particles.maxEmitPower = 20;
 
     particles.emitter = position.add(new Vector3(0, 2, 0));
-    particles.emitRate = 100;
+    particles.emitRate = 200;
 
-    particles.addSizeGradient(0, 0.3);
-    particles.addSizeGradient(0.2, 1);
-    particles.addSizeGradient(0.7, 1.2);
-    particles.addSizeGradient(1, 0.5);
+    particles.addSizeGradient(0, 0.2);
+    particles.addSizeGradient(0.15, 0.8);
+    particles.addSizeGradient(0.4, 1);
+    particles.addSizeGradient(0.7, 1.3);
+    particles.addSizeGradient(1, 0.6);
 
     particles.blendMode = ParticleSystem.BLENDMODE_STANDARD;
-    particles.gravity = new Vector3(0, -3, 0);
+    particles.gravity = new Vector3(0, -2, 0);
 
     particles.start();
 
-    // Stop emitting after initial burst
+    // Stop emitting after longer burst for dramatic effect
     setTimeout(() => {
       particles.emitRate = 0;
-    }, 800);
+    }, 1500);
 
     this.dustClouds.push({
       particles,
-      lifetime: 8,
+      lifetime: 12,
     });
   }
 
@@ -662,10 +668,11 @@ export class BuildingDamage {
    */
   public update(deltaTime: number, playerPosition?: Vector3): void {
     // Update collapsing buildings
+    const now = performance.now();
     for (let i = this.collapsingBuildings.length - 1; i >= 0; i--) {
       const collapse = this.collapsingBuildings[i];
 
-      // Increase tilt angle (building tips over)
+      // Increase tilt angle (building tips over) - slow and dramatic
       collapse.tiltAngle += COLLAPSE_TILT_SPEED * deltaTime;
 
       // Apply rotation around the base (pivot at ground level)
@@ -684,13 +691,49 @@ export class BuildingDamage {
       // Lower as it tips
       collapse.mesh.position.y = collapse.originalPosition.y - collapse.height * 0.5 * (1 - Math.cos(collapse.tiltAngle));
 
+      // Continuous dust and debris during collapse for dramatic effect
+      if (now - collapse.lastDustTime > 200) {  // Every 200ms
+        collapse.lastDustTime = now;
+
+        // Dust puffs along the falling building
+        const dustHeight = collapse.height * (0.3 + Math.random() * 0.5);
+        const dustPos = collapse.mesh.position.add(new Vector3(
+          (Math.random() - 0.5) * 10,
+          dustHeight,
+          (Math.random() - 0.5) * 10
+        ));
+        this.spawnDustCloud(dustPos, 4 + Math.random() * 3, 1.5);
+
+        // Spawn debris chunks during collapse
+        if (collapse.debrisSpawned < 15) {
+          const debrisPos = collapse.mesh.position.add(new Vector3(
+            (Math.random() - 0.5) * 15,
+            collapse.height * Math.random(),
+            (Math.random() - 0.5) * 15
+          ));
+          this.spawnImpactDebris(debrisPos, 20, 3);
+          collapse.debrisSpawned++;
+        }
+      }
+
       // When fully fallen (roughly 90 degrees)
       if (collapse.tiltAngle > Math.PI * 0.45) {
         collapse.fallProgress += COLLAPSE_FALL_SPEED * deltaTime;
 
-        // Spawn big dust cloud when hitting ground
+        // Spawn massive dust cloud when hitting ground
         if (!collapse.dustSpawned) {
           this.spawnCollapseDust(collapse.mesh.position, collapse.height);
+          // Multiple dust clouds for dramatic effect
+          for (let d = 0; d < 4; d++) {
+            const offset = new Vector3(
+              (Math.random() - 0.5) * collapse.height * 0.5,
+              0,
+              (Math.random() - 0.5) * collapse.height * 0.5
+            );
+            this.spawnDustCloud(collapse.mesh.position.add(offset), 10 + Math.random() * 8, 4);
+          }
+          // Final debris burst
+          this.spawnImpactDebris(collapse.mesh.position, 40, 25);
           collapse.dustSpawned = true;
         }
 

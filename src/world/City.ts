@@ -14,8 +14,9 @@ import { PhysicsManager, createCollisionBox } from '../physics/physics';
 
 // Chunk and city generation constants
 const CHUNK_SIZE = 200; // Larger chunks = fewer total chunks
-const LOAD_RADIUS = 2;
-const UNLOAD_DISTANCE = 3;
+const LOAD_RADIUS = 4;  // Load chunks much further out for seamless generation
+const UNLOAD_DISTANCE = 6;  // Keep chunks loaded longer
+const CHUNKS_PER_FRAME = 3;  // Generate multiple chunks per frame when needed
 
 // Building generation
 const SIDEWALK_HEIGHT = 0.15;
@@ -69,6 +70,8 @@ interface CityChunk {
   mergedMesh: Mesh | null;
   collisionMeshes: Mesh[];
   lastAccess: number;
+  fadeProgress: number;  // 0 to 1, for smooth fade-in
+  fullyVisible: boolean;
 }
 
 /**
@@ -124,10 +127,24 @@ export class City {
    * Generates initial chunks around spawn point synchronously
    */
   private generateInitialChunks(): void {
-    // Generate a 3x3 grid of chunks around origin immediately
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dz = -1; dz <= 1; dz++) {
+    // Generate a 5x5 grid of chunks around origin immediately for seamless start
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dz = -2; dz <= 2; dz++) {
         this.generateChunk(dx, dz);
+
+        // Make initial chunks fully visible immediately (no fade-in)
+        const key = `${dx},${dz}`;
+        const chunk = this.chunks.get(key);
+        if (chunk) {
+          chunk.fadeProgress = 1;
+          chunk.fullyVisible = true;
+          // Set all buildings to fully visible
+          for (const mesh of chunk.collisionMeshes) {
+            if (mesh.name.startsWith('building_')) {
+              mesh.visibility = 1;
+            }
+          }
+        }
       }
     }
   }
@@ -208,13 +225,13 @@ export class City {
   }
 
   /**
-   * Updates loaded chunks - with throttled generation
+   * Updates loaded chunks - with throttled generation and fade-in
    */
   public updateChunks(playerPosition: Vector3): void {
     const playerChunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
     const playerChunkZ = Math.floor(playerPosition.z / CHUNK_SIZE);
 
-    // Queue chunks that need loading
+    // Queue chunks that need loading - load further out for seamless experience
     for (let dx = -LOAD_RADIUS; dx <= LOAD_RADIUS; dx++) {
       for (let dz = -LOAD_RADIUS; dz <= LOAD_RADIUS; dz++) {
         const chunkX = playerChunkX + dx;
@@ -236,7 +253,7 @@ export class City {
       }
     }
 
-    // Generate only 1 pending chunk per frame to avoid stutters
+    // Generate multiple pending chunks per frame for faster loading
     if (this.pendingChunks.length > 0) {
       // Sort by distance to player (generate closest first)
       this.pendingChunks.sort((a, b) => {
@@ -245,18 +262,39 @@ export class City {
         return distA - distB;
       });
 
-      const next = this.pendingChunks.shift()!;
-      this.generateChunk(next.chunkX, next.chunkZ);
+      // Generate multiple chunks per frame to stay ahead of the player
+      const chunksToGenerate = Math.min(CHUNKS_PER_FRAME, this.pendingChunks.length);
+      for (let i = 0; i < chunksToGenerate; i++) {
+        const next = this.pendingChunks.shift()!;
+        this.generateChunk(next.chunkX, next.chunkZ);
+      }
     }
 
-    // Unload distant chunks
+    // Update fade-in for chunks and unload distant ones
     const now = performance.now();
     for (const [key, chunk] of this.chunks.entries()) {
       const dx = Math.abs(chunk.chunkX - playerChunkX);
       const dz = Math.abs(chunk.chunkZ - playerChunkZ);
 
+      // Smooth fade-in for buildings
+      if (!chunk.fullyVisible) {
+        chunk.fadeProgress = Math.min(1, chunk.fadeProgress + 0.03);  // Fade in over ~33 frames
+
+        // Apply visibility to all building meshes
+        for (const mesh of chunk.collisionMeshes) {
+          if (mesh.name.startsWith('building_')) {
+            mesh.visibility = chunk.fadeProgress;
+          }
+        }
+
+        if (chunk.fadeProgress >= 1) {
+          chunk.fullyVisible = true;
+        }
+      }
+
+      // Unload distant chunks
       if (dx > UNLOAD_DISTANCE || dz > UNLOAD_DISTANCE) {
-        if (now - chunk.lastAccess > 3000) {
+        if (now - chunk.lastAccess > 5000) {  // Longer delay before unloading
           this.unloadChunk(key);
         }
       }
@@ -334,6 +372,8 @@ export class City {
           if (buildingCount < 3 && mesh.name.includes('main')) {
             this.shadowGenerator.addShadowCaster(mesh);
           }
+          // Start buildings invisible - they will fade in
+          mesh.visibility = 0;
           createCollisionBox(mesh, this.physicsManager);
           collisionMeshes.push(mesh);
         }
@@ -352,6 +392,8 @@ export class City {
       mergedMesh: null,
       collisionMeshes,
       lastAccess: performance.now(),
+      fadeProgress: 0,
+      fullyVisible: false,
     });
   }
 

@@ -14,7 +14,7 @@ import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import { PhysicsManager } from '../physics/physics';
 
 // Heat vision constants
-const BEAM_LENGTH = 300;
+const BEAM_LENGTH = 800;  // Extended range for hitting distant targets
 const BEAM_WIDTH = 1.2;  // Thick but separated beams
 const DAMAGE_PER_SECOND = 2000;  // Massive destruction - destroys buildings instantly
 
