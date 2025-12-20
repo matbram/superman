@@ -11,10 +11,13 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 
 // Debris constants
-const MAX_DEBRIS_PIECES = 80;
-const DEBRIS_LIFETIME = 5;
+const MAX_DEBRIS_PIECES = 150;
+const DEBRIS_CLEANUP_DISTANCE = 300;  // Only cleanup debris when player is this far away
 const GRAVITY = -35;
-const CHUNK_LIFETIME = 6;
+
+// Wake damage constants
+const WAKE_BASE_RADIUS = 40;  // Much larger base radius for side damage
+const WAKE_SPEED_THRESHOLD = 80;  // Lower threshold - starts earlier
 
 /**
  * Structural breakpoint - defines where a building can break
@@ -45,8 +48,8 @@ interface DebrisPiece {
   mesh: Mesh;
   velocity: Vector3;
   angularVelocity: Vector3;
-  lifetime: number;
   isChunk: boolean;  // Large structural chunk vs small debris
+  settled: boolean;  // Has come to rest on ground
 }
 
 /**
@@ -169,20 +172,20 @@ export class BuildingDamage {
   public applyImpactDamage(building: Mesh, impactPosition: Vector3, speed: number): void {
     const structure = this.getOrCreateStructure(building);
 
-    // At supersonic speeds (100+), fully destroy the building on impact
-    if (speed > 100) {
+    // At high speeds (50+), fully destroy the building on impact
+    if (speed > 50) {
       this.destroyBuilding(structure, impactPosition, speed);
       return;
     }
 
-    // At high speeds (60+), destroy most of the building
-    if (speed > 60) {
+    // At moderate speeds (30+), destroy most of the building
+    if (speed > 30) {
       this.heavyDamageBuilding(structure, impactPosition, speed);
       return;
     }
 
     // Lower speeds: break chunks near impact
-    const damage = speed / 15;
+    const damage = speed / 10;  // More damage per speed unit
     structure.shakeTime = Math.min(1.5, structure.shakeTime + damage * 0.3);
 
     const bounds = structure.bounds;
@@ -266,6 +269,7 @@ export class BuildingDamage {
 
   /**
    * Applies supersonic wake damage to nearby buildings (no direct contact needed)
+   * Damages buildings on the SIDES of the player's flight path
    */
   public applySupersonicWakeDamage(
     playerPosition: Vector3,
@@ -273,10 +277,17 @@ export class BuildingDamage {
     speed: number,
     buildings: Mesh[]
   ): void {
-    if (speed < 120) return;  // Only at supersonic speeds
+    if (speed < WAKE_SPEED_THRESHOLD) return;
 
-    const wakeRadius = 15 + (speed - 120) * 0.2;  // Radius increases with speed
-    const wakeDamage = (speed - 120) / 50;  // Damage scales with speed
+    // Large radius that increases with speed
+    const wakeRadius = WAKE_BASE_RADIUS + (speed - WAKE_SPEED_THRESHOLD) * 0.5;
+    const wakeDamage = (speed - WAKE_SPEED_THRESHOLD) / 30;  // More damage
+
+    // Get normalized flight direction
+    const flyDir = playerVelocity.clone();
+    flyDir.y = 0;
+    if (flyDir.length() < 0.1) return;
+    flyDir.normalize();
 
     for (const building of buildings) {
       const buildingPos = building.position;
@@ -284,22 +295,28 @@ export class BuildingDamage {
       const dz = buildingPos.z - playerPosition.z;
       const horizontalDist = Math.sqrt(dx * dx + dz * dz);
 
-      if (horizontalDist < wakeRadius && horizontalDist > 3) {
-        // Check if building is roughly beside the player (not in front/behind)
+      if (horizontalDist < wakeRadius && horizontalDist > 5) {
+        // Check if building is to the SIDE of the player (not in front/behind)
         const toBuilding = new Vector3(dx, 0, dz).normalize();
-        const flyDir = playerVelocity.clone();
-        flyDir.y = 0;
-        flyDir.normalize();
 
-        // Dot product - 0 means perpendicular (beside player)
+        // Dot product - 0 means perpendicular (exactly beside player)
+        // We want buildings that are mostly perpendicular to flight direction
         const dot = Math.abs(Vector3.Dot(toBuilding, flyDir));
 
-        if (dot < 0.7) {  // Building is mostly to the side
+        // Only affect buildings that are mostly to the side (dot < 0.5 means within ~60 degrees of perpendicular)
+        if (dot < 0.5) {
           const structure = this.getOrCreateStructure(building);
 
-          // Determine how many chunks to break based on proximity
+          // More chunks break when closer and faster
           const proximityFactor = 1 - (horizontalDist / wakeRadius);
-          const chunksToBreak = Math.floor(proximityFactor * wakeDamage * 3) + 1;
+          const sideFactor = 1 - (dot / 0.5);  // Stronger effect when more perpendicular
+          const chunksToBreak = Math.floor(proximityFactor * sideFactor * wakeDamage * 5) + 2;
+
+          // At very high speeds close by, destroy the whole building
+          if (speed > 150 && horizontalDist < 20 && dot < 0.3) {
+            this.destroyBuilding(structure, playerPosition, speed);
+            continue;
+          }
 
           let broken = 0;
           for (const bp of structure.breakPoints) {
@@ -316,15 +333,15 @@ export class BuildingDamage {
             ).normalize();
 
             // Only break chunks facing the player
-            if (Vector3.Dot(chunkToPlayer, toBuilding) > 0.3) {
-              this.breakChunk(structure, bp, playerPosition, speed * 0.5);
+            if (Vector3.Dot(chunkToPlayer, toBuilding) > 0.2) {
+              this.breakChunk(structure, bp, playerPosition, speed * 0.7);
               broken++;
             }
           }
 
           if (broken > 0) {
-            structure.shakeTime = Math.min(1, structure.shakeTime + 0.3);
-            this.spawnImpactDebris(buildingPos.add(new Vector3(0, 20, 0)), speed * 0.3, broken * 2);
+            structure.shakeTime = Math.min(1.5, structure.shakeTime + 0.5);
+            this.spawnImpactDebris(buildingPos.add(new Vector3(0, 20, 0)), speed * 0.4, broken * 3);
           }
         }
       }
@@ -387,8 +404,8 @@ export class BuildingDamage {
         (Math.random() - 0.5) * 2,
         (Math.random() - 0.5) * 3
       ),
-      lifetime: CHUNK_LIFETIME,
       isChunk: true,
+      settled: false,
     });
   }
 
@@ -446,8 +463,8 @@ export class BuildingDamage {
           (Math.random() - 0.5) * 8,
           (Math.random() - 0.5) * 8
         ),
-        lifetime: DEBRIS_LIFETIME,
         isChunk: false,
+        settled: false,
       });
     }
   }
@@ -480,11 +497,27 @@ export class BuildingDamage {
 
   /**
    * Updates debris physics and building shake effects
+   * Only cleans up debris when player is far away
    */
-  public update(deltaTime: number): void {
+  public update(deltaTime: number, playerPosition?: Vector3): void {
     // Update debris pieces
     for (let i = this.debris.length - 1; i >= 0; i--) {
       const piece = this.debris[i];
+
+      // If settled, only check for distance-based cleanup
+      if (piece.settled) {
+        // Only remove debris if player is far away
+        if (playerPosition) {
+          const dx = piece.mesh.position.x - playerPosition.x;
+          const dz = piece.mesh.position.z - playerPosition.z;
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          if (dist > DEBRIS_CLEANUP_DISTANCE) {
+            piece.mesh.dispose();
+            this.debris.splice(i, 1);
+          }
+        }
+        continue;
+      }
 
       // Apply gravity
       piece.velocity.y += GRAVITY * deltaTime;
@@ -515,20 +548,13 @@ export class BuildingDamage {
         if (piece.isChunk && piece.velocity.length() > 5) {
           this.spawnImpactDebris(piece.mesh.position, piece.velocity.length() * 2, 2);
         }
-      }
 
-      // Update lifetime
-      piece.lifetime -= deltaTime;
-
-      // Fade out near end of life
-      if (piece.lifetime < 1.5) {
-        piece.mesh.visibility = piece.lifetime / 1.5;
-      }
-
-      // Remove dead debris
-      if (piece.lifetime <= 0) {
-        piece.mesh.dispose();
-        this.debris.splice(i, 1);
+        // Check if settled (very slow)
+        if (piece.velocity.length() < 1) {
+          piece.settled = true;
+          piece.velocity = Vector3.Zero();
+          piece.angularVelocity = Vector3.Zero();
+        }
       }
     }
 
