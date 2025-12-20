@@ -18,6 +18,10 @@ const DEBRIS_CLEANUP_DISTANCE = 150;  // Cleanup sooner
 const DEBRIS_SETTLE_CLEANUP_TIME = 10000;  // Remove settled debris after 10 seconds
 const GRAVITY = -30;  // Normal gravity for performance
 
+// Dust cloud limits - particle systems are expensive!
+const MAX_DUST_CLOUDS = 30;  // Hard cap on active particle systems
+const DUST_CLOUD_COOLDOWN = 200;  // ms between dust spawns at same location
+
 // Wake damage constants
 const WAKE_BASE_RADIUS = 40;
 const WAKE_SPEED_THRESHOLD = 80;
@@ -103,6 +107,9 @@ export class BuildingDamage {
 
   // Debris spawn cooldown tracking - prevents chain spawning
   private lastDebrisSpawnTime: Map<string, number> = new Map();
+
+  // Dust cloud cooldown tracking - prevents particle system spam
+  private lastDustSpawnTime: Map<string, number> = new Map();
 
   // Performance tracking
   private lastPerfLogTime: number = 0;
@@ -422,6 +429,12 @@ export class BuildingDamage {
     impactPosition: Vector3,
     speed: number
   ): void {
+    // Check debris cap - chunks count towards the limit
+    if (this.debris.length >= MAX_DEBRIS_PIECES) {
+      breakPoint.broken = true;  // Still mark as broken to prevent retry
+      return;
+    }
+
     breakPoint.broken = true;
 
     const bounds = structure.bounds;
@@ -490,8 +503,32 @@ export class BuildingDamage {
 
   /**
    * Spawns a dust/smoke cloud at a position
+   * Rate-limited to prevent particle system spam
    */
   private spawnDustCloud(position: Vector3, size: number, duration: number): void {
+    // Hard cap on dust clouds - particle systems are expensive
+    if (this.dustClouds.length >= MAX_DUST_CLOUDS) {
+      return;
+    }
+
+    // Position-based cooldown to prevent spam
+    const posKey = `${Math.round(position.x / 10) * 10}_${Math.round(position.z / 10) * 10}`;
+    const now = performance.now();
+    const lastSpawn = this.lastDustSpawnTime.get(posKey) || 0;
+    if (now - lastSpawn < DUST_CLOUD_COOLDOWN) {
+      return;
+    }
+    this.lastDustSpawnTime.set(posKey, now);
+
+    // Clean up old cooldown entries
+    if (this.lastDustSpawnTime.size > 50) {
+      for (const [key, time] of this.lastDustSpawnTime) {
+        if (now - time > 2000) {
+          this.lastDustSpawnTime.delete(key);
+        }
+      }
+    }
+
     const particles = new ParticleSystem(`dust_${Date.now()}`, 50, this.scene);
 
     // Use simple sphere emitter
@@ -545,6 +582,11 @@ export class BuildingDamage {
    * Spawns dust cloud for building collapse - optimized for performance
    */
   private spawnCollapseDust(position: Vector3, buildingHeight: number): void {
+    // Check cap - collapse dust counts as 2 regular clouds
+    if (this.dustClouds.length >= MAX_DUST_CLOUDS - 1) {
+      return;
+    }
+
     const particles = new ParticleSystem(`collapse_dust_${Date.now()}`, 200, this.scene);
 
     // Ground-level emission
