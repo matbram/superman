@@ -14,22 +14,22 @@ import { PhysicsManager, createCollisionBox } from '../physics/physics';
 
 // Chunk and city generation constants
 const CHUNK_SIZE = 200; // Larger chunks = fewer total chunks
-const LOAD_RADIUS = 4;  // Load chunks much further out for seamless generation
-const UNLOAD_DISTANCE = 6;  // Keep chunks loaded longer
-const CHUNKS_PER_FRAME = 3;  // Generate multiple chunks per frame when needed
+const LOAD_RADIUS = 3;  // Reduced for better performance
+const UNLOAD_DISTANCE = 4;  // Unload sooner
+const CHUNKS_PER_FRAME = 2;  // Generate fewer chunks per frame
 
 // Performance logging
 const ENABLE_CITY_PERF_LOGGING = true;
 const CITY_PERF_LOG_INTERVAL = 2000;  // Log every 2 seconds
 
-// Building generation - dense city
+// Building generation - reduced density for performance
 const SIDEWALK_HEIGHT = 0.15;
 const MIN_BUILDING_HEIGHT = 35;
 const MAX_BUILDING_HEIGHT = 140;
-const MIN_BUILDING_WIDTH = 10;
-const MAX_BUILDING_WIDTH = 30;
-const BUILDING_SPACING = 6;  // Tighter spacing for dense city
-const BUILDINGS_PER_CHUNK = 16; // More buildings per chunk
+const MIN_BUILDING_WIDTH = 12;
+const MAX_BUILDING_WIDTH = 35;
+const BUILDING_SPACING = 12;  // More spacing between buildings
+const BUILDINGS_PER_CHUNK = 8; // Fewer buildings per chunk
 
 // Building style types
 enum BuildingStyle {
@@ -411,12 +411,16 @@ export class City {
         );
 
         for (const mesh of buildingMeshes) {
-          // Add to shadow caster (limit shadows for performance)
-          if (buildingCount < 3 && mesh.name.includes('main')) {
+          // Add to shadow caster (limit shadows for performance - only first building)
+          if (buildingCount < 1 && mesh.name.includes('main')) {
             this.shadowGenerator.addShadowCaster(mesh);
           }
           // Start buildings invisible - they will fade in
           mesh.visibility = 0;
+
+          // LOD: Hide mesh entirely at distance 400 to reduce draw calls
+          mesh.addLODLevel(400, null);
+
           createCollisionBox(mesh, this.physicsManager);
           collisionMeshes.push(mesh);
         }
