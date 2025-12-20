@@ -1,6 +1,7 @@
 /**
  * Voxel Traffic System
  * Cars, taxis, trucks that drive on streets and can be destroyed
+ * Vehicles are restricted to streets (at chunk edges) and sized realistically
  */
 
 import { Scene } from '@babylonjs/core/scene';
@@ -10,11 +11,16 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
+import { STREET_WIDTH, CITY_CHUNK_SIZE } from './City';
 
 // Traffic constants
 const MAX_VEHICLES = 60;
 const VEHICLE_DESPAWN_RADIUS = 500;
-const STREET_Y = 0.5;  // Vehicles drive on streets
+const STREET_Y = 0.1;  // Vehicles drive just above street level
+
+// Street lane configuration - vehicles drive in lanes within the street width
+const LANE_WIDTH = 4;  // Each lane is 4m wide
+const LANES_PER_DIRECTION = 2;  // 2 lanes each direction = 4 lanes total
 
 // Vehicle types
 enum VehicleType {
@@ -101,7 +107,7 @@ export class Traffic {
   }
 
   /**
-   * Creates a voxel car
+   * Creates a voxel car - realistically sized (2m wide × 5m long × 1.5m tall)
    */
   private createCar(colorName: string): Vehicle {
     const root = new TransformNode('car', this.scene);
@@ -110,49 +116,72 @@ export class Traffic {
     const windowMat = this.vehicleMaterials.get('window')!;
     const tireMat = this.vehicleMaterials.get('tire')!;
 
-    // Car body - lower section
+    // Car body - lower section (main chassis)
     const body = MeshBuilder.CreateBox('carBody', {
-      width: 2.0, height: 0.8, depth: 4.5
+      width: 2.0, height: 1.0, depth: 5.0
     }, this.scene);
-    body.position.y = 0.6;
+    body.position.y = 0.7;
     body.material = bodyMat;
     body.parent = root;
     meshes.push(body);
 
     // Car cabin - upper section
     const cabin = MeshBuilder.CreateBox('carCabin', {
-      width: 1.8, height: 0.7, depth: 2.2
+      width: 1.9, height: 0.9, depth: 2.8
     }, this.scene);
-    cabin.position = new Vector3(0, 1.35, -0.3);
+    cabin.position = new Vector3(0, 1.65, -0.3);
     cabin.material = bodyMat;
     cabin.parent = root;
     meshes.push(cabin);
 
-    // Windows
+    // Front windshield
     const frontWindow = MeshBuilder.CreateBox('frontWindow', {
-      width: 1.6, height: 0.5, depth: 0.1
+      width: 1.7, height: 0.7, depth: 0.15
     }, this.scene);
-    frontWindow.position = new Vector3(0, 1.3, 0.75);
-    frontWindow.rotation.x = -0.3;
+    frontWindow.position = new Vector3(0, 1.6, 1.1);
+    frontWindow.rotation.x = -0.4;
     frontWindow.material = windowMat;
     frontWindow.parent = root;
     meshes.push(frontWindow);
 
-    // Tires (4 corners)
+    // Rear windshield
+    const rearWindow = MeshBuilder.CreateBox('rearWindow', {
+      width: 1.7, height: 0.6, depth: 0.15
+    }, this.scene);
+    rearWindow.position = new Vector3(0, 1.6, -1.5);
+    rearWindow.rotation.x = 0.3;
+    rearWindow.material = windowMat;
+    rearWindow.parent = root;
+    meshes.push(rearWindow);
+
+    // Tires (4 corners) - properly sized
     const tirePositions = [
-      new Vector3(-0.9, 0.3, 1.4),
-      new Vector3(0.9, 0.3, 1.4),
-      new Vector3(-0.9, 0.3, -1.4),
-      new Vector3(0.9, 0.3, -1.4),
+      new Vector3(-0.95, 0.4, 1.6),
+      new Vector3(0.95, 0.4, 1.6),
+      new Vector3(-0.95, 0.4, -1.6),
+      new Vector3(0.95, 0.4, -1.6),
     ];
     for (const pos of tirePositions) {
       const tire = MeshBuilder.CreateBox('tire', {
-        width: 0.3, height: 0.6, depth: 0.6
+        width: 0.35, height: 0.8, depth: 0.8
       }, this.scene);
       tire.position = pos;
       tire.material = tireMat;
       tire.parent = root;
       meshes.push(tire);
+    }
+
+    // Headlights
+    const lightMat = this.vehicleMaterials.get('light')!;
+    const headlightPositions = [new Vector3(-0.7, 0.6, 2.5), new Vector3(0.7, 0.6, 2.5)];
+    for (const pos of headlightPositions) {
+      const light = MeshBuilder.CreateBox('headlight', {
+        width: 0.4, height: 0.25, depth: 0.1
+      }, this.scene);
+      light.position = pos;
+      light.material = lightMat;
+      light.parent = root;
+      meshes.push(light);
     }
 
     return {
@@ -161,7 +190,7 @@ export class Traffic {
       type: VehicleType.Car,
       position: new Vector3(0, STREET_Y, 0),
       direction: new Vector3(1, 0, 0),
-      speed: 8 + Math.random() * 6,
+      speed: 12 + Math.random() * 8,  // 12-20 m/s (43-72 km/h)
       health: 100,
       isDestroyed: false,
       debrisVelocities: [],
@@ -188,7 +217,7 @@ export class Traffic {
   }
 
   /**
-   * Creates a voxel truck
+   * Creates a voxel truck - realistically sized (2.5m wide × 8m long × 4m tall)
    */
   private createTruck(): Vehicle {
     const root = new TransformNode('truck', this.scene);
@@ -196,42 +225,66 @@ export class Traffic {
     const bodyMat = this.vehicleMaterials.get('white')!;
     const cabMat = this.vehicleMaterials.get('red')!;
     const tireMat = this.vehicleMaterials.get('tire')!;
+    const windowMat = this.vehicleMaterials.get('window')!;
 
-    // Truck cab
+    // Truck cab - larger and more detailed
     const cab = MeshBuilder.CreateBox('truckCab', {
-      width: 2.2, height: 2.0, depth: 2.0
+      width: 2.5, height: 2.5, depth: 2.5
     }, this.scene);
-    cab.position = new Vector3(0, 1.2, 2.5);
+    cab.position = new Vector3(0, 1.8, 3.0);
     cab.material = cabMat;
     cab.parent = root;
     meshes.push(cab);
 
-    // Truck cargo container
-    const cargo = MeshBuilder.CreateBox('truckCargo', {
-      width: 2.4, height: 2.5, depth: 5.0
+    // Cab windshield
+    const windshield = MeshBuilder.CreateBox('truckWindshield', {
+      width: 2.2, height: 1.2, depth: 0.15
     }, this.scene);
-    cargo.position = new Vector3(0, 1.45, -1.0);
+    windshield.position = new Vector3(0, 2.2, 4.3);
+    windshield.rotation.x = -0.15;
+    windshield.material = windowMat;
+    windshield.parent = root;
+    meshes.push(windshield);
+
+    // Truck cargo container - large box
+    const cargo = MeshBuilder.CreateBox('truckCargo', {
+      width: 2.6, height: 3.5, depth: 6.0
+    }, this.scene);
+    cargo.position = new Vector3(0, 2.3, -1.5);
     cargo.material = bodyMat;
     cargo.parent = root;
     meshes.push(cargo);
 
-    // Tires (6 - 2 front, 4 back)
+    // Tires (6 - 2 front, 4 back dual wheels) - larger truck tires
     const tirePositions = [
-      new Vector3(-1.0, 0.4, 2.5),
-      new Vector3(1.0, 0.4, 2.5),
-      new Vector3(-1.0, 0.4, -1.5),
-      new Vector3(1.0, 0.4, -1.5),
-      new Vector3(-1.0, 0.4, -2.8),
-      new Vector3(1.0, 0.4, -2.8),
+      new Vector3(-1.15, 0.55, 3.0),
+      new Vector3(1.15, 0.55, 3.0),
+      new Vector3(-1.15, 0.55, -2.0),
+      new Vector3(1.15, 0.55, -2.0),
+      new Vector3(-1.15, 0.55, -3.5),
+      new Vector3(1.15, 0.55, -3.5),
     ];
     for (const pos of tirePositions) {
       const tire = MeshBuilder.CreateBox('tire', {
-        width: 0.4, height: 0.8, depth: 0.8
+        width: 0.5, height: 1.1, depth: 1.1
       }, this.scene);
       tire.position = pos;
       tire.material = tireMat;
       tire.parent = root;
       meshes.push(tire);
+    }
+
+    // Headlights
+    const lightMat = this.vehicleMaterials.get('light')!;
+    const headlightPositions = [new Vector3(-1.0, 1.2, 4.3), new Vector3(1.0, 1.2, 4.3)];
+    for (const pos of headlightPositions) {
+      const light = MeshBuilder.CreateBox('headlight', {
+        width: 0.5, height: 0.4, depth: 0.15
+      }, this.scene);
+      light.position = pos;
+      light.material = lightMat;
+      light.parent = root;
+      meshes.push(light);
     }
 
     return {
@@ -240,15 +293,15 @@ export class Traffic {
       type: VehicleType.Truck,
       position: new Vector3(0, STREET_Y, 0),
       direction: new Vector3(1, 0, 0),
-      speed: 6 + Math.random() * 4,
-      health: 200,
+      speed: 10 + Math.random() * 5,  // 10-15 m/s (36-54 km/h)
+      health: 250,
       isDestroyed: false,
       debrisVelocities: [],
     };
   }
 
   /**
-   * Creates a voxel bus
+   * Creates a voxel bus - realistically sized (2.8m wide × 12m long × 3.5m tall)
    */
   private createBus(): Vehicle {
     const root = new TransformNode('bus', this.scene);
@@ -257,41 +310,71 @@ export class Traffic {
     const windowMat = this.vehicleMaterials.get('window')!;
     const tireMat = this.vehicleMaterials.get('tire')!;
 
-    // Bus body
+    // Bus body - main chassis
     const body = MeshBuilder.CreateBox('busBody', {
-      width: 2.5, height: 2.8, depth: 10.0
+      width: 2.8, height: 3.2, depth: 12.0
     }, this.scene);
-    body.position.y = 1.6;
+    body.position.y = 2.0;
     body.material = bodyMat;
     body.parent = root;
     meshes.push(body);
 
-    // Windows strip
-    const windows = MeshBuilder.CreateBox('busWindows', {
-      width: 2.6, height: 1.0, depth: 8.0
+    // Windows strip (rows of windows on sides)
+    const windowsLeft = MeshBuilder.CreateBox('busWindowsLeft', {
+      width: 0.12, height: 1.4, depth: 10.0
     }, this.scene);
-    windows.position = new Vector3(0, 2.2, 0);
-    windows.material = windowMat;
-    windows.parent = root;
-    meshes.push(windows);
+    windowsLeft.position = new Vector3(-1.45, 2.5, 0);
+    windowsLeft.material = windowMat;
+    windowsLeft.parent = root;
+    meshes.push(windowsLeft);
 
-    // Tires (6)
+    const windowsRight = MeshBuilder.CreateBox('busWindowsRight', {
+      width: 0.12, height: 1.4, depth: 10.0
+    }, this.scene);
+    windowsRight.position = new Vector3(1.45, 2.5, 0);
+    windowsRight.material = windowMat;
+    windowsRight.parent = root;
+    meshes.push(windowsRight);
+
+    // Front windshield
+    const frontWindow = MeshBuilder.CreateBox('busFrontWindow', {
+      width: 2.5, height: 1.5, depth: 0.15
+    }, this.scene);
+    frontWindow.position = new Vector3(0, 2.6, 6.0);
+    frontWindow.material = windowMat;
+    frontWindow.parent = root;
+    meshes.push(frontWindow);
+
+    // Tires (6) - larger bus tires
     const tirePositions = [
-      new Vector3(-1.1, 0.5, 3.5),
-      new Vector3(1.1, 0.5, 3.5),
-      new Vector3(-1.1, 0.5, -1.0),
-      new Vector3(1.1, 0.5, -1.0),
-      new Vector3(-1.1, 0.5, -3.5),
-      new Vector3(1.1, 0.5, -3.5),
+      new Vector3(-1.25, 0.6, 4.5),
+      new Vector3(1.25, 0.6, 4.5),
+      new Vector3(-1.25, 0.6, -1.5),
+      new Vector3(1.25, 0.6, -1.5),
+      new Vector3(-1.25, 0.6, -4.5),
+      new Vector3(1.25, 0.6, -4.5),
     ];
     for (const pos of tirePositions) {
       const tire = MeshBuilder.CreateBox('tire', {
-        width: 0.4, height: 0.9, depth: 0.9
+        width: 0.5, height: 1.2, depth: 1.2
       }, this.scene);
       tire.position = pos;
       tire.material = tireMat;
       tire.parent = root;
       meshes.push(tire);
+    }
+
+    // Headlights
+    const lightMat = this.vehicleMaterials.get('light')!;
+    const headlightPositions = [new Vector3(-1.1, 1.2, 6.0), new Vector3(1.1, 1.2, 6.0)];
+    for (const pos of headlightPositions) {
+      const light = MeshBuilder.CreateBox('headlight', {
+        width: 0.5, height: 0.4, depth: 0.15
+      }, this.scene);
+      light.position = pos;
+      light.material = lightMat;
+      light.parent = root;
+      meshes.push(light);
     }
 
     return {
@@ -300,41 +383,64 @@ export class Traffic {
       type: VehicleType.Bus,
       position: new Vector3(0, STREET_Y, 0),
       direction: new Vector3(1, 0, 0),
-      speed: 5 + Math.random() * 3,
-      health: 300,
+      speed: 8 + Math.random() * 4,  // 8-12 m/s (29-43 km/h)
+      health: 400,
       isDestroyed: false,
       debrisVelocities: [],
     };
   }
 
   /**
-   * Spawns a new vehicle near the player
+   * Gets a random street position near the player
+   * Streets are at chunk edges (first STREET_WIDTH meters of each chunk on all sides)
+   */
+  private getStreetPosition(playerPosition: Vector3): { x: number; z: number; isHorizontal: boolean; lane: number } {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 80 + Math.random() * 250;
+
+    const baseX = playerPosition.x + Math.cos(angle) * dist;
+    const baseZ = playerPosition.z + Math.sin(angle) * dist;
+
+    // Determine which chunk we're near
+    const chunkX = Math.floor(baseX / CITY_CHUNK_SIZE);
+    const chunkZ = Math.floor(baseZ / CITY_CHUNK_SIZE);
+
+    // Streets are at chunk edges. Pick either horizontal (along X) or vertical (along Z) street
+    const isHorizontal = Math.random() > 0.5;
+
+    // Pick a lane within the street (streets have multiple lanes)
+    // Lane 0-1 go one direction, lanes 2-3 go the other direction
+    const lane = Math.floor(Math.random() * (LANES_PER_DIRECTION * 2));
+    const laneOffset = (lane - (LANES_PER_DIRECTION - 0.5)) * LANE_WIDTH;
+
+    let x: number;
+    let z: number;
+
+    if (isHorizontal) {
+      // Horizontal street - vehicle drives along X axis
+      // Street is at the boundary between chunks (z = chunkZ * CITY_CHUNK_SIZE)
+      x = baseX;
+      // Position in the street with lane offset
+      z = chunkZ * CITY_CHUNK_SIZE + STREET_WIDTH / 2 + laneOffset;
+    } else {
+      // Vertical street - vehicle drives along Z axis
+      // Street is at the boundary between chunks (x = chunkX * CITY_CHUNK_SIZE)
+      z = baseZ;
+      // Position in the street with lane offset
+      x = chunkX * CITY_CHUNK_SIZE + STREET_WIDTH / 2 + laneOffset;
+    }
+
+    return { x, z, isHorizontal, lane };
+  }
+
+  /**
+   * Spawns a new vehicle near the player - restricted to streets only
    */
   private spawnVehicle(playerPosition: Vector3): void {
     if (this.vehicles.length >= MAX_VEHICLES) return;
 
-    // Spawn on a "street" - aligned to chunk grid
-    const chunkSize = 200;
-    const streetOffset = 15;  // Offset from chunk edge for streets
-
-    const angle = Math.random() * Math.PI * 2;
-    const dist = 100 + Math.random() * 200;
-
-    // Snap to street grid
-    let x = playerPosition.x + Math.cos(angle) * dist;
-    let z = playerPosition.z + Math.sin(angle) * dist;
-
-    // Align to chunk streets
-    const chunkX = Math.floor(x / chunkSize);
-    const chunkZ = Math.floor(z / chunkSize);
-
-    // Randomly choose horizontal or vertical street
-    const isHorizontal = Math.random() > 0.5;
-    if (isHorizontal) {
-      z = chunkZ * chunkSize + streetOffset;
-    } else {
-      x = chunkX * chunkSize + streetOffset;
-    }
+    // Get a proper street position
+    const { x, z, isHorizontal, lane } = this.getStreetPosition(playerPosition);
 
     // Create vehicle based on type
     const typeRoll = Math.random();
@@ -358,11 +464,14 @@ export class Traffic {
     vehicle.position = new Vector3(x, STREET_Y, z);
     vehicle.root.position = vehicle.position;
 
-    // Direction based on street orientation
+    // Direction based on street orientation and lane
+    // Lanes 0-1 go positive direction, lanes 2-3 go negative direction
+    const goingPositive = lane < LANES_PER_DIRECTION;
+
     if (isHorizontal) {
-      vehicle.direction = new Vector3(Math.random() > 0.5 ? 1 : -1, 0, 0);
+      vehicle.direction = new Vector3(goingPositive ? 1 : -1, 0, 0);
     } else {
-      vehicle.direction = new Vector3(0, 0, Math.random() > 0.5 ? 1 : -1);
+      vehicle.direction = new Vector3(0, 0, goingPositive ? 1 : -1);
     }
 
     // Face direction of travel
@@ -497,15 +606,17 @@ export class Traffic {
   }
 
   /**
-   * Checks collision with vehicles
+   * Checks collision with vehicles - uses larger hit radii for bigger vehicles
    */
   public checkCollision(position: Vector3, radius: number, velocity: Vector3): Vehicle | null {
     for (const vehicle of this.vehicles) {
       if (vehicle.isDestroyed) continue;
 
       const dist = Vector3.Distance(position, vehicle.position);
-      const hitRadius = vehicle.type === VehicleType.Bus ? 6 :
-                        vehicle.type === VehicleType.Truck ? 4 : 2.5;
+      // Hit radii based on actual vehicle sizes
+      const hitRadius = vehicle.type === VehicleType.Bus ? 8 :    // 12m long bus
+                        vehicle.type === VehicleType.Truck ? 6 :  // 8m long truck
+                        3.5;                                       // 5m long car
 
       if (dist < radius + hitRadius) {
         // Calculate damage based on impact speed

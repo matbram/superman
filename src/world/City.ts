@@ -27,15 +27,23 @@ const LOD_MIN_VISIBILITY = 0.4;     // Minimum visibility for distant buildings
 const ENABLE_CITY_PERF_LOGGING = true;
 const CITY_PERF_LOG_INTERVAL = 2000;  // Log every 2 seconds
 
+// Street layout - realistic NYC grid (exported for Traffic system)
+export const STREET_WIDTH = 20;          // Width of streets at chunk edges (realistic NYC)
+export const CITY_CHUNK_SIZE = 200;      // Exported chunk size for traffic
+const SIDEWALK_HEIGHT = 0.3;
+
 // Building generation - NYC-style dense city
 // Player is 1.8m tall, so buildings should be 30-300m (realistic NYC scale)
-const SIDEWALK_HEIGHT = 0.3;
 const MIN_BUILDING_HEIGHT = 50;   // ~25 stories minimum
 const MAX_BUILDING_HEIGHT = 250;  // ~125 stories for tall skyscrapers
 const MIN_BUILDING_WIDTH = 15;    // Realistic NYC building footprint
 const MAX_BUILDING_WIDTH = 40;    // Large office buildings
-const BUILDING_SPACING = 3;       // Narrow NYC streets (~20m with building widths)
-const BUILDINGS_PER_CHUNK = 18;   // Dense but performant
+const BUILDING_SPACING = 5;       // Space between buildings
+const BUILDINGS_PER_CHUNK = 16;   // Dense but performant
+
+// Building zone - area where buildings can be placed (inside the streets)
+const BUILDING_ZONE_START = STREET_WIDTH;  // Buildings start after street
+const BUILDING_ZONE_END = CHUNK_SIZE - STREET_WIDTH;  // Buildings end before street
 
 // Building style types - more variety
 enum BuildingStyle {
@@ -385,7 +393,7 @@ export class City {
 
     const collisionMeshes: Mesh[] = [];
 
-    // Create chunk ground (asphalt/road)
+    // Create chunk ground (asphalt/road) - covers the entire chunk
     const chunkGround = MeshBuilder.CreateGround(
       `ground_${key}`,
       { width: CHUNK_SIZE, height: CHUNK_SIZE },
@@ -395,31 +403,37 @@ export class City {
     chunkGround.material = this.groundMaterial;
     chunkGround.receiveShadows = true;
     chunkGround.isPickable = true;
-    chunkGround.freezeWorldMatrix();  // Static - never moves
+    chunkGround.freezeWorldMatrix();
     createCollisionBox(chunkGround, this.physicsManager);
     collisionMeshes.push(chunkGround);
 
-    // Create sidewalk (raised slightly)
+    // Create sidewalk block (raised area where buildings sit)
+    // This is the area BETWEEN the streets on each side
+    const sidewalkSize = BUILDING_ZONE_END - BUILDING_ZONE_START;
     const sidewalk = MeshBuilder.CreateBox(
       `sidewalk_${key}`,
-      { width: CHUNK_SIZE - 15, height: SIDEWALK_HEIGHT, depth: CHUNK_SIZE - 15 },
+      { width: sidewalkSize, height: SIDEWALK_HEIGHT, depth: sidewalkSize },
       this.scene
     );
-    sidewalk.position = new Vector3(worldX + halfChunk, SIDEWALK_HEIGHT / 2, worldZ + halfChunk);
+    sidewalk.position = new Vector3(
+      worldX + BUILDING_ZONE_START + sidewalkSize / 2,
+      SIDEWALK_HEIGHT / 2,
+      worldZ + BUILDING_ZONE_START + sidewalkSize / 2
+    );
     sidewalk.material = this.sidewalkMaterial;
     sidewalk.receiveShadows = true;
-    sidewalk.freezeWorldMatrix();  // Static - never moves
+    sidewalk.freezeWorldMatrix();
     createCollisionBox(sidewalk, this.physicsManager);
     collisionMeshes.push(sidewalk);
 
-    // Generate buildings with varied styles
+    // Generate buildings with varied styles - ONLY within the building zone
     let buildingCount = 0;
-    let currentX = worldX + BUILDING_SPACING + 8;
-    const endX = worldX + CHUNK_SIZE - BUILDING_SPACING - 8;
-    const endZ = worldZ + CHUNK_SIZE - BUILDING_SPACING - 8;
+    let currentX = worldX + BUILDING_ZONE_START + BUILDING_SPACING;
+    const endX = worldX + BUILDING_ZONE_END - BUILDING_SPACING;
+    const endZ = worldZ + BUILDING_ZONE_END - BUILDING_SPACING;
 
     while (currentX < endX && buildingCount < BUILDINGS_PER_CHUNK) {
-      let currentZ = worldZ + BUILDING_SPACING + 8;
+      let currentZ = worldZ + BUILDING_ZONE_START + BUILDING_SPACING;
 
       while (currentZ < endZ && buildingCount < BUILDINGS_PER_CHUNK) {
         const bWidth = random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH);
@@ -714,9 +728,9 @@ export class City {
    * Gets spawn position - on the road at chunk edge, guaranteed not inside a building
    */
   public getSpawnPosition(): Vector3 {
-    // Spawn on the road at the edge of chunk (0,0)
-    // Buildings start at BUILDING_SPACING + 8 = 18, so x=5 is safe on the road
-    return new Vector3(5, 1.0, CHUNK_SIZE / 2);
+    // Spawn in the middle of the street at the edge of chunk (0,0)
+    // Streets are STREET_WIDTH (20m) wide at chunk edges
+    return new Vector3(STREET_WIDTH / 2, 1.0, CHUNK_SIZE / 2);
   }
 
   /**
