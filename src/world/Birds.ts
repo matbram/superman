@@ -13,11 +13,7 @@ import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 
 // Bird constants - more birds for a lively city
 const NUM_BIRD_FLOCKS = 20;        // Many more flocks
-const BIRDS_PER_FLOCK = 8;         // Larger flocks
-const BIRD_HEIGHT_MIN = 30;        // Some birds fly low (pigeons)
-const BIRD_HEIGHT_MAX = 300;       // Some fly very high (hawks)
 const BIRD_SPAWN_RADIUS = 500;
-const BIRD_SPEED = 18;
 const WING_FLAP_SPEED = 14;
 
 // Bird types for variety

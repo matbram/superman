@@ -13,7 +13,6 @@ import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 
 // Traffic constants
 const MAX_VEHICLES = 60;
-const VEHICLE_SPAWN_RADIUS = 400;
 const VEHICLE_DESPAWN_RADIUS = 500;
 const STREET_Y = 0.5;  // Vehicles drive on streets
 
