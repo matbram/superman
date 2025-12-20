@@ -10,7 +10,6 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator';
-import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { PhysicsManager, createCollisionBox } from '../physics/physics';
 
 // Chunk and city generation constants
@@ -105,8 +104,20 @@ export class City {
     // Create ground
     this.createGround();
 
-    // Generate initial chunks
-    this.updateChunks(new Vector3(0, 0, 0));
+    // Generate initial chunks immediately (not throttled) for spawn area
+    this.generateInitialChunks();
+  }
+
+  /**
+   * Generates initial chunks around spawn point synchronously
+   */
+  private generateInitialChunks(): void {
+    // Generate a 3x3 grid of chunks around origin immediately
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        this.generateChunk(dx, dz);
+      }
+    }
   }
 
   /**
@@ -215,10 +226,12 @@ export class City {
   }
 
   /**
-   * Generates a city chunk with merged geometry
+   * Generates a city chunk with simple box buildings (reliable rendering)
    */
   private generateChunk(chunkX: number, chunkZ: number): void {
     const key = `${chunkX},${chunkZ}`;
+    if (this.chunks.has(key)) return; // Already exists
+
     const chunkSeed = this.hashCoords(chunkX, chunkZ);
     const random = new SeededRandom(chunkSeed);
 
@@ -226,15 +239,7 @@ export class City {
     const worldZ = chunkZ * CHUNK_SIZE;
     const halfChunk = CHUNK_SIZE / 2;
 
-    // Collect building data for merging
-    const buildingData: {
-      positions: number[];
-      indices: number[];
-      normals: number[];
-    } = { positions: [], indices: [], normals: [] };
-
     const collisionMeshes: Mesh[] = [];
-    let indexOffset = 0;
 
     // Create sidewalk
     const sidewalk = MeshBuilder.CreateBox(
@@ -245,18 +250,17 @@ export class City {
     sidewalk.position = new Vector3(worldX + halfChunk, SIDEWALK_HEIGHT / 2, worldZ + halfChunk);
     sidewalk.material = this.sidewalkMaterial;
     sidewalk.receiveShadows = true;
-    sidewalk.freezeWorldMatrix();
     createCollisionBox(sidewalk, this.physicsManager);
     collisionMeshes.push(sidewalk);
 
-    // Generate buildings
+    // Generate buildings - simple box meshes with shared materials
     let buildingCount = 0;
-    let currentX = worldX + BUILDING_SPACING;
-    const endX = worldX + CHUNK_SIZE - BUILDING_SPACING;
-    const endZ = worldZ + CHUNK_SIZE - BUILDING_SPACING;
+    let currentX = worldX + BUILDING_SPACING + 10;
+    const endX = worldX + CHUNK_SIZE - BUILDING_SPACING - 10;
+    const endZ = worldZ + CHUNK_SIZE - BUILDING_SPACING - 10;
 
     while (currentX < endX && buildingCount < BUILDINGS_PER_CHUNK) {
-      let currentZ = worldZ + BUILDING_SPACING;
+      let currentZ = worldZ + BUILDING_SPACING + 10;
 
       while (currentZ < endZ && buildingCount < BUILDINGS_PER_CHUNK) {
         const bWidth = random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH);
@@ -267,139 +271,42 @@ export class City {
         const by = bHeight / 2 + SIDEWALK_HEIGHT;
         const bz = currentZ + bDepth / 2;
 
-        // Add building geometry to merged data
-        const boxData = this.createBoxVertexData(bx, by, bz, bWidth, bHeight, bDepth);
-
-        // Offset indices
-        for (const idx of boxData.indices) {
-          buildingData.indices.push(idx + indexOffset);
-        }
-        buildingData.positions.push(...boxData.positions);
-        buildingData.normals.push(...boxData.normals);
-        indexOffset += boxData.positions.length / 3;
-
-        // Create invisible collision mesh
-        const collider = MeshBuilder.CreateBox(
-          `collider_${key}_${buildingCount}`,
+        // Create visible building mesh
+        const building = MeshBuilder.CreateBox(
+          `building_${key}_${buildingCount}`,
           { width: bWidth, height: bHeight, depth: bDepth },
           this.scene
         );
-        collider.position = new Vector3(bx, by, bz);
-        collider.isVisible = false;
-        collider.freezeWorldMatrix();
-        createCollisionBox(collider, this.physicsManager);
-        collisionMeshes.push(collider);
+        building.position = new Vector3(bx, by, bz);
+
+        // Use shared material
+        const matIndex = Math.abs(chunkX + chunkZ + buildingCount) % this.buildingMaterials.length;
+        building.material = this.buildingMaterials[matIndex];
+        building.receiveShadows = true;
+
+        // Add to shadow caster (limit shadows for performance)
+        if (buildingCount < 4) {
+          this.shadowGenerator.addShadowCaster(building);
+        }
+
+        createCollisionBox(building, this.physicsManager);
+        collisionMeshes.push(building);
 
         buildingCount++;
-        currentZ += bDepth + BUILDING_SPACING + random.range(5, 15);
+        currentZ += bDepth + BUILDING_SPACING + random.range(10, 25);
       }
 
-      currentX += random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH) + BUILDING_SPACING + random.range(5, 15);
-    }
-
-    // Create merged mesh from all buildings
-    let mergedMesh: Mesh | null = null;
-
-    if (buildingData.positions.length > 0) {
-      mergedMesh = new Mesh(`chunk_${key}`, this.scene);
-
-      const vertexData = new VertexData();
-      vertexData.positions = buildingData.positions;
-      vertexData.indices = buildingData.indices;
-      vertexData.normals = buildingData.normals;
-      vertexData.applyToMesh(mergedMesh);
-
-      // Use a random shared material
-      const matIndex = Math.abs(chunkX + chunkZ) % this.buildingMaterials.length;
-      mergedMesh.material = this.buildingMaterials[matIndex];
-      mergedMesh.receiveShadows = true;
-
-      // Add to shadow generator (only the merged mesh)
-      this.shadowGenerator.addShadowCaster(mergedMesh);
-
-      mergedMesh.freezeWorldMatrix();
+      currentX += random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH) + BUILDING_SPACING + random.range(10, 25);
     }
 
     this.chunks.set(key, {
       key,
       chunkX,
       chunkZ,
-      mergedMesh,
+      mergedMesh: null, // Not using merged mesh anymore
       collisionMeshes,
       lastAccess: performance.now(),
     });
-  }
-
-  /**
-   * Creates vertex data for a box at a specific position
-   */
-  private createBoxVertexData(
-    x: number, y: number, z: number,
-    width: number, height: number, depth: number
-  ): { positions: number[]; indices: number[]; normals: number[] } {
-    const hw = width / 2;
-    const hh = height / 2;
-    const hd = depth / 2;
-
-    // 8 vertices of the box
-    const positions = [
-      // Front face
-      x - hw, y - hh, z + hd,
-      x + hw, y - hh, z + hd,
-      x + hw, y + hh, z + hd,
-      x - hw, y + hh, z + hd,
-      // Back face
-      x + hw, y - hh, z - hd,
-      x - hw, y - hh, z - hd,
-      x - hw, y + hh, z - hd,
-      x + hw, y + hh, z - hd,
-      // Top face
-      x - hw, y + hh, z + hd,
-      x + hw, y + hh, z + hd,
-      x + hw, y + hh, z - hd,
-      x - hw, y + hh, z - hd,
-      // Bottom face
-      x - hw, y - hh, z - hd,
-      x + hw, y - hh, z - hd,
-      x + hw, y - hh, z + hd,
-      x - hw, y - hh, z + hd,
-      // Right face
-      x + hw, y - hh, z + hd,
-      x + hw, y - hh, z - hd,
-      x + hw, y + hh, z - hd,
-      x + hw, y + hh, z + hd,
-      // Left face
-      x - hw, y - hh, z - hd,
-      x - hw, y - hh, z + hd,
-      x - hw, y + hh, z + hd,
-      x - hw, y + hh, z - hd,
-    ];
-
-    const indices = [
-      0, 1, 2, 0, 2, 3,       // Front
-      4, 5, 6, 4, 6, 7,       // Back
-      8, 9, 10, 8, 10, 11,    // Top
-      12, 13, 14, 12, 14, 15, // Bottom
-      16, 17, 18, 16, 18, 19, // Right
-      20, 21, 22, 20, 22, 23, // Left
-    ];
-
-    const normals = [
-      // Front
-      0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1,
-      // Back
-      0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1,
-      // Top
-      0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0,
-      // Bottom
-      0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0,
-      // Right
-      1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0,
-      // Left
-      -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0,
-    ];
-
-    return { positions, indices, normals };
   }
 
   /**
@@ -409,14 +316,12 @@ export class City {
     const chunk = this.chunks.get(key);
     if (!chunk) return;
 
-    // Dispose merged mesh
-    if (chunk.mergedMesh) {
-      this.shadowGenerator.removeShadowCaster(chunk.mergedMesh);
-      chunk.mergedMesh.dispose();
-    }
-
-    // Dispose collision meshes
+    // Dispose all meshes (buildings + sidewalk)
     for (const mesh of chunk.collisionMeshes) {
+      // Remove from shadow caster if it was added
+      if (mesh.name.startsWith('building_')) {
+        this.shadowGenerator.removeShadowCaster(mesh);
+      }
       this.physicsManager.removeCollisionMesh(mesh);
       mesh.dispose();
     }
@@ -445,8 +350,10 @@ export class City {
   public getBuildings(): Mesh[] {
     const buildings: Mesh[] = [];
     for (const chunk of this.chunks.values()) {
-      if (chunk.mergedMesh) {
-        buildings.push(chunk.mergedMesh);
+      for (const mesh of chunk.collisionMeshes) {
+        if (mesh.name.startsWith('building_')) {
+          buildings.push(mesh);
+        }
       }
     }
     return buildings;
