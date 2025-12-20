@@ -158,8 +158,13 @@ class Game {
     // Update city chunks based on player position (procedural generation)
     this.city.updateChunks(this.player.getPosition());
 
-    // Update atmosphere (clouds, sun positioning)
-    this.atmosphere.update(this.player.getPosition(), deltaTime);
+    // Update atmosphere (clouds, sun positioning, cloud dispersion)
+    this.atmosphere.update(
+      this.player.getPosition(),
+      deltaTime,
+      this.player.getVelocity(),
+      this.player.getCurrentSpeed()
+    );
 
     // Update building damage (debris physics)
     this.buildingDamage.update(deltaTime);

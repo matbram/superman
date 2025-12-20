@@ -17,6 +17,11 @@ const CLOUD_HEIGHT_MAX = 350;
 const CLOUD_RENDER_DISTANCE = 700;
 const NUM_CLOUD_CLUSTERS = 25; // Reduced for performance
 
+// Cloud dispersion constants
+const CLOUD_DISPERSE_RADIUS = 30; // How close player needs to be to disperse clouds
+const CLOUD_DISPERSE_SPEED = 80; // How fast clouds push away
+const CLOUD_RECOVER_SPEED = 15; // How fast clouds return to normal
+
 /**
  * Individual cloud puff with its own properties
  */
@@ -26,6 +31,10 @@ interface CloudPuff {
   phase: number;
   bobSpeed: number;
   bobAmount: number;
+  // Dispersion state
+  disperseOffset: Vector3;
+  disperseScale: number;
+  originalScale: Vector3;
 }
 
 /**
@@ -245,6 +254,9 @@ export class Atmosphere {
         phase: Math.random() * Math.PI * 2,
         bobSpeed: 0.15 + Math.random() * 0.2,
         bobAmount: 1.5 + Math.random() * 2,
+        disperseOffset: Vector3.Zero(),
+        disperseScale: 1,
+        originalScale: new Vector3(scaleX, scaleY, scaleZ),
       });
     }
 
@@ -277,6 +289,9 @@ export class Atmosphere {
         phase: Math.random() * Math.PI * 2,
         bobSpeed: 0.1 + Math.random() * 0.15,
         bobAmount: 2 + Math.random() * 3,
+        disperseOffset: Vector3.Zero(),
+        disperseScale: 1,
+        originalScale: new Vector3(scaleX, scaleY, scaleZ),
       });
     }
 
@@ -299,7 +314,7 @@ export class Atmosphere {
   /**
    * Updates cloud positions and manages cloud streaming
    */
-  public update(playerPosition: Vector3, deltaTime: number): void {
+  public update(playerPosition: Vector3, deltaTime: number, playerVelocity?: Vector3, playerSpeed?: number): void {
     this.time += deltaTime;
 
     // Update sun position relative to player
@@ -313,17 +328,61 @@ export class Atmosphere {
       this.sunGlow.position = this.sunMesh.position.clone();
     }
 
+    const speed = playerSpeed ?? 0;
+    const velocity = playerVelocity ?? Vector3.Zero();
+
     // Update cloud clusters
     for (const cluster of this.cloudClusters) {
       // Drift clouds slowly
       cluster.basePosition.addInPlace(cluster.driftSpeed.scale(deltaTime));
 
-      // Simple bobbing for each puff (no rotation for performance)
+      // Update each puff with bobbing and dispersion
       for (const puff of cluster.puffs) {
         const bobY = Math.sin(this.time * puff.bobSpeed + puff.phase) * puff.bobAmount;
-        puff.mesh.position.x = cluster.basePosition.x + puff.localOffset.x;
-        puff.mesh.position.y = cluster.basePosition.y + puff.localOffset.y + bobY;
-        puff.mesh.position.z = cluster.basePosition.z + puff.localOffset.z;
+
+        // Calculate base position
+        const baseX = cluster.basePosition.x + puff.localOffset.x;
+        const baseY = cluster.basePosition.y + puff.localOffset.y + bobY;
+        const baseZ = cluster.basePosition.z + puff.localOffset.z;
+
+        // Check distance to player for dispersion
+        const dx = baseX - playerPosition.x;
+        const dy = baseY - playerPosition.y;
+        const dz = baseZ - playerPosition.z;
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+        if (dist < CLOUD_DISPERSE_RADIUS && speed > 30) {
+          // Player is flying through this cloud puff - disperse it!
+          const disperseStrength = (1 - dist / CLOUD_DISPERSE_RADIUS) * (speed / 100);
+
+          // Push cloud away from player in direction player is moving
+          const pushDir = new Vector3(dx, dy, dz).normalize();
+          // Also add component in player's velocity direction
+          if (velocity.length() > 1) {
+            const velDir = velocity.normalize();
+            pushDir.addInPlace(velDir.scale(0.5));
+            pushDir.normalize();
+          }
+
+          puff.disperseOffset.addInPlace(pushDir.scale(CLOUD_DISPERSE_SPEED * disperseStrength * deltaTime));
+
+          // Shrink the cloud as it disperses
+          puff.disperseScale = Math.max(0.3, puff.disperseScale - disperseStrength * 2 * deltaTime);
+        } else {
+          // Recover: slowly return to original position and scale
+          puff.disperseOffset.scaleInPlace(1 - CLOUD_RECOVER_SPEED * deltaTime * 0.1);
+          puff.disperseScale = Math.min(1, puff.disperseScale + CLOUD_RECOVER_SPEED * deltaTime * 0.05);
+        }
+
+        // Apply position with dispersion offset
+        puff.mesh.position.x = baseX + puff.disperseOffset.x;
+        puff.mesh.position.y = baseY + puff.disperseOffset.y;
+        puff.mesh.position.z = baseZ + puff.disperseOffset.z;
+
+        // Apply scale with dispersion
+        puff.mesh.scaling.x = puff.originalScale.x * puff.disperseScale;
+        puff.mesh.scaling.y = puff.originalScale.y * puff.disperseScale;
+        puff.mesh.scaling.z = puff.originalScale.z * puff.disperseScale;
       }
 
       // Check if cluster is too far from player
@@ -339,9 +398,11 @@ export class Atmosphere {
         cluster.basePosition.z = playerPosition.z + Math.sin(angle) * newRadius;
         cluster.basePosition.y = CLOUD_HEIGHT_MIN + Math.random() * (CLOUD_HEIGHT_MAX - CLOUD_HEIGHT_MIN);
 
-        // Reset puff positions
+        // Reset puff positions and dispersion
         for (const puff of cluster.puffs) {
           puff.mesh.position = cluster.basePosition.add(puff.localOffset);
+          puff.disperseOffset = Vector3.Zero();
+          puff.disperseScale = 1;
         }
       }
     }

@@ -67,6 +67,10 @@ export class Player {
   private shockwaveRings: Mesh[] = [];
   private wasAboveSonicThreshold: boolean = false;
 
+  // Wind breaking effect - visible air compression in front during flight
+  private windBreakCone: Mesh | null = null;
+  private windBreakRings: Mesh[] = [];
+
   // Stop shockwave for building damage
   private onBuildingDamage: ((position: Vector3, radius: number, force: number) => void) | null = null;
 
@@ -110,6 +114,7 @@ export class Player {
     // Create speed effect particles
     this.createSpeedParticles();
     this.createTakeoffParticles();
+    this.createWindBreakEffect();
 
     // Initialize state machine
     this.states = new Map<PlayerStateType, IPlayerState>();
@@ -241,6 +246,112 @@ export class Player {
   }
 
   /**
+   * Creates wind breaking effect - visible air compression cone and rings in front of player
+   */
+  private createWindBreakEffect(): void {
+    // Create main compression cone in front of player
+    this.windBreakCone = MeshBuilder.CreateCylinder('windBreakCone', {
+      diameterTop: 0,
+      diameterBottom: 3,
+      height: 4,
+      tessellation: 16,
+    }, this.scene);
+
+    const coneMaterial = new StandardMaterial('windConeMat', this.scene);
+    coneMaterial.diffuseColor = new Color3(0.9, 0.95, 1);
+    coneMaterial.emissiveColor = new Color3(0.3, 0.5, 0.8);
+    coneMaterial.specularColor = new Color3(1, 1, 1);
+    coneMaterial.alpha = 0;
+    coneMaterial.backFaceCulling = false;
+
+    this.windBreakCone.material = coneMaterial;
+    this.windBreakCone.isPickable = false;
+    this.windBreakCone.parent = this.rootNode;
+    // Position in front of player, tip pointing forward
+    this.windBreakCone.rotation.x = Math.PI / 2;
+    this.windBreakCone.position = new Vector3(0, 0, 3);
+
+    // Create compression rings that follow the player
+    for (let i = 0; i < 3; i++) {
+      const ring = MeshBuilder.CreateTorus('windRing_' + i, {
+        diameter: 1.5 + i * 0.8,
+        thickness: 0.08,
+        tessellation: 24,
+      }, this.scene);
+
+      const ringMaterial = new StandardMaterial('windRingMat_' + i, this.scene);
+      ringMaterial.diffuseColor = new Color3(0.85, 0.9, 1);
+      ringMaterial.emissiveColor = new Color3(0.4, 0.6, 0.9);
+      ringMaterial.alpha = 0;
+      ringMaterial.backFaceCulling = false;
+
+      ring.material = ringMaterial;
+      ring.isPickable = false;
+      ring.parent = this.rootNode;
+      ring.position = new Vector3(0, 0, 2 + i * 1.2);
+
+      this.windBreakRings.push(ring);
+    }
+  }
+
+  /**
+   * Updates wind breaking effect based on speed
+   */
+  private updateWindBreakEffect(deltaTime: number): void {
+    const WIND_BREAK_START_SPEED = 50;  // Speed at which effect starts appearing
+    const WIND_BREAK_FULL_SPEED = 150;  // Speed at which effect is fully visible
+
+    if (!this.windBreakCone || !this.isFlightMode) {
+      // Hide effect when not in flight
+      if (this.windBreakCone) {
+        (this.windBreakCone.material as StandardMaterial).alpha = 0;
+      }
+      for (const ring of this.windBreakRings) {
+        (ring.material as StandardMaterial).alpha = 0;
+      }
+      return;
+    }
+
+    // Calculate effect intensity based on speed
+    let intensity = 0;
+    if (this.currentSpeed > WIND_BREAK_START_SPEED) {
+      intensity = Math.min(1, (this.currentSpeed - WIND_BREAK_START_SPEED) / (WIND_BREAK_FULL_SPEED - WIND_BREAK_START_SPEED));
+    }
+
+    // Update cone visibility and scale
+    const coneMat = this.windBreakCone.material as StandardMaterial;
+    const targetConeAlpha = intensity * 0.25;  // Subtle transparency
+    coneMat.alpha = this.lerp(coneMat.alpha, targetConeAlpha, 5 * deltaTime);
+
+    // Scale cone based on speed - gets more pronounced at higher speeds
+    const coneScale = 0.8 + intensity * 0.5;
+    this.windBreakCone.scaling = new Vector3(coneScale, coneScale, coneScale + intensity * 0.3);
+
+    // Pulse effect for intensity
+    const pulseTime = performance.now() * 0.003;
+    const pulse = 1 + Math.sin(pulseTime) * 0.1 * intensity;
+
+    // Update rings with wave animation
+    for (let i = 0; i < this.windBreakRings.length; i++) {
+      const ring = this.windBreakRings[i];
+      const ringMat = ring.material as StandardMaterial;
+
+      // Stagger ring visibility
+      const ringIntensity = Math.max(0, intensity - i * 0.15);
+      const targetRingAlpha = ringIntensity * 0.35;
+      ringMat.alpha = this.lerp(ringMat.alpha, targetRingAlpha, 5 * deltaTime);
+
+      // Animate ring position - wave effect flowing back
+      const waveOffset = Math.sin(pulseTime * 2 + i * 1.5) * 0.3 * intensity;
+      ring.position.z = 2 + i * 1.2 + waveOffset;
+
+      // Scale rings based on speed
+      const ringScale = (1 + i * 0.3) * pulse * (0.8 + intensity * 0.4);
+      ring.scaling = new Vector3(ringScale, ringScale, 1);
+    }
+  }
+
+  /**
    * Creates a shockwave ring mesh for visual effect
    */
   private createShockwaveRing(): Mesh {
@@ -292,10 +403,11 @@ export class Player {
     }, this.scene);
 
     const material = new StandardMaterial('stopShockwaveMat', this.scene);
-    material.diffuseColor = new Color3(1, 0.4, 0.1);
-    material.emissiveColor = new Color3(1, 0.3, 0);
-    material.specularColor = new Color3(1, 0.5, 0.2);
-    material.alpha = 0.9;
+    // Use same blue/white colors as normal shockwave for consistency
+    material.diffuseColor = new Color3(0.8, 0.9, 1);
+    material.emissiveColor = new Color3(0.5, 0.7, 1);
+    material.specularColor = new Color3(1, 1, 1);
+    material.alpha = 0.85;
 
     ring.material = material;
     ring.isPickable = false;
@@ -546,6 +658,9 @@ export class Player {
 
     // Update existing shockwave rings
     this.updateShockwaves(deltaTime);
+
+    // Update wind breaking effect
+    this.updateWindBreakEffect(deltaTime);
 
     // Spawn shockwave ONCE when crossing the sonic threshold
     const isAboveSonicThreshold = this.currentSpeed > SHOCKWAVE_THRESHOLD && this.isFlightMode;
