@@ -32,6 +32,7 @@ const PLAYER_RADIUS = 0.4;
 // Speed effect thresholds
 const SPEED_PARTICLE_THRESHOLD = 40;  // When speed particles start
 const SHOCKWAVE_THRESHOLD = 120;      // When shockwave ring appears
+const STOP_SHOCKWAVE_RADIUS = 50;     // Radius of destructive stop shockwave
 
 export class Player {
   private scene: Scene;
@@ -65,6 +66,9 @@ export class Player {
   // Shockwave visual effect - triggers once when crossing sonic threshold
   private shockwaveRings: Mesh[] = [];
   private wasAboveSonicThreshold: boolean = false;
+
+  // Stop shockwave for building damage
+  private onBuildingDamage: ((position: Vector3, radius: number, force: number) => void) | null = null;
 
   // Audio (placeholder for future implementation)
   // TODO: Add wind audio that scales with speed
@@ -275,6 +279,55 @@ export class Player {
   }
 
   /**
+   * Creates a destructive stop shockwave ring (red/orange, larger)
+   */
+  private createStopShockwaveRing(): Mesh {
+    const ring = MeshBuilder.CreateTorus('stopShockwave', {
+      diameter: 5,
+      thickness: 0.4,
+      tessellation: 48,
+    }, this.scene);
+
+    const material = new StandardMaterial('stopShockwaveMat', this.scene);
+    material.diffuseColor = new Color3(1, 0.4, 0.1);
+    material.emissiveColor = new Color3(1, 0.3, 0);
+    material.specularColor = new Color3(1, 0.5, 0.2);
+    material.alpha = 0.9;
+
+    ring.material = material;
+    ring.isPickable = false;
+    ring.visibility = 0;
+
+    return ring;
+  }
+
+  /**
+   * Spawns a destructive stop shockwave when abruptly stopping from high speed
+   */
+  private spawnStopShockwave(previousSpeed: number): void {
+    // Create multiple expanding rings for dramatic effect
+    for (let i = 0; i < 3; i++) {
+      const ring = this.createStopShockwaveRing();
+      ring.position.copyFrom(this.physics.position);
+      ring.rotation.x = Math.PI / 2;
+      ring.scaling = new Vector3(1 + i * 0.5, 1 + i * 0.5, 1 + i * 0.5);
+      ring.visibility = 1;
+
+      this.shockwaveRings.push(ring);
+    }
+
+    // Intense camera shake
+    const shakeIntensity = Math.min(5, previousSpeed / 30);
+    this.cameraController.addShake(shakeIntensity);
+
+    // Trigger building damage in radius
+    if (this.onBuildingDamage) {
+      const force = previousSpeed / 50; // Damage force based on speed
+      this.onBuildingDamage(this.physics.position.clone(), STOP_SHOCKWAVE_RADIUS, force);
+    }
+  }
+
+  /**
    * Updates shockwave rings (expand and fade)
    */
   private updateShockwaves(deltaTime: number): void {
@@ -351,6 +404,18 @@ export class Player {
     // Trigger flight stop camera effect when transitioning from Flight to Hover
     if (previousStateType === PlayerStateType.Flight && newStateType === PlayerStateType.Hover) {
       this.cameraController.triggerFlightStopEffect(previousSpeed);
+
+      // Spawn destructive stop shockwave if was flying above sonic speed
+      if (previousSpeed > SHOCKWAVE_THRESHOLD) {
+        this.spawnStopShockwave(previousSpeed);
+      }
+    }
+
+    // Also trigger stop shockwave if transitioning from Flight to Landing at high speed
+    if (previousStateType === PlayerStateType.Flight && newStateType === PlayerStateType.Landing) {
+      if (previousSpeed > SHOCKWAVE_THRESHOLD) {
+        this.spawnStopShockwave(previousSpeed);
+      }
     }
   }
 
@@ -557,6 +622,13 @@ export class Player {
 
   public getCurrentStateType(): PlayerStateType {
     return this.currentState.type;
+  }
+
+  /**
+   * Sets callback for building damage from stop shockwave
+   */
+  public setOnBuildingDamage(callback: (position: Vector3, radius: number, force: number) => void): void {
+    this.onBuildingDamage = callback;
   }
 
   private lerp(a: number, b: number, t: number): number {

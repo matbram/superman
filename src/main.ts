@@ -9,6 +9,8 @@ import { InputManager } from './input/inputManager';
 import { PhysicsManager } from './physics/physics';
 import { Player } from './player/Player';
 import { City } from './world/City';
+import { Atmosphere } from './world/Atmosphere';
+import { BuildingDamage } from './world/BuildingDamage';
 import { Hud } from './ui/Hud';
 import { DebugOverlay } from './ui/DebugOverlay';
 
@@ -23,6 +25,8 @@ class Game {
   private physicsManager: PhysicsManager;
   private player: Player;
   private city: City;
+  private atmosphere: Atmosphere;
+  private buildingDamage: BuildingDamage;
   private hud: Hud;
   private debugOverlay: DebugOverlay;
 
@@ -60,6 +64,12 @@ class Game {
       this.sceneContext.shadowGenerator
     );
 
+    // Initialize atmosphere (clouds, sun, sky)
+    this.atmosphere = new Atmosphere(this.sceneContext.scene);
+
+    // Initialize building damage system
+    this.buildingDamage = new BuildingDamage(this.sceneContext.scene);
+
     // Initialize player
     this.player = new Player(
       this.sceneContext.scene,
@@ -70,6 +80,12 @@ class Game {
 
     // Set player spawn position
     this.player.setPosition(this.city.getSpawnPosition());
+
+    // Connect player shockwave to building damage system
+    this.player.setOnBuildingDamage((position, radius, force) => {
+      const buildings = this.city.getBuildings();
+      this.buildingDamage.applyShockwaveDamage(position, radius, force, buildings);
+    });
 
     // Initialize UI
     this.hud = new Hud();
@@ -136,6 +152,12 @@ class Game {
 
     // Update city chunks based on player position (procedural generation)
     this.city.updateChunks(this.player.getPosition());
+
+    // Update atmosphere (clouds, sun positioning)
+    this.atmosphere.update(this.player.getPosition(), deltaTime);
+
+    // Update building damage (debris physics)
+    this.buildingDamage.update(deltaTime);
 
     // Update HUD
     this.hud.update(
