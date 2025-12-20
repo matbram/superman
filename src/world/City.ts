@@ -18,14 +18,14 @@ const LOAD_RADIUS = 4;  // Load chunks much further out for seamless generation
 const UNLOAD_DISTANCE = 6;  // Keep chunks loaded longer
 const CHUNKS_PER_FRAME = 3;  // Generate multiple chunks per frame when needed
 
-// Building generation
+// Building generation - dense city
 const SIDEWALK_HEIGHT = 0.15;
-const MIN_BUILDING_HEIGHT = 30;
-const MAX_BUILDING_HEIGHT = 120;
-const MIN_BUILDING_WIDTH = 12;
-const MAX_BUILDING_WIDTH = 35;
-const BUILDING_SPACING = 10;
-const BUILDINGS_PER_CHUNK = 10; // More buildings for denser city
+const MIN_BUILDING_HEIGHT = 35;
+const MAX_BUILDING_HEIGHT = 140;
+const MIN_BUILDING_WIDTH = 10;
+const MAX_BUILDING_WIDTH = 30;
+const BUILDING_SPACING = 6;  // Tighter spacing for dense city
+const BUILDINGS_PER_CHUNK = 16; // More buildings per chunk
 
 // Building style types
 enum BuildingStyle {
@@ -379,10 +379,10 @@ export class City {
         }
 
         buildingCount++;
-        currentZ += bDepth + BUILDING_SPACING + random.range(8, 20);
+        currentZ += bDepth + BUILDING_SPACING + random.range(2, 8);
       }
 
-      currentX += random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH) + BUILDING_SPACING + random.range(8, 20);
+      currentX += random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH) + BUILDING_SPACING + random.range(2, 8);
     }
 
     this.chunks.set(key, {

@@ -150,14 +150,15 @@ export class HoverState extends BasePlayerState {
     return angle;
   }
 
-  fixedUpdate(player: Player, _input: InputState, fixedDelta: number): void {
-    // Hover has reduced gravity effect
+  fixedUpdate(player: Player, _input: InputState, _fixedDelta: number): void {
+    // Hover maintains altitude - no gravity effect
+    // Vertical movement is handled by jump/descend inputs in handleHoverMovement
     const velocity = player.getVelocity();
 
-    // Slight gravity, countered by hover force
-    const hoverForce = -player.getPhysics().getGravity() * 0.8;
-    velocity.y += (player.getPhysics().getGravity() + hoverForce) * fixedDelta;
-
-    player.setVelocity(velocity);
+    // If no vertical input, maintain current altitude (zero out drift)
+    if (Math.abs(velocity.y) < 0.5 && Math.abs(this.hoverVelocity.y) < 0.1) {
+      velocity.y = 0;
+      player.setVelocity(velocity);
+    }
   }
 }
