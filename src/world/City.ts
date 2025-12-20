@@ -14,27 +14,28 @@ import { PhysicsManager, createCollisionBox } from '../physics/physics';
 
 // Chunk and city generation constants
 const CHUNK_SIZE = 200; // Larger chunks = fewer total chunks
-const LOAD_RADIUS = 2;  // Reduced: 5x5=25 chunks instead of 7x7=49
-const UNLOAD_DISTANCE = 3;  // Unload chunks sooner
+const LOAD_RADIUS = 3;  // Increased slightly for better skyline visibility
+const UNLOAD_DISTANCE = 4;  // Unload chunks when far
 const CHUNKS_PER_FRAME = 1;  // Generate 1 chunk per frame to avoid stutters
 
 // LOD culling constants
-const LOD_FADE_START_DISTANCE = 1;  // Start fading buildings at chunk distance 1
-const LOD_FADE_END_DISTANCE = 2;    // Fully faded at chunk distance 2
-const LOD_MIN_VISIBILITY = 0.3;     // Minimum visibility for distant buildings
+const LOD_FADE_START_DISTANCE = 2;  // Start fading buildings at chunk distance 2
+const LOD_FADE_END_DISTANCE = 3;    // Fully faded at chunk distance 3
+const LOD_MIN_VISIBILITY = 0.4;     // Minimum visibility for distant buildings
 
 // Performance logging
 const ENABLE_CITY_PERF_LOGGING = true;
 const CITY_PERF_LOG_INTERVAL = 2000;  // Log every 2 seconds
 
-// Building generation - optimized for performance
-const SIDEWALK_HEIGHT = 0.15;
-const MIN_BUILDING_HEIGHT = 40;
-const MAX_BUILDING_HEIGHT = 120;
-const MIN_BUILDING_WIDTH = 12;
-const MAX_BUILDING_WIDTH = 28;
-const BUILDING_SPACING = 5;
-const BUILDINGS_PER_CHUNK = 12; // Reduced for performance (was 24)
+// Building generation - NYC-style dense city
+// Player is 1.8m tall, so buildings should be 30-300m (realistic NYC scale)
+const SIDEWALK_HEIGHT = 0.3;
+const MIN_BUILDING_HEIGHT = 50;   // ~25 stories minimum
+const MAX_BUILDING_HEIGHT = 250;  // ~125 stories for tall skyscrapers
+const MIN_BUILDING_WIDTH = 15;    // Realistic NYC building footprint
+const MAX_BUILDING_WIDTH = 40;    // Large office buildings
+const BUILDING_SPACING = 3;       // Narrow NYC streets (~20m with building widths)
+const BUILDINGS_PER_CHUNK = 18;   // Dense but performant
 
 // Building style types
 enum BuildingStyle {
@@ -469,7 +470,8 @@ export class City {
   }
 
   /**
-   * Creates a building - simplified to single mesh for performance
+   * Creates a building - NYC-style with varied proportions
+   * Single mesh per building for performance
    */
   private createBuilding(
     chunkKey: string,
@@ -477,45 +479,60 @@ export class City {
     style: BuildingStyle,
     x: number, z: number,
     width: number, depth: number, height: number,
-    _random: SeededRandom,  // Prefixed with _ to indicate intentionally unused
+    random: SeededRandom,
     chunkX: number, chunkZ: number
   ): Mesh[] {
     const meshes: Mesh[] = [];
     const baseName = `building_${chunkKey}_${index}`;
     const matIndex = Math.abs(chunkX + chunkZ + index) % this.buildingMaterials.length;
 
-    // All styles now create single mesh for performance (reduces draw calls by ~60%)
-    // Visual variety comes from different heights, widths, and materials
+    // NYC-style building variety
     let finalWidth = width;
     let finalDepth = depth;
     let finalHeight = height;
 
-    // Apply style-based size variations
+    // Add random height variation for more natural skyline
+    const heightVariation = 0.7 + random.next() * 0.6; // 70% to 130%
+    finalHeight *= heightVariation;
+
+    // Apply style-based proportions for NYC feel
     switch (style) {
       case BuildingStyle.Tower:
-        // Taller and thinner
-        finalWidth *= 0.7;
-        finalDepth *= 0.7;
-        finalHeight *= 1.2;
+        // Tall thin skyscraper (Empire State, Chrysler style)
+        finalWidth *= 0.6;
+        finalDepth *= 0.6;
+        finalHeight *= 1.5;  // Extra tall
         break;
       case BuildingStyle.Tiered:
-        // Wider base feel
-        finalWidth *= 1.1;
-        finalDepth *= 1.1;
-        finalHeight *= 0.9;
+        // Art deco style with wide base
+        finalWidth *= 1.0;
+        finalDepth *= 1.0;
+        finalHeight *= 1.1;
         break;
       case BuildingStyle.LShape:
-        // Slightly offset
-        finalWidth *= 0.9;
+        // Asymmetric modern tower
+        finalWidth *= 0.75;
+        finalDepth *= 0.85;
+        finalHeight *= 1.2;
         break;
       case BuildingStyle.Modern:
-        // Standard proportions
+        // Glass tower style - tall and slim
+        finalWidth *= 0.7;
+        finalDepth *= 0.7;
+        finalHeight *= 1.4;
         break;
       case BuildingStyle.Classic:
       default:
-        // Standard box
+        // Standard office building
+        finalWidth *= 0.9;
+        finalDepth *= 0.9;
         break;
     }
+
+    // Ensure minimum dimensions
+    finalWidth = Math.max(finalWidth, 10);
+    finalDepth = Math.max(finalDepth, 10);
+    finalHeight = Math.max(finalHeight, 40);
 
     const building = MeshBuilder.CreateBox(
       `${baseName}_main`,
