@@ -24,6 +24,7 @@ import { TakeoffState } from './states/TakeoffState';
 import { FlightState } from './states/FlightState';
 import { HoverState } from './states/HoverState';
 import { LandingState } from './states/LandingState';
+import { VoxelCharacter } from './VoxelCharacter';
 
 // Player physical properties
 const PLAYER_HEIGHT = 1.8;
@@ -41,8 +42,7 @@ export class Player {
 
   // Visual representation
   private rootNode: TransformNode;
-  private bodyMesh: Mesh;
-  private capeMesh: Mesh;
+  private voxelCharacter: VoxelCharacter;
 
   // Physics body
   private physics: CharacterPhysics;
@@ -92,12 +92,7 @@ export class Player {
 
     // Create player visuals
     this.rootNode = new TransformNode('playerRoot', scene);
-    this.bodyMesh = this.createBodyMesh();
-    this.capeMesh = this.createCapeMesh();
-
-    // Add to shadow caster
-    shadowGenerator.addShadowCaster(this.bodyMesh);
-    shadowGenerator.addShadowCaster(this.capeMesh);
+    this.voxelCharacter = new VoxelCharacter(scene, shadowGenerator);
 
     // Initialize physics body
     this.physics = {
@@ -133,47 +128,6 @@ export class Player {
   }
 
   /**
-   * Creates the player body mesh (simple capsule-like shape)
-   */
-  private createBodyMesh(): Mesh {
-    // Create a simple humanoid shape from primitives
-    const body = MeshBuilder.CreateCapsule('playerBody', {
-      height: PLAYER_HEIGHT,
-      radius: PLAYER_RADIUS,
-    }, this.scene);
-
-    const material = new StandardMaterial('playerMaterial', this.scene);
-    material.diffuseColor = new Color3(0.2, 0.3, 0.8); // Blue suit
-    material.specularColor = new Color3(0.3, 0.3, 0.3);
-
-    body.material = material;
-    body.parent = this.rootNode;
-
-    return body;
-  }
-
-  /**
-   * Creates a simple cape mesh
-   */
-  private createCapeMesh(): Mesh {
-    const cape = MeshBuilder.CreateBox('playerCape', {
-      width: 0.8,
-      height: 1.2,
-      depth: 0.1,
-    }, this.scene);
-
-    const material = new StandardMaterial('capeMaterial', this.scene);
-    material.diffuseColor = new Color3(0.8, 0.1, 0.1); // Red cape
-    material.specularColor = new Color3(0.2, 0.2, 0.2);
-
-    cape.material = material;
-    cape.parent = this.rootNode;
-    cape.position = new Vector3(0, 0.2, -0.3);
-
-    return cape;
-  }
-
-  /**
    * Creates speed streak particle system
    */
   private createSpeedParticles(): void {
@@ -182,8 +136,8 @@ export class Player {
     // Use a simple white texture or create procedurally
     this.speedParticles.particleTexture = new Texture('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAA0SURBVChTY/z//z8DEwMBwESAAOggFgZCYNQEXABZE4omnCbgNQGvCTiB0AS8JuA0gYEBAGqkBQm7+hkOAAAAAElFTkSuQmCC', this.scene);
 
-    // Emission from player position (use body mesh as emitter)
-    this.speedParticles.emitter = this.bodyMesh;
+    // Emission from player position (use voxel character body as emitter)
+    this.speedParticles.emitter = this.voxelCharacter.getEmitterMesh();
     this.speedParticles.minEmitBox = new Vector3(-0.5, -0.5, -0.5);
     this.speedParticles.maxEmitBox = new Vector3(0.5, 0.5, 0.5);
 
@@ -221,7 +175,7 @@ export class Player {
 
     this.takeoffParticles.particleTexture = new Texture('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAA0SURBVChTY/z//z8DEwMBwESAAOggFgZCYNQEXABZE4omnCbgNQGvCTiB0AS8JuA0gYEBAGqkBQm7+hkOAAAAAElFTkSuQmCC', this.scene);
 
-    this.takeoffParticles.emitter = this.bodyMesh;
+    this.takeoffParticles.emitter = this.voxelCharacter.getEmitterMesh();
     this.takeoffParticles.minEmitBox = new Vector3(-0.3, -0.9, -0.3);
     this.takeoffParticles.maxEmitBox = new Vector3(0.3, -0.9, 0.3);
 
@@ -614,33 +568,16 @@ export class Player {
    * Updates visual representation to match physics
    */
   private updateVisuals(deltaTime: number): void {
-    // Update root node position
+    // Update root node position (for particles attached to rootNode)
     this.rootNode.position.copyFrom(this.physics.position);
 
     // Create rotation from euler angles
     const rotation = Quaternion.RotationYawPitchRoll(this.yaw, this.pitch, this.roll);
     this.rootNode.rotationQuaternion = rotation;
 
-    // Animate cape based on speed and movement
-    this.animateCape(deltaTime);
-  }
-
-  /**
-   * Animates the cape based on movement
-   */
-  private animateCape(deltaTime: number): void {
-    // Cape flows behind during flight
-    const capeAngle = Math.min(0.8, this.currentSpeed * 0.01);
-    const targetRotX = this.isFlightMode ? capeAngle : 0;
-
-    // Add some flutter
-    const flutter = Math.sin(performance.now() * 0.01) * 0.1 * (this.isFlightMode ? 1 : 0.3);
-
-    this.capeMesh.rotation.x = this.lerp(
-      this.capeMesh.rotation.x,
-      targetRotX + flutter,
-      5 * deltaTime
-    );
+    // Update voxel character transform and cape physics
+    this.voxelCharacter.setTransform(this.physics.position, this.yaw, this.pitch, this.roll);
+    this.voxelCharacter.update(deltaTime, this.physics.velocity, this.isFlightMode, this.currentSpeed);
   }
 
   /**

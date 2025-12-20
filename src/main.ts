@@ -11,6 +11,7 @@ import { Player } from './player/Player';
 import { City } from './world/City';
 import { Atmosphere } from './world/Atmosphere';
 import { BuildingDamage } from './world/BuildingDamage';
+import { Birds } from './world/Birds';
 import { Hud } from './ui/Hud';
 import { DebugOverlay } from './ui/DebugOverlay';
 
@@ -27,6 +28,7 @@ class Game {
   private city: City;
   private atmosphere: Atmosphere;
   private buildingDamage: BuildingDamage;
+  private birds: Birds;
   private hud: Hud;
   private debugOverlay: DebugOverlay;
 
@@ -69,6 +71,9 @@ class Game {
 
     // Initialize building damage system
     this.buildingDamage = new BuildingDamage(this.sceneContext.scene);
+
+    // Initialize birds
+    this.birds = new Birds(this.sceneContext.scene);
 
     // Initialize player
     this.player = new Player(
@@ -181,6 +186,9 @@ class Game {
 
     // Update building damage (debris physics, distance-based cleanup)
     this.buildingDamage.update(deltaTime, playerPos);
+
+    // Update birds
+    this.birds.update(deltaTime, playerPos);
 
     // Update HUD
     this.hud.update(
