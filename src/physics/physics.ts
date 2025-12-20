@@ -262,6 +262,9 @@ export class PhysicsManager {
     velocity: Vector3,
     deltaTime: number
   ): void {
+    // First, check if we're stuck inside geometry and push out
+    this.depenetrateCharacter(character);
+
     // Calculate intended movement
     const movement = velocity.scale(deltaTime);
     const targetPosition = character.position.add(movement);
@@ -274,21 +277,28 @@ export class PhysicsManager {
     );
 
     if (sweepResult.hit && sweepResult.distance < movement.length()) {
-      // Collision detected - slide along surface
-      const penetrationDepth = movement.length() - sweepResult.distance;
-      const slideDirection = this.calculateSlideVector(
-        movement.normalize(),
-        sweepResult.normal
-      );
+      // Collision detected - stop at contact point with small buffer
+      const safeDistance = Math.max(0, sweepResult.distance - 0.05);
+      const movementDir = movement.length() > 0.001 ? movement.normalize() : Vector3.Zero();
 
-      // Move to contact point, then slide
-      character.position = sweepResult.point.subtract(
-        movement.normalize().scale(character.radius)
-      );
-      character.position.addInPlace(slideDirection.scale(penetrationDepth));
+      character.position = character.position.add(movementDir.scale(safeDistance));
 
-      // Adjust velocity to slide along surface
-      character.velocity = this.calculateSlideVector(velocity, sweepResult.normal);
+      // Slide along surface
+      const slideVelocity = this.calculateSlideVector(velocity, sweepResult.normal);
+      character.velocity = slideVelocity;
+
+      // Try to apply remaining movement as slide
+      const remainingDistance = movement.length() - safeDistance;
+      if (remainingDistance > 0.01) {
+        const slideMovement = this.calculateSlideVector(movementDir, sweepResult.normal).scale(remainingDistance);
+        const slideTarget = character.position.add(slideMovement);
+
+        // Check if slide is safe
+        const slideCheck = this.sphereSweep(character.position, slideTarget, character.radius);
+        if (!slideCheck.hit || slideCheck.distance >= slideMovement.length()) {
+          character.position = slideTarget;
+        }
+      }
     } else {
       // No collision - apply full movement
       character.position = targetPosition;
@@ -303,11 +313,55 @@ export class PhysicsManager {
     // Snap to ground if close and moving down
     if (character.isGrounded && velocity.y <= 0) {
       const groundY = groundCheck.point.y;
-      if (character.position.y - groundY < character.height * 0.1) {
-        character.position.y = groundY;
+      // Position is character center, so add half height to stand ON the ground
+      const targetY = groundY + character.height / 2;
+      if (character.position.y < targetY + 0.1) {
+        character.position.y = targetY;
         if (character.velocity.y < 0) {
           character.velocity.y = 0;
         }
+      }
+    }
+  }
+
+  /**
+   * Pushes character out of geometry if stuck inside
+   */
+  private depenetrateCharacter(character: CharacterPhysics): void {
+    // Cast rays in all directions to find penetration
+    const directions = [
+      new Vector3(1, 0, 0),
+      new Vector3(-1, 0, 0),
+      new Vector3(0, 1, 0),
+      new Vector3(0, -1, 0),
+      new Vector3(0, 0, 1),
+      new Vector3(0, 0, -1),
+    ];
+
+    let pushOut = Vector3.Zero();
+    let maxPenetration = 0;
+
+    for (const dir of directions) {
+      // Cast ray from inside outward
+      const result = this.raycast(character.position, dir, character.radius * 2);
+
+      if (result.hit && result.distance < character.radius) {
+        // We're inside geometry in this direction
+        const penetration = character.radius - result.distance;
+        if (penetration > maxPenetration) {
+          maxPenetration = penetration;
+          // Push in the direction of the surface normal
+          pushOut = result.normal.scale(penetration + 0.1);
+        }
+      }
+    }
+
+    if (maxPenetration > 0) {
+      character.position.addInPlace(pushOut);
+      // Stop velocity in penetration direction
+      const velocityDot = Vector3.Dot(character.velocity, pushOut.normalize());
+      if (velocityDot < 0) {
+        character.velocity = character.velocity.subtract(pushOut.normalize().scale(velocityDot));
       }
     }
   }

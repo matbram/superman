@@ -372,6 +372,9 @@ export class City {
     const offsetX = -totalWidth / 2;
     const offsetZ = -totalDepth / 2;
 
+    // Player center height: ground (0) + half player height (0.9) + small buffer
+    const spawnY = 1.0;
+
     // Try to spawn on a street intersection
     for (let attempt = 0; attempt < 20; attempt++) {
       // Pick a random street intersection
@@ -381,7 +384,7 @@ export class City {
       const x = offsetX + streetX * (BLOCK_SIZE + STREET_WIDTH) - STREET_WIDTH / 2;
       const z = offsetZ + streetZ * (BLOCK_SIZE + STREET_WIDTH) - STREET_WIDTH / 2;
 
-      const testPos = new Vector3(x, 2, z);
+      const testPos = new Vector3(x, spawnY, z);
 
       if (!this.isPositionInsideBuilding(testPos, 2)) {
         return testPos;
@@ -389,7 +392,7 @@ export class City {
     }
 
     // Fallback: spawn outside the city
-    return new Vector3(-totalWidth / 2 - 20, 2, -totalDepth / 2 - 20);
+    return new Vector3(-totalWidth / 2 - 20, spawnY, -totalDepth / 2 - 20);
   }
 
   /**

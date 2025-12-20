@@ -106,18 +106,18 @@ export class FlightState extends BasePlayerState {
     const speedFactor = this.currentSpeed / BASE_MAX_SPEED;
     const turnRate = this.lerp(BASE_TURN_RATE, HIGH_SPEED_TURN_RATE, speedFactor);
 
-    // Pitch control (up/down)
+    // Pitch control - airplane style:
+    // Push stick forward (up) = dive down, pull back (down) = climb up
     let targetPitch = player.getPitch();
     if (Math.abs(input.moveY) > 0.1) {
-      // Forward = pitch down, backward = pitch up
-      targetPitch -= input.moveY * PITCH_RATE * deltaTime;
+      targetPitch += input.moveY * PITCH_RATE * deltaTime;
     } else {
-      // Auto-level pitch
+      // Auto-level pitch gradually when no input
       targetPitch = this.damp(targetPitch, 0, AUTO_LEVEL_RATE, deltaTime);
     }
     player.setPitch(this.clamp(targetPitch, -MAX_PITCH, MAX_PITCH));
 
-    // Yaw control (left/right)
+    // Yaw control (left/right turning)
     if (Math.abs(input.moveX) > 0.1) {
       const yaw = player.getYaw();
       player.setYaw(yaw + input.moveX * turnRate * deltaTime);
