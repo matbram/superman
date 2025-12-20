@@ -76,6 +76,7 @@ export class Player {
 
   // Building collision damage callback
   private onBuildingCollision: ((buildingMesh: any, impactPosition: Vector3, speed: number) => void) | null = null;
+  private lastBuildingCollisionTime: number = 0;
 
   // Audio (placeholder for future implementation)
   // TODO: Add wind audio that scales with speed
@@ -824,34 +825,59 @@ export class Player {
    */
   private checkBuildingCollision(): void {
     // Only check when flying at significant speed
-    if (!this.isFlightMode || this.currentSpeed < 20) return;
+    if (!this.isFlightMode || this.currentSpeed < 25) return;
+
+    // Prevent rapid-fire collision triggers
+    const now = performance.now();
+    if (now - this.lastBuildingCollisionTime < 200) return;
 
     // Cast ray in movement direction
     const velocity = this.physics.velocity;
-    if (velocity.length() < 1) return;
+    if (velocity.length() < 5) return;
 
-    const direction = velocity.normalize();
-    const checkDistance = Math.max(PLAYER_RADIUS * 2, this.currentSpeed * 0.05);
+    // Get direction without modifying original velocity
+    const direction = velocity.clone().normalize();
 
-    const result = this.physicsManager.raycast(
+    // Check distance ahead - further at higher speeds for earlier detection
+    const lookAhead = Math.max(3, this.currentSpeed * 0.08);
+
+    // Use sphere sweep for more reliable detection
+    const endPoint = this.physics.position.add(direction.scale(lookAhead));
+    const result = this.physicsManager.sphereSweep(
       this.physics.position,
-      direction,
-      checkDistance
+      endPoint,
+      PLAYER_RADIUS * 1.5
     );
 
-    if (result.hit && result.mesh && result.distance < PLAYER_RADIUS * 1.5) {
-      // Check if this is a building (not ground)
+    // Trigger collision if we hit something close
+    const hitThreshold = PLAYER_RADIUS * 2.5;
+
+    if (result.hit && result.mesh && result.distance < hitThreshold) {
+      // Check if this is a building (not ground or sidewalk)
       const meshName = result.mesh.name.toLowerCase();
-      if (meshName.includes('building') || meshName.includes('tower') ||
-          meshName.includes('tier') || meshName.includes('wing')) {
+      const isBuilding = meshName.startsWith('building') ||
+                         meshName.includes('_main') ||
+                         meshName.includes('_tier') ||
+                         meshName.includes('_wing') ||
+                         meshName.includes('_base') ||
+                         meshName.includes('_roof');
+      const isNotBuilding = meshName.includes('ground') ||
+                            meshName.includes('sidewalk') ||
+                            meshName.includes('fallback') ||
+                            meshName.includes('strip');
+
+      if (isBuilding && !isNotBuilding) {
         // Trigger building collision damage
         if (this.onBuildingCollision) {
           this.onBuildingCollision(result.mesh, result.point, this.currentSpeed);
         }
 
         // Add camera shake on impact
-        const shakeIntensity = Math.min(3, this.currentSpeed / 40);
+        const shakeIntensity = Math.min(4, this.currentSpeed / 25);
         this.cameraController.addShake(shakeIntensity);
+
+        // Set cooldown
+        this.lastBuildingCollisionTime = now;
       }
     }
   }
