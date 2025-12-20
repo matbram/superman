@@ -855,18 +855,17 @@ export class Player {
     if (result.hit && result.mesh && result.distance < hitThreshold) {
       // Check if this is a building (not ground or sidewalk)
       const meshName = result.mesh.name.toLowerCase();
-      const isBuilding = meshName.startsWith('building') ||
-                         meshName.includes('_main') ||
-                         meshName.includes('_tier') ||
-                         meshName.includes('_wing') ||
-                         meshName.includes('_base') ||
-                         meshName.includes('_roof');
-      const isNotBuilding = meshName.includes('ground') ||
-                            meshName.includes('sidewalk') ||
-                            meshName.includes('fallback') ||
-                            meshName.includes('strip');
 
-      if (isBuilding && !isNotBuilding) {
+      // All building parts start with "building_" - simple and reliable check
+      const isBuilding = meshName.startsWith('building_');
+
+      // Exclude non-damageable parts
+      const isExcluded = meshName.includes('ground') ||
+                         meshName.includes('sidewalk') ||
+                         meshName.includes('fallback') ||
+                         meshName.includes('_strip');  // Window strips
+
+      if (isBuilding && !isExcluded) {
         // Trigger building collision damage
         if (this.onBuildingCollision) {
           this.onBuildingCollision(result.mesh, result.point, this.currentSpeed);
