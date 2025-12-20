@@ -325,11 +325,11 @@ export class Birds {
       // Respawn flock if too far from player
       const distFromPlayer = Vector3.Distance(flock.centerPosition, playerPosition);
       if (distFromPlayer > BIRD_SPAWN_RADIUS) {
-        // Respawn ahead of player
+        // Respawn ahead of player at flock's preferred height
         const angle = Math.random() * Math.PI * 2;
         flock.centerPosition = playerPosition.add(new Vector3(
           Math.cos(angle) * BIRD_SPAWN_RADIUS * 0.7,
-          BIRD_HEIGHT_MIN + Math.random() * (BIRD_HEIGHT_MAX - BIRD_HEIGHT_MIN),
+          flock.preferredHeight + (Math.random() - 0.5) * 30,
           Math.sin(angle) * BIRD_SPAWN_RADIUS * 0.7
         ));
       }
