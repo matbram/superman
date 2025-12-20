@@ -11,14 +11,22 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 
-// Bird constants
-const NUM_BIRD_FLOCKS = 8;
-const BIRDS_PER_FLOCK = 5;
-const BIRD_HEIGHT_MIN = 80;
-const BIRD_HEIGHT_MAX = 200;
-const BIRD_SPAWN_RADIUS = 400;
-const BIRD_SPEED = 15;
-const WING_FLAP_SPEED = 12;
+// Bird constants - more birds for a lively city
+const NUM_BIRD_FLOCKS = 20;        // Many more flocks
+const BIRDS_PER_FLOCK = 8;         // Larger flocks
+const BIRD_HEIGHT_MIN = 30;        // Some birds fly low (pigeons)
+const BIRD_HEIGHT_MAX = 300;       // Some fly very high (hawks)
+const BIRD_SPAWN_RADIUS = 500;
+const BIRD_SPEED = 18;
+const WING_FLAP_SPEED = 14;
+
+// Bird types for variety
+enum BirdType {
+  Pigeon = 0,     // Small, low flying, gray
+  Seagull = 1,    // Medium, white, mid-height
+  Crow = 2,       // Medium, black, varied height
+  Hawk = 3,       // Large, brown, high soaring
+}
 
 /**
  * Individual voxel bird
@@ -29,6 +37,7 @@ interface VoxelBird {
   leftWing: Mesh;
   rightWing: Mesh;
   wingPhase: number;
+  scale: number;
 }
 
 /**
@@ -41,6 +50,8 @@ interface BirdFlock {
   targetDirection: Vector3;
   speed: number;
   turnTimer: number;
+  birdType: BirdType;
+  preferredHeight: number;
 }
 
 /**
@@ -58,25 +69,36 @@ export class Birds {
   }
 
   /**
-   * Creates materials for birds
+   * Creates materials for birds - by type
    */
   private createBirdMaterials(): void {
-    // Various bird colors
-    const colors = [
-      new Color3(0.2, 0.2, 0.25),   // Dark gray
-      new Color3(0.15, 0.1, 0.1),   // Black
-      new Color3(0.4, 0.35, 0.3),   // Brown
-      new Color3(0.5, 0.5, 0.55),   // Light gray
-      new Color3(0.3, 0.25, 0.2),   // Dark brown
-    ];
+    // Pigeon - gray/purple iridescent
+    const pigeonMat = new StandardMaterial('birdMat_pigeon', this.scene);
+    pigeonMat.diffuseColor = new Color3(0.4, 0.4, 0.45);
+    pigeonMat.specularColor = new Color3(0.2, 0.2, 0.25);
+    pigeonMat.freeze();
+    this.birdMaterials.push(pigeonMat);
 
-    for (let i = 0; i < colors.length; i++) {
-      const mat = new StandardMaterial(`birdMat_${i}`, this.scene);
-      mat.diffuseColor = colors[i];
-      mat.specularColor = new Color3(0.1, 0.1, 0.1);
-      mat.freeze();
-      this.birdMaterials.push(mat);
-    }
+    // Seagull - white/gray
+    const seagullMat = new StandardMaterial('birdMat_seagull', this.scene);
+    seagullMat.diffuseColor = new Color3(0.9, 0.9, 0.85);
+    seagullMat.specularColor = new Color3(0.1, 0.1, 0.1);
+    seagullMat.freeze();
+    this.birdMaterials.push(seagullMat);
+
+    // Crow - black
+    const crowMat = new StandardMaterial('birdMat_crow', this.scene);
+    crowMat.diffuseColor = new Color3(0.1, 0.1, 0.12);
+    crowMat.specularColor = new Color3(0.3, 0.3, 0.35);
+    crowMat.freeze();
+    this.birdMaterials.push(crowMat);
+
+    // Hawk - brown
+    const hawkMat = new StandardMaterial('birdMat_hawk', this.scene);
+    hawkMat.diffuseColor = new Color3(0.45, 0.3, 0.2);
+    hawkMat.specularColor = new Color3(0.1, 0.1, 0.1);
+    hawkMat.freeze();
+    this.birdMaterials.push(hawkMat);
   }
 
   /**
@@ -90,12 +112,45 @@ export class Birds {
   }
 
   /**
-   * Creates a single flock of birds
+   * Creates a single flock of birds with type-based behavior
    */
   private createFlock(): BirdFlock {
+    // Randomly select bird type with weighted distribution
+    const typeRoll = Math.random();
+    let birdType: BirdType;
+    let preferredHeight: number;
+    let flockSize: number;
+    let scale: number;
+
+    if (typeRoll < 0.4) {
+      // 40% pigeons - low flying, large flocks
+      birdType = BirdType.Pigeon;
+      preferredHeight = 30 + Math.random() * 50;
+      flockSize = 10 + Math.floor(Math.random() * 8);
+      scale = 0.8;
+    } else if (typeRoll < 0.65) {
+      // 25% seagulls - medium height
+      birdType = BirdType.Seagull;
+      preferredHeight = 80 + Math.random() * 100;
+      flockSize = 5 + Math.floor(Math.random() * 5);
+      scale = 1.2;
+    } else if (typeRoll < 0.85) {
+      // 20% crows - varied height
+      birdType = BirdType.Crow;
+      preferredHeight = 50 + Math.random() * 150;
+      flockSize = 6 + Math.floor(Math.random() * 6);
+      scale = 1.0;
+    } else {
+      // 15% hawks - high soaring, small groups
+      birdType = BirdType.Hawk;
+      preferredHeight = 150 + Math.random() * 150;
+      flockSize = 1 + Math.floor(Math.random() * 3);
+      scale = 1.8;
+    }
+
     const centerPos = new Vector3(
       (Math.random() - 0.5) * BIRD_SPAWN_RADIUS * 2,
-      BIRD_HEIGHT_MIN + Math.random() * (BIRD_HEIGHT_MAX - BIRD_HEIGHT_MIN),
+      preferredHeight,
       (Math.random() - 0.5) * BIRD_SPAWN_RADIUS * 2
     );
 
@@ -106,43 +161,52 @@ export class Birds {
     ).normalize();
 
     const birds: VoxelBird[] = [];
-    const material = this.birdMaterials[Math.floor(Math.random() * this.birdMaterials.length)];
+    const material = this.birdMaterials[birdType];
 
-    for (let i = 0; i < BIRDS_PER_FLOCK; i++) {
-      const bird = this.createBird(material);
+    for (let i = 0; i < flockSize; i++) {
+      const bird = this.createBird(material, scale);
 
       // Offset within flock
+      const spreadFactor = birdType === BirdType.Hawk ? 20 : 8;
       const offset = new Vector3(
-        (Math.random() - 0.5) * 10,
-        (Math.random() - 0.5) * 5,
-        (Math.random() - 0.5) * 10
+        (Math.random() - 0.5) * spreadFactor,
+        (Math.random() - 0.5) * spreadFactor * 0.5,
+        (Math.random() - 0.5) * spreadFactor
       );
       bird.root.position = centerPos.add(offset);
 
       birds.push(bird);
     }
 
+    // Speed varies by type
+    const baseSpeed = birdType === BirdType.Hawk ? 25 :
+                      birdType === BirdType.Seagull ? 20 :
+                      birdType === BirdType.Crow ? 18 : 12;
+
     return {
       birds,
       centerPosition: centerPos,
       direction,
       targetDirection: direction.clone(),
-      speed: BIRD_SPEED * (0.8 + Math.random() * 0.4),
+      speed: baseSpeed * (0.8 + Math.random() * 0.4),
       turnTimer: 3 + Math.random() * 5,
+      birdType,
+      preferredHeight,
     };
   }
 
   /**
-   * Creates a single voxel bird
+   * Creates a single voxel bird with scale
    */
-  private createBird(material: StandardMaterial): VoxelBird {
+  private createBird(material: StandardMaterial, scale: number = 1.0): VoxelBird {
     const root = new TransformNode('bird', this.scene);
+    const s = scale;
 
     // Body - elongated cube
     const body = MeshBuilder.CreateBox('birdBody', {
-      width: 0.3,
-      height: 0.25,
-      depth: 0.6,
+      width: 0.3 * s,
+      height: 0.25 * s,
+      depth: 0.6 * s,
     }, this.scene);
     body.material = material;
     body.parent = root;
@@ -150,61 +214,61 @@ export class Birds {
 
     // Head - small cube
     const head = MeshBuilder.CreateBox('birdHead', {
-      width: 0.2,
-      height: 0.2,
-      depth: 0.2,
+      width: 0.2 * s,
+      height: 0.2 * s,
+      depth: 0.2 * s,
     }, this.scene);
     head.material = material;
     head.parent = body;
-    head.position = new Vector3(0, 0.05, 0.35);
+    head.position = new Vector3(0, 0.05 * s, 0.35 * s);
     head.isPickable = false;
 
     // Beak - tiny cube
     const beak = MeshBuilder.CreateBox('birdBeak', {
-      width: 0.08,
-      height: 0.06,
-      depth: 0.15,
+      width: 0.08 * s,
+      height: 0.06 * s,
+      depth: 0.15 * s,
     }, this.scene);
     const beakMat = new StandardMaterial('beakMat', this.scene);
     beakMat.diffuseColor = new Color3(0.8, 0.6, 0.2);
     beak.material = beakMat;
     beak.parent = head;
-    beak.position = new Vector3(0, -0.02, 0.15);
+    beak.position = new Vector3(0, -0.02 * s, 0.15 * s);
     beak.isPickable = false;
 
     // Left wing - flat cube
     const leftWing = MeshBuilder.CreateBox('birdLeftWing', {
-      width: 0.8,
-      height: 0.05,
-      depth: 0.4,
+      width: 0.8 * s,
+      height: 0.05 * s,
+      depth: 0.4 * s,
     }, this.scene);
     leftWing.material = material;
     leftWing.parent = root;
-    leftWing.position = new Vector3(-0.4, 0, 0);
-    leftWing.setPivotPoint(new Vector3(0.4, 0, 0));
+    leftWing.position = new Vector3(-0.4 * s, 0, 0);
+    leftWing.setPivotPoint(new Vector3(0.4 * s, 0, 0));
     leftWing.isPickable = false;
 
     // Right wing
     const rightWing = MeshBuilder.CreateBox('birdRightWing', {
-      width: 0.8,
-      height: 0.05,
-      depth: 0.4,
+      width: 0.8 * s,
+      height: 0.05 * s,
+      depth: 0.4 * s,
     }, this.scene);
     rightWing.material = material;
     rightWing.parent = root;
-    rightWing.position = new Vector3(0.4, 0, 0);
-    rightWing.setPivotPoint(new Vector3(-0.4, 0, 0));
+    rightWing.position = new Vector3(0.4 * s, 0, 0);
+    rightWing.setPivotPoint(new Vector3(-0.4 * s, 0, 0));
     rightWing.isPickable = false;
 
     // Tail - small flat cube
     const tail = MeshBuilder.CreateBox('birdTail', {
-      width: 0.15,
-      height: 0.04,
-      depth: 0.25,
+      width: 0.15 * s,
+      height: 0.04 * s,
+      depth: 0.25 * s,
     }, this.scene);
     tail.material = material;
     tail.parent = body;
-    tail.position = new Vector3(0, 0.05, -0.35);
+    tail.position = new Vector3(0, 0.05 * s, -0.35 * s);
     tail.rotation.x = -0.3;
     tail.isPickable = false;
 
@@ -214,6 +278,7 @@ export class Birds {
       leftWing,
       rightWing,
       wingPhase: Math.random() * Math.PI * 2,
+      scale,
     };
   }
 
@@ -248,11 +313,13 @@ export class Birds {
         flock.direction.normalize();
       }
 
-      // Keep birds at reasonable height
-      if (flock.centerPosition.y < BIRD_HEIGHT_MIN) {
-        flock.direction.y = Math.abs(flock.direction.y) + 0.2;
-      } else if (flock.centerPosition.y > BIRD_HEIGHT_MAX) {
-        flock.direction.y = -Math.abs(flock.direction.y) - 0.2;
+      // Keep birds at their preferred height range
+      const minH = Math.max(20, flock.preferredHeight - 30);
+      const maxH = flock.preferredHeight + 50;
+      if (flock.centerPosition.y < minH) {
+        flock.direction.y = Math.abs(flock.direction.y) + 0.3;
+      } else if (flock.centerPosition.y > maxH) {
+        flock.direction.y = -Math.abs(flock.direction.y) - 0.3;
       }
       flock.direction.normalize();
 

@@ -12,6 +12,7 @@ import { City } from './world/City';
 import { Atmosphere } from './world/Atmosphere';
 import { BuildingDamage } from './world/BuildingDamage';
 import { Birds } from './world/Birds';
+import { Traffic } from './world/Traffic';
 import { Hud } from './ui/Hud';
 import { DebugOverlay } from './ui/DebugOverlay';
 
@@ -33,6 +34,7 @@ class Game {
   private atmosphere: Atmosphere;
   private buildingDamage: BuildingDamage;
   private birds: Birds;
+  private traffic: Traffic;
   private hud: Hud;
   private debugOverlay: DebugOverlay;
 
@@ -52,6 +54,7 @@ class Game {
     wakeDamage: 0,
     buildingDamage: 0,
     birds: 0,
+    traffic: 0,
     render: 0,
   };
 
@@ -93,6 +96,9 @@ class Game {
 
     // Initialize birds
     this.birds = new Birds(this.sceneContext.scene);
+
+    // Initialize traffic system
+    this.traffic = new Traffic(this.sceneContext.scene);
 
     // Initialize player
     this.player = new Player(
@@ -235,6 +241,16 @@ class Game {
     t1 = performance.now();
     this.perfTimings.birds += t1 - t0;
 
+    // Update traffic and check vehicle collisions
+    t0 = performance.now();
+    this.traffic.update(deltaTime, playerPos);
+    // Check if player hits vehicles
+    if (playerSpeed > 5) {
+      this.traffic.checkCollision(playerPos, 1.5, this.player.getVelocity());
+    }
+    t1 = performance.now();
+    this.perfTimings.traffic += t1 - t0;
+
     // Update HUD
     this.hud.update(
       this.player.getCurrentStateType(),
@@ -284,6 +300,7 @@ class Game {
             wakeDamage: (this.perfTimings.wakeDamage / this.frameCount).toFixed(2) + 'ms',
             buildingDamage: (this.perfTimings.buildingDamage / this.frameCount).toFixed(2) + 'ms',
             birds: (this.perfTimings.birds / this.frameCount).toFixed(2) + 'ms',
+            traffic: (this.perfTimings.traffic / this.frameCount).toFixed(2) + 'ms',
             render: (this.perfTimings.render / this.frameCount).toFixed(2) + 'ms',
           }
         });
@@ -300,6 +317,7 @@ class Game {
           wakeDamage: 0,
           buildingDamage: 0,
           birds: 0,
+          traffic: 0,
           render: 0,
         };
       }

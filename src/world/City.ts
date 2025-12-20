@@ -37,13 +37,16 @@ const MAX_BUILDING_WIDTH = 40;    // Large office buildings
 const BUILDING_SPACING = 3;       // Narrow NYC streets (~20m with building widths)
 const BUILDINGS_PER_CHUNK = 18;   // Dense but performant
 
-// Building style types
+// Building style types - more variety
 enum BuildingStyle {
-  Tower = 0,      // Tall thin building
-  Tiered = 1,     // Stepped building with setbacks
-  LShape = 2,     // L-shaped footprint
-  Modern = 3,     // Modern with rooftop features
-  Classic = 4,    // Standard box building
+  Tower = 0,        // Tall thin skyscraper
+  Tiered = 1,       // Art deco with setbacks
+  LShape = 2,       // L-shaped footprint
+  Modern = 3,       // Glass tower
+  Classic = 4,      // Standard office
+  Spire = 5,        // Building with antenna/spire
+  WideBase = 6,     // Wider at bottom, tapers up
+  Twin = 7,         // Two towers connected
 }
 
 /**
@@ -427,7 +430,7 @@ export class City {
         const bz = currentZ + bDepth / 2;
 
         // Choose building style based on seed
-        const style = random.intRange(0, 4) as BuildingStyle;
+        const style = random.intRange(0, 7) as BuildingStyle;
         const buildingMeshes = this.createBuilding(
           key, buildingCount, style,
           bx, bz, bWidth, bDepth, bHeight,
@@ -470,8 +473,8 @@ export class City {
   }
 
   /**
-   * Creates a building - NYC-style with varied proportions
-   * Single mesh per building for performance
+   * Creates a building - NYC-style with varied proportions and complex shapes
+   * Uses multiple meshes for interesting silhouettes while keeping performance reasonable
    */
   private createBuilding(
     chunkKey: string,
@@ -485,65 +488,196 @@ export class City {
     const meshes: Mesh[] = [];
     const baseName = `building_${chunkKey}_${index}`;
     const matIndex = Math.abs(chunkX + chunkZ + index) % this.buildingMaterials.length;
-
-    // NYC-style building variety
-    let finalWidth = width;
-    let finalDepth = depth;
-    let finalHeight = height;
+    const mat = this.buildingMaterials[matIndex];
+    const mat2 = this.buildingMaterials[(matIndex + 1) % this.buildingMaterials.length];
 
     // Add random height variation for more natural skyline
-    const heightVariation = 0.7 + random.next() * 0.6; // 70% to 130%
-    finalHeight *= heightVariation;
-
-    // Apply style-based proportions for NYC feel
-    switch (style) {
-      case BuildingStyle.Tower:
-        // Tall thin skyscraper (Empire State, Chrysler style)
-        finalWidth *= 0.6;
-        finalDepth *= 0.6;
-        finalHeight *= 1.5;  // Extra tall
-        break;
-      case BuildingStyle.Tiered:
-        // Art deco style with wide base
-        finalWidth *= 1.0;
-        finalDepth *= 1.0;
-        finalHeight *= 1.1;
-        break;
-      case BuildingStyle.LShape:
-        // Asymmetric modern tower
-        finalWidth *= 0.75;
-        finalDepth *= 0.85;
-        finalHeight *= 1.2;
-        break;
-      case BuildingStyle.Modern:
-        // Glass tower style - tall and slim
-        finalWidth *= 0.7;
-        finalDepth *= 0.7;
-        finalHeight *= 1.4;
-        break;
-      case BuildingStyle.Classic:
-      default:
-        // Standard office building
-        finalWidth *= 0.9;
-        finalDepth *= 0.9;
-        break;
-    }
+    const heightVariation = 0.7 + random.next() * 0.6;
+    height *= heightVariation;
 
     // Ensure minimum dimensions
-    finalWidth = Math.max(finalWidth, 10);
-    finalDepth = Math.max(finalDepth, 10);
-    finalHeight = Math.max(finalHeight, 40);
+    width = Math.max(width, 12);
+    depth = Math.max(depth, 12);
+    height = Math.max(height, 50);
 
-    const building = MeshBuilder.CreateBox(
-      `${baseName}_main`,
-      { width: finalWidth, height: finalHeight, depth: finalDepth },
-      this.scene
-    );
-    building.position = new Vector3(x, finalHeight / 2 + SIDEWALK_HEIGHT, z);
-    building.material = this.buildingMaterials[matIndex];
-    building.receiveShadows = true;
-    building.freezeWorldMatrix();  // Static mesh - freeze for performance
-    meshes.push(building);
+    switch (style) {
+      case BuildingStyle.Tower: {
+        // Tall thin skyscraper with setback
+        const baseH = height * 0.25;
+        const towerH = height * 0.75;
+        const towerW = width * 0.6;
+
+        const base = MeshBuilder.CreateBox(`${baseName}_base`,
+          { width, height: baseH, depth }, this.scene);
+        base.position = new Vector3(x, baseH / 2 + SIDEWALK_HEIGHT, z);
+        base.material = mat;
+        base.receiveShadows = true;
+        base.freezeWorldMatrix();
+        meshes.push(base);
+
+        const tower = MeshBuilder.CreateBox(`${baseName}_main`,
+          { width: towerW, height: towerH, depth: towerW }, this.scene);
+        tower.position = new Vector3(x, baseH + towerH / 2 + SIDEWALK_HEIGHT, z);
+        tower.material = mat2;
+        tower.receiveShadows = true;
+        tower.freezeWorldMatrix();
+        meshes.push(tower);
+        break;
+      }
+
+      case BuildingStyle.Tiered: {
+        // Art deco with 2-3 setbacks
+        const tiers = 2 + Math.floor(random.next() * 2);
+        let currentY = SIDEWALK_HEIGHT;
+        let currentW = width;
+        let currentD = depth;
+        const tierH = height / tiers;
+
+        for (let t = 0; t < tiers; t++) {
+          const tier = MeshBuilder.CreateBox(`${baseName}_tier${t}${t === 0 ? '_main' : ''}`,
+            { width: currentW, height: tierH, depth: currentD }, this.scene);
+          tier.position = new Vector3(x, currentY + tierH / 2, z);
+          tier.material = t % 2 === 0 ? mat : mat2;
+          tier.receiveShadows = true;
+          tier.freezeWorldMatrix();
+          meshes.push(tier);
+
+          currentY += tierH;
+          currentW *= 0.75;
+          currentD *= 0.75;
+        }
+        break;
+      }
+
+      case BuildingStyle.Spire: {
+        // Building with antenna/spire on top
+        const mainH = height * 0.85;
+        const spireH = height * 0.25;
+
+        const main = MeshBuilder.CreateBox(`${baseName}_main`,
+          { width: width * 0.8, height: mainH, depth: depth * 0.8 }, this.scene);
+        main.position = new Vector3(x, mainH / 2 + SIDEWALK_HEIGHT, z);
+        main.material = mat;
+        main.receiveShadows = true;
+        main.freezeWorldMatrix();
+        meshes.push(main);
+
+        const spire = MeshBuilder.CreateBox(`${baseName}_spire`,
+          { width: 3, height: spireH, depth: 3 }, this.scene);
+        spire.position = new Vector3(x, mainH + spireH / 2 + SIDEWALK_HEIGHT, z);
+        spire.material = this.rooftopMaterial;
+        spire.receiveShadows = true;
+        spire.freezeWorldMatrix();
+        meshes.push(spire);
+        break;
+      }
+
+      case BuildingStyle.WideBase: {
+        // Pyramid-style wider at bottom
+        const baseH = height * 0.4;
+        const topH = height * 0.6;
+
+        const base = MeshBuilder.CreateBox(`${baseName}_base`,
+          { width: width * 1.2, height: baseH, depth: depth * 1.2 }, this.scene);
+        base.position = new Vector3(x, baseH / 2 + SIDEWALK_HEIGHT, z);
+        base.material = mat;
+        base.receiveShadows = true;
+        base.freezeWorldMatrix();
+        meshes.push(base);
+
+        const top = MeshBuilder.CreateBox(`${baseName}_main`,
+          { width: width * 0.7, height: topH, depth: depth * 0.7 }, this.scene);
+        top.position = new Vector3(x, baseH + topH / 2 + SIDEWALK_HEIGHT, z);
+        top.material = mat2;
+        top.receiveShadows = true;
+        top.freezeWorldMatrix();
+        meshes.push(top);
+        break;
+      }
+
+      case BuildingStyle.Twin: {
+        // Two towers side by side
+        const towerW = width * 0.4;
+        const gap = width * 0.1;
+
+        const tower1 = MeshBuilder.CreateBox(`${baseName}_main`,
+          { width: towerW, height: height, depth: depth * 0.8 }, this.scene);
+        tower1.position = new Vector3(x - towerW / 2 - gap / 2, height / 2 + SIDEWALK_HEIGHT, z);
+        tower1.material = mat;
+        tower1.receiveShadows = true;
+        tower1.freezeWorldMatrix();
+        meshes.push(tower1);
+
+        const tower2 = MeshBuilder.CreateBox(`${baseName}_twin`,
+          { width: towerW, height: height * 0.9, depth: depth * 0.8 }, this.scene);
+        tower2.position = new Vector3(x + towerW / 2 + gap / 2, (height * 0.9) / 2 + SIDEWALK_HEIGHT, z);
+        tower2.material = mat2;
+        tower2.receiveShadows = true;
+        tower2.freezeWorldMatrix();
+        meshes.push(tower2);
+        break;
+      }
+
+      case BuildingStyle.LShape: {
+        // L-shaped footprint
+        const mainH = height;
+        const wingH = height * (0.6 + random.next() * 0.3);
+
+        const main = MeshBuilder.CreateBox(`${baseName}_main`,
+          { width: width, height: mainH, depth: depth * 0.5 }, this.scene);
+        main.position = new Vector3(x, mainH / 2 + SIDEWALK_HEIGHT, z - depth * 0.25);
+        main.material = mat;
+        main.receiveShadows = true;
+        main.freezeWorldMatrix();
+        meshes.push(main);
+
+        const wing = MeshBuilder.CreateBox(`${baseName}_wing`,
+          { width: width * 0.4, height: wingH, depth: depth * 0.5 }, this.scene);
+        wing.position = new Vector3(x + width * 0.3, wingH / 2 + SIDEWALK_HEIGHT, z + depth * 0.25);
+        wing.material = mat2;
+        wing.receiveShadows = true;
+        wing.freezeWorldMatrix();
+        meshes.push(wing);
+        break;
+      }
+
+      case BuildingStyle.Modern: {
+        // Sleek modern glass tower
+        const mainH = height * 1.3;
+        const main = MeshBuilder.CreateBox(`${baseName}_main`,
+          { width: width * 0.7, height: mainH, depth: depth * 0.7 }, this.scene);
+        main.position = new Vector3(x, mainH / 2 + SIDEWALK_HEIGHT, z);
+        main.material = this.windowMaterial;  // Glass-like
+        main.receiveShadows = true;
+        main.freezeWorldMatrix();
+        meshes.push(main);
+        break;
+      }
+
+      case BuildingStyle.Classic:
+      default: {
+        // Standard office building with rooftop
+        const mainH = height * 0.95;
+        const main = MeshBuilder.CreateBox(`${baseName}_main`,
+          { width: width * 0.9, height: mainH, depth: depth * 0.9 }, this.scene);
+        main.position = new Vector3(x, mainH / 2 + SIDEWALK_HEIGHT, z);
+        main.material = mat;
+        main.receiveShadows = true;
+        main.freezeWorldMatrix();
+        meshes.push(main);
+
+        // Rooftop structure
+        const roofH = height * 0.08;
+        const roof = MeshBuilder.CreateBox(`${baseName}_roof`,
+          { width: width * 0.4, height: roofH, depth: depth * 0.4 }, this.scene);
+        roof.position = new Vector3(x, mainH + roofH / 2 + SIDEWALK_HEIGHT, z);
+        roof.material = this.rooftopMaterial;
+        roof.receiveShadows = true;
+        roof.freezeWorldMatrix();
+        meshes.push(roof);
+        break;
+      }
+    }
 
     return meshes;
   }
