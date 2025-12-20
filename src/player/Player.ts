@@ -62,9 +62,9 @@ export class Player {
   private speedParticles: ParticleSystem | null = null;
   private takeoffParticles: ParticleSystem | null = null;
 
-  // Shockwave visual effect
+  // Shockwave visual effect - triggers once when crossing sonic threshold
   private shockwaveRings: Mesh[] = [];
-  private lastShockwaveTime: number = 0;
+  private wasAboveSonicThreshold: boolean = false;
 
   // Audio (placeholder for future implementation)
   // TODO: Add wind audio that scales with speed
@@ -403,8 +403,6 @@ export class Player {
    * Updates visual effects based on speed
    */
   private updateEffects(deltaTime: number): void {
-    const now = performance.now();
-
     // Speed particles (subtle at lower speeds)
     if (this.speedParticles) {
       if (this.currentSpeed > SPEED_PARTICLE_THRESHOLD && this.isFlightMode) {
@@ -418,14 +416,13 @@ export class Player {
     // Update existing shockwave rings
     this.updateShockwaves(deltaTime);
 
-    // Spawn shockwave rings at high speed
-    if (this.currentSpeed > SHOCKWAVE_THRESHOLD && this.isFlightMode) {
-      // Spawn periodic shockwaves
-      if (now - this.lastShockwaveTime > 400) { // Every 400ms
-        this.spawnShockwave();
-        this.lastShockwaveTime = now;
-      }
+    // Spawn shockwave ONCE when crossing the sonic threshold
+    const isAboveSonicThreshold = this.currentSpeed > SHOCKWAVE_THRESHOLD && this.isFlightMode;
+    if (isAboveSonicThreshold && !this.wasAboveSonicThreshold) {
+      // Just crossed the threshold - spawn a single shockwave
+      this.spawnShockwave();
     }
+    this.wasAboveSonicThreshold = isAboveSonicThreshold;
 
     // Camera shake at high speed near ground
     if (this.currentSpeed > 80 && this.isFlightMode) {

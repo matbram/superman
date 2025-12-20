@@ -1,6 +1,6 @@
 /**
- * Procedural City Generator
- * Creates a small 3D city with buildings, streets, and sidewalks
+ * Procedural Infinite City Generator
+ * Creates city chunks dynamically as the player explores
  */
 
 import { Scene } from '@babylonjs/core/scene';
@@ -12,44 +12,43 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator';
 import { PhysicsManager, createCollisionBox } from '../physics/physics';
 
-// City generation constants
-const CITY_BLOCKS_X = 3;
-const CITY_BLOCKS_Z = 3;
-const BLOCK_SIZE = 60; // meters
-const STREET_WIDTH = 15; // meters
-const SIDEWALK_WIDTH = 3; // meters (for building offset)
-const SIDEWALK_HEIGHT = 0.15; // meters
+// Chunk and city generation constants
+const CHUNK_SIZE = 150; // Size of each city chunk in meters
+const LOAD_RADIUS = 2; // Number of chunks to load around player
+const UNLOAD_DISTANCE = 4; // Chunks further than this are unloaded
 
-// Building size ranges
+// Building generation
+const STREET_WIDTH = 15;
+const SIDEWALK_WIDTH = 3;
+const SIDEWALK_HEIGHT = 0.15;
+
 const MIN_BUILDING_HEIGHT = 20;
-const MAX_BUILDING_HEIGHT = 80;
+const MAX_BUILDING_HEIGHT = 100;
 const MIN_BUILDING_WIDTH = 12;
 const MAX_BUILDING_WIDTH = 25;
 const BUILDING_SPACING = 8;
 
 // Colors
-const ROAD_COLOR = new Color3(0.2, 0.2, 0.2);
 const SIDEWALK_COLOR = new Color3(0.55, 0.55, 0.55);
 const BUILDING_COLORS = [
-  new Color3(0.7, 0.7, 0.75),   // Light Gray
-  new Color3(0.6, 0.55, 0.5),   // Tan
-  new Color3(0.5, 0.55, 0.6),   // Blue-gray
-  new Color3(0.55, 0.45, 0.4),  // Brown
-  new Color3(0.75, 0.7, 0.65),  // Off-white
-  new Color3(0.4, 0.45, 0.5),   // Dark blue-gray
-  new Color3(0.65, 0.6, 0.55),  // Warm gray
-  new Color3(0.3, 0.35, 0.4),   // Dark slate
+  new Color3(0.7, 0.7, 0.75),
+  new Color3(0.6, 0.55, 0.5),
+  new Color3(0.5, 0.55, 0.6),
+  new Color3(0.55, 0.45, 0.4),
+  new Color3(0.75, 0.7, 0.65),
+  new Color3(0.4, 0.45, 0.5),
+  new Color3(0.65, 0.6, 0.55),
+  new Color3(0.3, 0.35, 0.4),
 ];
 
-// Window colors for lit windows
 const WINDOW_COLORS = [
-  new Color3(1.0, 0.95, 0.7),   // Warm yellow light
-  new Color3(0.7, 0.85, 1.0),   // Cool blue light
-  new Color3(0.9, 0.9, 0.8),    // Neutral light
+  new Color3(1.0, 0.95, 0.7),
+  new Color3(0.7, 0.85, 1.0),
+  new Color3(0.9, 0.9, 0.8),
 ];
 
 /**
- * Seeded random number generator for deterministic city generation
+ * Seeded random for deterministic chunk generation
  */
 class SeededRandom {
   private seed: number;
@@ -77,16 +76,32 @@ class SeededRandom {
 }
 
 /**
- * City generator class
+ * City chunk containing meshes and data for one area
+ */
+interface CityChunk {
+  key: string;
+  chunkX: number;
+  chunkZ: number;
+  meshes: Mesh[];
+  lastAccess: number;
+}
+
+/**
+ * Procedural city generator with infinite streaming
  */
 export class City {
   private scene: Scene;
   private physicsManager: PhysicsManager;
   private shadowGenerator: ShadowGenerator;
-  private random: SeededRandom;
+  private baseSeed: number;
 
-  private buildings: Mesh[] = [];
-  private sidewalks: Mesh[] = [];
+  private chunks: Map<string, CityChunk> = new Map();
+  private groundMesh: Mesh | null = null;
+  private groundMaterial: StandardMaterial;
+  private sidewalkMaterial: StandardMaterial;
+  private roadMaterial: StandardMaterial;
+
+  private buildingIdCounter: number = 0;
 
   constructor(
     scene: Scene,
@@ -97,155 +112,231 @@ export class City {
     this.scene = scene;
     this.physicsManager = physicsManager;
     this.shadowGenerator = shadowGenerator;
-    this.random = new SeededRandom(seed);
+    this.baseSeed = seed;
 
-    this.generate();
+    // Create shared materials
+    this.groundMaterial = new StandardMaterial('groundMaterial', scene);
+    this.groundMaterial.diffuseColor = new Color3(0.25, 0.35, 0.2);
+    this.groundMaterial.specularColor = new Color3(0.05, 0.05, 0.05);
+
+    this.sidewalkMaterial = new StandardMaterial('sidewalkMaterial', scene);
+    this.sidewalkMaterial.diffuseColor = SIDEWALK_COLOR;
+    this.sidewalkMaterial.specularColor = new Color3(0.1, 0.1, 0.1);
+
+    this.roadMaterial = new StandardMaterial('roadMaterial', scene);
+    this.roadMaterial.diffuseColor = new Color3(0.2, 0.2, 0.2);
+    this.roadMaterial.specularColor = new Color3(0.05, 0.05, 0.05);
+
+    // Create infinite ground
+    this.createGround();
+
+    // Generate initial chunks around origin
+    this.updateChunks(new Vector3(0, 0, 0));
   }
 
   /**
-   * Generates the entire city
+   * Creates the infinite ground plane
    */
-  private generate(): void {
-    const totalWidth = CITY_BLOCKS_X * (BLOCK_SIZE + STREET_WIDTH);
-    const totalDepth = CITY_BLOCKS_Z * (BLOCK_SIZE + STREET_WIDTH);
-    const offsetX = -totalWidth / 2;
-    const offsetZ = -totalDepth / 2;
+  private createGround(): void {
+    const groundSize = 5000; // Very large ground
 
-    // Create unified ground first (prevents z-fighting)
-    this.createUnifiedGround(totalWidth, totalDepth);
-
-    // Create road material
-    const roadMaterial = new StandardMaterial('roadMaterial', this.scene);
-    roadMaterial.diffuseColor = ROAD_COLOR;
-    roadMaterial.specularColor = new Color3(0.05, 0.05, 0.05);
-
-    // Create sidewalk material
-    const sidewalkMaterial = new StandardMaterial('sidewalkMaterial', this.scene);
-    sidewalkMaterial.diffuseColor = SIDEWALK_COLOR;
-    sidewalkMaterial.specularColor = new Color3(0.1, 0.1, 0.1);
-
-    // Generate grid of blocks with sidewalks
-    for (let bx = 0; bx < CITY_BLOCKS_X; bx++) {
-      for (let bz = 0; bz < CITY_BLOCKS_Z; bz++) {
-        const blockX = offsetX + bx * (BLOCK_SIZE + STREET_WIDTH) + BLOCK_SIZE / 2;
-        const blockZ = offsetZ + bz * (BLOCK_SIZE + STREET_WIDTH) + BLOCK_SIZE / 2;
-
-        // Create sidewalk for this block
-        this.createSidewalk(blockX, blockZ, BLOCK_SIZE, sidewalkMaterial);
-
-        // Generate buildings in this block
-        this.generateBlock(blockX, blockZ);
-      }
-    }
-
-    // Add road markings (no overlapping surfaces)
-    this.addRoadMarkings(offsetX, offsetZ, totalWidth, totalDepth);
-  }
-
-  /**
-   * Creates unified ground plane (no overlapping surfaces)
-   */
-  private createUnifiedGround(totalWidth: number, totalDepth: number): void {
-    const groundSize = Math.max(totalWidth, totalDepth) + 500;
-
-    const ground = MeshBuilder.CreateGround(
+    this.groundMesh = MeshBuilder.CreateGround(
       'cityGround',
       { width: groundSize, height: groundSize },
       this.scene
     );
-    ground.position.y = 0;
-
-    const groundMaterial = new StandardMaterial('groundMaterial', this.scene);
-    groundMaterial.diffuseColor = new Color3(0.25, 0.35, 0.2); // Grass color
-    groundMaterial.specularColor = new Color3(0.05, 0.05, 0.05);
-
-    ground.material = groundMaterial;
-    ground.receiveShadows = true;
-    ground.isPickable = true;
-    createCollisionBox(ground, this.physicsManager);
+    this.groundMesh.position.y = 0;
+    this.groundMesh.material = this.groundMaterial;
+    this.groundMesh.receiveShadows = true;
+    this.groundMesh.isPickable = true;
+    createCollisionBox(this.groundMesh, this.physicsManager);
   }
 
   /**
-   * Generates buildings within a city block
+   * Updates loaded chunks based on player position
    */
-  private generateBlock(centerX: number, centerZ: number): void {
-    const halfBlock = (BLOCK_SIZE - SIDEWALK_WIDTH * 2) / 2;
+  public updateChunks(playerPosition: Vector3): void {
+    const playerChunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
+    const playerChunkZ = Math.floor(playerPosition.z / CHUNK_SIZE);
 
-    // Fill block with buildings
-    let currentX = centerX - halfBlock;
+    // Load chunks in radius around player
+    for (let dx = -LOAD_RADIUS; dx <= LOAD_RADIUS; dx++) {
+      for (let dz = -LOAD_RADIUS; dz <= LOAD_RADIUS; dz++) {
+        const chunkX = playerChunkX + dx;
+        const chunkZ = playerChunkZ + dz;
+        const key = `${chunkX},${chunkZ}`;
 
-    while (currentX < centerX + halfBlock - MIN_BUILDING_WIDTH) {
-      let currentZ = centerZ - halfBlock;
+        if (!this.chunks.has(key)) {
+          this.generateChunk(chunkX, chunkZ);
+        } else {
+          // Update access time
+          const chunk = this.chunks.get(key)!;
+          chunk.lastAccess = performance.now();
+        }
+      }
+    }
 
-      while (currentZ < centerZ + halfBlock - MIN_BUILDING_WIDTH) {
-        // Random building dimensions
-        const maxWidth = Math.min(
-          MAX_BUILDING_WIDTH,
-          centerX + halfBlock - currentX
-        );
-        const maxDepth = Math.min(
-          MAX_BUILDING_WIDTH,
-          centerZ + halfBlock - currentZ
-        );
+    // Unload distant chunks
+    const now = performance.now();
+    for (const [key, chunk] of this.chunks.entries()) {
+      const dx = Math.abs(chunk.chunkX - playerChunkX);
+      const dz = Math.abs(chunk.chunkZ - playerChunkZ);
+
+      if (dx > UNLOAD_DISTANCE || dz > UNLOAD_DISTANCE) {
+        // Only unload if not recently accessed
+        if (now - chunk.lastAccess > 5000) {
+          this.unloadChunk(key);
+        }
+      }
+    }
+  }
+
+  /**
+   * Generates a city chunk at the given chunk coordinates
+   */
+  private generateChunk(chunkX: number, chunkZ: number): void {
+    const key = `${chunkX},${chunkZ}`;
+    const chunkSeed = this.hashCoords(chunkX, chunkZ);
+    const random = new SeededRandom(chunkSeed);
+
+    const meshes: Mesh[] = [];
+    const worldX = chunkX * CHUNK_SIZE;
+    const worldZ = chunkZ * CHUNK_SIZE;
+
+    // Create city block in this chunk
+    const halfChunk = CHUNK_SIZE / 2;
+
+    // Create sidewalk/platform for the chunk
+    const sidewalk = this.createChunkSidewalk(worldX + halfChunk, worldZ + halfChunk, random);
+    meshes.push(sidewalk);
+
+    // Generate buildings
+    const buildingMeshes = this.generateChunkBuildings(
+      worldX + SIDEWALK_WIDTH,
+      worldZ + SIDEWALK_WIDTH,
+      CHUNK_SIZE - SIDEWALK_WIDTH * 2,
+      CHUNK_SIZE - SIDEWALK_WIDTH * 2,
+      random
+    );
+    meshes.push(...buildingMeshes);
+
+    // Create road markings at chunk edges
+    const markings = this.createChunkRoadMarkings(worldX, worldZ, random);
+    meshes.push(...markings);
+
+    this.chunks.set(key, {
+      key,
+      chunkX,
+      chunkZ,
+      meshes,
+      lastAccess: performance.now(),
+    });
+  }
+
+  /**
+   * Creates sidewalk for a chunk
+   */
+  private createChunkSidewalk(centerX: number, centerZ: number, _random: SeededRandom): Mesh {
+    const sidewalk = MeshBuilder.CreateBox(
+      `sidewalk_${centerX}_${centerZ}`,
+      {
+        width: CHUNK_SIZE - STREET_WIDTH,
+        height: SIDEWALK_HEIGHT,
+        depth: CHUNK_SIZE - STREET_WIDTH,
+      },
+      this.scene
+    );
+
+    sidewalk.position = new Vector3(centerX, SIDEWALK_HEIGHT / 2, centerZ);
+    sidewalk.material = this.sidewalkMaterial;
+    sidewalk.receiveShadows = true;
+    createCollisionBox(sidewalk, this.physicsManager);
+
+    return sidewalk;
+  }
+
+  /**
+   * Generates buildings within a chunk area
+   */
+  private generateChunkBuildings(
+    startX: number,
+    startZ: number,
+    width: number,
+    depth: number,
+    random: SeededRandom
+  ): Mesh[] {
+    const meshes: Mesh[] = [];
+    const endX = startX + width;
+    const endZ = startZ + depth;
+
+    let currentX = startX + BUILDING_SPACING;
+
+    while (currentX < endX - MIN_BUILDING_WIDTH) {
+      let currentZ = startZ + BUILDING_SPACING;
+
+      while (currentZ < endZ - MIN_BUILDING_WIDTH) {
+        const maxWidth = Math.min(MAX_BUILDING_WIDTH, endX - currentX - BUILDING_SPACING);
+        const maxDepth = Math.min(MAX_BUILDING_WIDTH, endZ - currentZ - BUILDING_SPACING);
 
         if (maxWidth < MIN_BUILDING_WIDTH || maxDepth < MIN_BUILDING_WIDTH) {
           currentZ += BUILDING_SPACING;
           continue;
         }
 
-        const width = this.random.range(MIN_BUILDING_WIDTH, maxWidth);
-        const depth = this.random.range(MIN_BUILDING_WIDTH, maxDepth);
-        const height = this.random.range(MIN_BUILDING_HEIGHT, MAX_BUILDING_HEIGHT);
+        const bWidth = random.range(MIN_BUILDING_WIDTH, maxWidth);
+        const bDepth = random.range(MIN_BUILDING_WIDTH, maxDepth);
+        const bHeight = random.range(MIN_BUILDING_HEIGHT, MAX_BUILDING_HEIGHT);
 
-        // Create building
-        this.createBuilding(
-          currentX + width / 2,
-          currentZ + depth / 2,
-          width,
-          height,
-          depth
+        const buildingMeshes = this.createBuilding(
+          currentX + bWidth / 2,
+          currentZ + bDepth / 2,
+          bWidth,
+          bHeight,
+          bDepth,
+          random
         );
+        meshes.push(...buildingMeshes);
 
-        currentZ += depth + BUILDING_SPACING;
+        currentZ += bDepth + BUILDING_SPACING + random.range(0, 5);
       }
 
-      currentX += this.random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH) + BUILDING_SPACING;
+      currentX += random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH) + BUILDING_SPACING;
     }
+
+    return meshes;
   }
 
   /**
-   * Creates a single building with windows and details
+   * Creates a building with variations
    */
   private createBuilding(
     x: number,
     z: number,
     width: number,
     height: number,
-    depth: number
-  ): void {
-    const buildingId = this.buildings.length;
-    const buildingType = this.random.intRange(0, 10);
+    depth: number,
+    random: SeededRandom
+  ): Mesh[] {
+    const meshes: Mesh[] = [];
+    const buildingId = this.buildingIdCounter++;
+    const buildingType = random.intRange(0, 10);
 
-    // Choose building style based on random
-    if (buildingType < 3 && height > 50) {
-      // Tiered/stepped building
-      this.createTieredBuilding(x, z, width, height, depth, buildingId);
+    if (buildingType < 3 && height > 60) {
+      // Tiered building
+      meshes.push(...this.createTieredBuilding(x, z, width, height, depth, buildingId, random));
     } else if (buildingType < 5 && width > 15 && depth > 15) {
       // L-shaped building
-      this.createLShapedBuilding(x, z, width, height, depth, buildingId);
+      meshes.push(...this.createLShapedBuilding(x, z, width, height, depth, buildingId, random));
     } else {
-      // Standard building with windows
-      this.createStandardBuilding(x, z, width, height, depth, buildingId);
+      // Standard building
+      meshes.push(...this.createStandardBuilding(x, z, width, height, depth, buildingId, random));
     }
 
-    // Add rooftop details for taller buildings
-    if (height > 30) {
-      this.addRooftopDetails(x, z, width, height, depth);
-    }
+    return meshes;
   }
 
   /**
-   * Creates a standard box building with windows
+   * Creates a standard box building
    */
   private createStandardBuilding(
     x: number,
@@ -253,8 +344,11 @@ export class City {
     width: number,
     height: number,
     depth: number,
-    buildingId: number
-  ): void {
+    buildingId: number,
+    random: SeededRandom
+  ): Mesh[] {
+    const meshes: Mesh[] = [];
+
     const building = MeshBuilder.CreateBox(
       `building_${buildingId}`,
       { width, height, depth },
@@ -263,7 +357,7 @@ export class City {
 
     building.position = new Vector3(x, height / 2 + SIDEWALK_HEIGHT, z);
 
-    const baseColor = this.random.pick(BUILDING_COLORS);
+    const baseColor = random.pick(BUILDING_COLORS);
     const material = new StandardMaterial(`buildingMat_${buildingId}`, this.scene);
     material.diffuseColor = baseColor;
     material.specularColor = new Color3(0.15, 0.15, 0.15);
@@ -272,14 +366,21 @@ export class City {
     building.receiveShadows = true;
     this.shadowGenerator.addShadowCaster(building);
     createCollisionBox(building, this.physicsManager);
-    this.buildings.push(building);
+    meshes.push(building);
 
     // Add windows
-    this.addBuildingWindows(x, z, width, height, depth, buildingId);
+    meshes.push(...this.addBuildingWindows(x, z, width, height, depth, buildingId, random));
+
+    // Add rooftop for taller buildings
+    if (height > 40) {
+      meshes.push(...this.addRooftopDetails(x, z, width, height, depth, buildingId, random));
+    }
+
+    return meshes;
   }
 
   /**
-   * Creates a tiered/stepped building
+   * Creates a tiered building
    */
   private createTieredBuilding(
     x: number,
@@ -287,17 +388,23 @@ export class City {
     width: number,
     height: number,
     depth: number,
-    buildingId: number
-  ): void {
-    const numTiers = this.random.intRange(2, 4);
+    buildingId: number,
+    random: SeededRandom
+  ): Mesh[] {
+    const meshes: Mesh[] = [];
+    const numTiers = random.intRange(2, 4);
     const tierHeight = height / numTiers;
-    const baseColor = this.random.pick(BUILDING_COLORS);
+    const baseColor = random.pick(BUILDING_COLORS);
+
+    const material = new StandardMaterial(`buildingMat_${buildingId}`, this.scene);
+    material.diffuseColor = baseColor;
+    material.specularColor = new Color3(0.15, 0.15, 0.15);
 
     for (let i = 0; i < numTiers; i++) {
-      const tierScale = 1 - (i * 0.15);
+      const tierScale = 1 - i * 0.15;
       const tierWidth = width * tierScale;
       const tierDepth = depth * tierScale;
-      const tierY = tierHeight / 2 + SIDEWALK_HEIGHT + (i * tierHeight);
+      const tierY = tierHeight / 2 + SIDEWALK_HEIGHT + i * tierHeight;
 
       const tier = MeshBuilder.CreateBox(
         `building_${buildingId}_tier${i}`,
@@ -306,22 +413,16 @@ export class City {
       );
 
       tier.position = new Vector3(x, tierY, z);
-
-      const material = new StandardMaterial(`buildingMat_${buildingId}_tier${i}`, this.scene);
-      material.diffuseColor = baseColor;
-      material.specularColor = new Color3(0.15, 0.15, 0.15);
       tier.material = material;
-
       tier.receiveShadows = true;
       this.shadowGenerator.addShadowCaster(tier);
       createCollisionBox(tier, this.physicsManager);
-
-      if (i === 0) {
-        this.buildings.push(tier);
-      }
+      meshes.push(tier);
     }
 
-    this.addBuildingWindows(x, z, width * 0.85, height * 0.7, depth * 0.85, buildingId);
+    meshes.push(...this.addBuildingWindows(x, z, width * 0.85, height * 0.7, depth * 0.85, buildingId, random));
+
+    return meshes;
   }
 
   /**
@@ -333,9 +434,12 @@ export class City {
     width: number,
     height: number,
     depth: number,
-    buildingId: number
-  ): void {
-    const baseColor = this.random.pick(BUILDING_COLORS);
+    buildingId: number,
+    random: SeededRandom
+  ): Mesh[] {
+    const meshes: Mesh[] = [];
+    const baseColor = random.pick(BUILDING_COLORS);
+
     const material = new StandardMaterial(`buildingMat_${buildingId}`, this.scene);
     material.diffuseColor = baseColor;
     material.specularColor = new Color3(0.15, 0.15, 0.15);
@@ -352,7 +456,7 @@ export class City {
     main.receiveShadows = true;
     this.shadowGenerator.addShadowCaster(main);
     createCollisionBox(main, this.physicsManager);
-    this.buildings.push(main);
+    meshes.push(main);
 
     // Wing section
     const wingDepth = depth * 0.5;
@@ -371,12 +475,15 @@ export class City {
     wing.receiveShadows = true;
     this.shadowGenerator.addShadowCaster(wing);
     createCollisionBox(wing, this.physicsManager);
+    meshes.push(wing);
 
-    this.addBuildingWindows(x, z, width, height, depth, buildingId);
+    meshes.push(...this.addBuildingWindows(x, z, width, height, depth, buildingId, random));
+
+    return meshes;
   }
 
   /**
-   * Adds window lights to a building
+   * Adds window strips to a building
    */
   private addBuildingWindows(
     x: number,
@@ -384,31 +491,31 @@ export class City {
     width: number,
     height: number,
     depth: number,
-    buildingId: number
-  ): void {
+    buildingId: number,
+    random: SeededRandom
+  ): Mesh[] {
+    const meshes: Mesh[] = [];
     const windowSize = 1.5;
-    const windowSpacingH = 4;
     const windowSpacingV = 4;
     const windowInset = 0.1;
 
     const windowMaterial = new StandardMaterial(`windowMat_${buildingId}`, this.scene);
-    const windowColor = this.random.pick(WINDOW_COLORS);
+    const windowColor = random.pick(WINDOW_COLORS);
     windowMaterial.diffuseColor = windowColor.scale(0.3);
     windowMaterial.emissiveColor = windowColor.scale(0.4);
     windowMaterial.specularColor = new Color3(0.5, 0.5, 0.5);
 
-    // Create window strips on front and back faces
-    const numWindowsH = Math.floor((width - 4) / windowSpacingH);
+    const numWindowsH = Math.floor((width - 4) / 4);
     const numWindowsV = Math.floor((height - 4) / windowSpacingV);
 
-    if (numWindowsH < 1 || numWindowsV < 1) return;
+    if (numWindowsH < 1 || numWindowsV < 1) return meshes;
 
-    // Front face windows (merged into strips for performance)
+    const stripWidth = Math.max(width - 4, windowSize);
+
+    // Front windows
     for (let row = 0; row < numWindowsV; row++) {
-      // Randomly skip some rows to add variety
-      if (this.random.next() > 0.8) continue;
+      if (random.next() > 0.85) continue;
 
-      const stripWidth = (numWindowsH - 1) * windowSpacingH + windowSize;
       const windowStrip = MeshBuilder.CreateBox(
         `window_${buildingId}_front_${row}`,
         { width: stripWidth, height: windowSize, depth: windowInset },
@@ -418,13 +525,13 @@ export class City {
       const windowY = SIDEWALK_HEIGHT + 3 + row * windowSpacingV;
       windowStrip.position = new Vector3(x, windowY, z + depth / 2 + windowInset / 2);
       windowStrip.material = windowMaterial;
+      meshes.push(windowStrip);
     }
 
-    // Back face windows
+    // Back windows
     for (let row = 0; row < numWindowsV; row++) {
-      if (this.random.next() > 0.8) continue;
+      if (random.next() > 0.85) continue;
 
-      const stripWidth = (numWindowsH - 1) * windowSpacingH + windowSize;
       const windowStrip = MeshBuilder.CreateBox(
         `window_${buildingId}_back_${row}`,
         { width: stripWidth, height: windowSize, depth: windowInset },
@@ -434,168 +541,127 @@ export class City {
       const windowY = SIDEWALK_HEIGHT + 3 + row * windowSpacingV;
       windowStrip.position = new Vector3(x, windowY, z - depth / 2 - windowInset / 2);
       windowStrip.material = windowMaterial;
+      meshes.push(windowStrip);
     }
+
+    return meshes;
   }
 
   /**
-   * Adds simple rooftop structures
+   * Adds rooftop structures
    */
   private addRooftopDetails(
     x: number,
-    z: number,
+    _z: number,
     width: number,
     height: number,
-    depth: number
-  ): void {
+    depth: number,
+    buildingId: number,
+    random: SeededRandom
+  ): Mesh[] {
+    const meshes: Mesh[] = [];
+
     const rooftopWidth = width * 0.3;
     const rooftopDepth = depth * 0.3;
-    const rooftopHeight = this.random.range(3, 6);
+    const rooftopHeight = random.range(3, 6);
 
     const rooftop = MeshBuilder.CreateBox(
-      `rooftop_${this.buildings.length}`,
+      `rooftop_${buildingId}`,
       { width: rooftopWidth, height: rooftopHeight, depth: rooftopDepth },
       this.scene
     );
 
-    rooftop.position = new Vector3(x, height + SIDEWALK_HEIGHT + rooftopHeight / 2, z);
+    rooftop.position = new Vector3(x, height + SIDEWALK_HEIGHT + rooftopHeight / 2, _z);
 
-    const material = new StandardMaterial(`rooftopMat_${this.buildings.length}`, this.scene);
+    const material = new StandardMaterial(`rooftopMat_${buildingId}`, this.scene);
     material.diffuseColor = new Color3(0.35, 0.35, 0.35);
     rooftop.material = material;
 
     this.shadowGenerator.addShadowCaster(rooftop);
     createCollisionBox(rooftop, this.physicsManager);
+    meshes.push(rooftop);
+
+    return meshes;
   }
 
   /**
-   * Creates sidewalk around a block
+   * Creates road markings at chunk edges
    */
-  private createSidewalk(
-    centerX: number,
-    centerZ: number,
-    blockSize: number,
-    material: StandardMaterial
-  ): void {
-    const sidewalk = MeshBuilder.CreateBox(
-      `sidewalk_${this.sidewalks.length}`,
-      {
-        width: blockSize,
-        height: SIDEWALK_HEIGHT,
-        depth: blockSize,
-      },
+  private createChunkRoadMarkings(worldX: number, worldZ: number, _random: SeededRandom): Mesh[] {
+    const meshes: Mesh[] = [];
+
+    const markingMaterial = new StandardMaterial(`marking_${worldX}_${worldZ}`, this.scene);
+    markingMaterial.diffuseColor = new Color3(1, 1, 0.7);
+    markingMaterial.emissiveColor = new Color3(0.2, 0.2, 0.05);
+
+    // Crosswalk at chunk corner
+    const crosswalk = MeshBuilder.CreateBox(
+      `crosswalk_${worldX}_${worldZ}`,
+      { width: STREET_WIDTH - 2, height: 0.02, depth: 2 },
       this.scene
     );
+    crosswalk.position = new Vector3(worldX, 0.01, worldZ);
+    crosswalk.material = markingMaterial;
+    meshes.push(crosswalk);
 
-    sidewalk.position = new Vector3(centerX, SIDEWALK_HEIGHT / 2, centerZ);
-    sidewalk.material = material;
-    sidewalk.receiveShadows = true;
-
-    // Add collision for walking
-    createCollisionBox(sidewalk, this.physicsManager);
-
-    this.sidewalks.push(sidewalk);
+    return meshes;
   }
 
   /**
-   * Adds road lane markings (simplified, no z-fighting)
+   * Unloads a chunk and disposes its meshes
    */
-  private addRoadMarkings(
-    offsetX: number,
-    offsetZ: number,
-    _totalWidth: number,
-    _totalDepth: number
-  ): void {
-    const markingMaterial = new StandardMaterial('markingMaterial', this.scene);
-    markingMaterial.diffuseColor = new Color3(1, 1, 0.7);
-    markingMaterial.emissiveColor = new Color3(0.3, 0.3, 0.1);
+  private unloadChunk(key: string): void {
+    const chunk = this.chunks.get(key);
+    if (!chunk) return;
 
-    // Simplified road markings - just at intersections
-    for (let i = 0; i <= CITY_BLOCKS_X; i++) {
-      for (let j = 0; j <= CITY_BLOCKS_Z; j++) {
-        const x = offsetX + i * (BLOCK_SIZE + STREET_WIDTH) - STREET_WIDTH / 2;
-        const z = offsetZ + j * (BLOCK_SIZE + STREET_WIDTH) - STREET_WIDTH / 2;
-
-        // Crosswalk marking
-        const crosswalk = MeshBuilder.CreateBox(
-          `crosswalk_${i}_${j}`,
-          { width: STREET_WIDTH - 2, height: 0.05, depth: 2 },
-          this.scene
-        );
-        crosswalk.position = new Vector3(x, 0.025, z);
-        crosswalk.material = markingMaterial;
-      }
+    for (const mesh of chunk.meshes) {
+      this.physicsManager.removeCollisionMesh(mesh);
+      mesh.dispose();
     }
+
+    this.chunks.delete(key);
   }
 
   /**
-   * Gets all building meshes
+   * Hash function for deterministic chunk seeds
+   */
+  private hashCoords(x: number, z: number): number {
+    const h = (x * 374761393 + z * 668265263 + this.baseSeed) ^ (x * 1274126177);
+    return Math.abs(h);
+  }
+
+  /**
+   * Gets all currently loaded building meshes
    */
   public getBuildings(): Mesh[] {
-    return this.buildings;
-  }
-
-  /**
-   * Checks if a position collides with any building
-   */
-  public isPositionInsideBuilding(pos: Vector3, radius: number = 1): boolean {
-    for (const building of this.buildings) {
-      const bounds = building.getBoundingInfo().boundingBox;
-      const min = bounds.minimumWorld;
-      const max = bounds.maximumWorld;
-
-      // Check if position (with radius) is inside building bounds
-      if (
-        pos.x + radius > min.x && pos.x - radius < max.x &&
-        pos.z + radius > min.z && pos.z - radius < max.z &&
-        pos.y < max.y && pos.y > min.y - 2
-      ) {
-        return true;
+    const buildings: Mesh[] = [];
+    for (const chunk of this.chunks.values()) {
+      for (const mesh of chunk.meshes) {
+        if (mesh.name.startsWith('building_')) {
+          buildings.push(mesh);
+        }
       }
     }
-    return false;
+    return buildings;
   }
 
   /**
-   * Finds a safe spawn position on a street (not inside buildings)
+   * Gets spawn position near origin
    */
   public getSpawnPosition(): Vector3 {
-    const totalWidth = CITY_BLOCKS_X * (BLOCK_SIZE + STREET_WIDTH);
-    const totalDepth = CITY_BLOCKS_Z * (BLOCK_SIZE + STREET_WIDTH);
-    const offsetX = -totalWidth / 2;
-    const offsetZ = -totalDepth / 2;
-
-    // Player center height: ground (0) + half player height (0.9) + small buffer
-    const spawnY = 1.0;
-
-    // Try to spawn on a street intersection
-    for (let attempt = 0; attempt < 20; attempt++) {
-      // Pick a random street intersection
-      const streetX = this.random.intRange(0, CITY_BLOCKS_X);
-      const streetZ = this.random.intRange(0, CITY_BLOCKS_Z);
-
-      const x = offsetX + streetX * (BLOCK_SIZE + STREET_WIDTH) - STREET_WIDTH / 2;
-      const z = offsetZ + streetZ * (BLOCK_SIZE + STREET_WIDTH) - STREET_WIDTH / 2;
-
-      const testPos = new Vector3(x, spawnY, z);
-
-      if (!this.isPositionInsideBuilding(testPos, 2)) {
-        return testPos;
-      }
-    }
-
-    // Fallback: spawn outside the city
-    return new Vector3(-totalWidth / 2 - 20, spawnY, -totalDepth / 2 - 20);
+    return new Vector3(CHUNK_SIZE / 2, 1.0, CHUNK_SIZE / 2);
   }
 
   /**
-   * Gets a safe position on a building rooftop
+   * Gets a position on a random building rooftop
    */
   public getRandomRooftopPosition(): Vector3 {
-    if (this.buildings.length === 0) {
+    const buildings = this.getBuildings();
+    if (buildings.length === 0) {
       return new Vector3(0, 20, 0);
     }
 
-    const building = this.random.pick(this.buildings);
+    const building = buildings[Math.floor(Math.random() * buildings.length)];
     const bounds = building.getBoundingInfo().boundingBox;
 
     return new Vector3(
@@ -603,5 +669,29 @@ export class City {
       bounds.maximumWorld.y + 2,
       building.position.z
     );
+  }
+
+  /**
+   * Checks if position is inside any building
+   */
+  public isPositionInsideBuilding(pos: Vector3, radius: number = 1): boolean {
+    for (const chunk of this.chunks.values()) {
+      for (const mesh of chunk.meshes) {
+        if (!mesh.name.startsWith('building_')) continue;
+
+        const bounds = mesh.getBoundingInfo().boundingBox;
+        const min = bounds.minimumWorld;
+        const max = bounds.maximumWorld;
+
+        if (
+          pos.x + radius > min.x && pos.x - radius < max.x &&
+          pos.z + radius > min.z && pos.z - radius < max.z &&
+          pos.y < max.y && pos.y > min.y - 2
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 }

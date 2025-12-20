@@ -128,15 +128,32 @@ export class GroundedState extends BasePlayerState {
     return angle;
   }
 
-  fixedUpdate(player: Player, _input: InputState, fixedDelta: number): void {
+  fixedUpdate(player: Player, input: InputState, fixedDelta: number): void {
     const velocity = player.getVelocity();
+
+    // During landing grace period, completely stop horizontal movement
+    // This prevents physics slide from causing sliding after landing
+    if (this.landingGracePeriod > 0) {
+      velocity.x = 0;
+      velocity.z = 0;
+    }
+
+    // If no input and grounded, ensure we're stopped (prevent sliding)
+    const inputMag = Math.sqrt(input.moveX ** 2 + input.moveY ** 2);
+    if (player.isGrounded() && inputMag < 0.1) {
+      // Rapidly damp any residual horizontal velocity
+      velocity.x *= 0.8;
+      velocity.z *= 0.8;
+      if (Math.abs(velocity.x) < 0.1) velocity.x = 0;
+      if (Math.abs(velocity.z) < 0.1) velocity.z = 0;
+    }
 
     // Apply gravity if not grounded
     if (!player.isGrounded()) {
       velocity.y += player.getPhysics().getGravity() * fixedDelta;
     } else {
-      // Keep small downward velocity to maintain ground contact
-      velocity.y = Math.max(velocity.y, -1);
+      // Zero vertical velocity when grounded
+      velocity.y = 0;
     }
 
     player.setVelocity(velocity);

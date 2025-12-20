@@ -134,6 +134,9 @@ class Game {
     // Update player
     this.player.update(input, deltaTime);
 
+    // Update city chunks based on player position (procedural generation)
+    this.city.updateChunks(this.player.getPosition());
+
     // Update HUD
     this.hud.update(
       this.player.getCurrentStateType(),

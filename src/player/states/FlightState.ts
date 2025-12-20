@@ -7,12 +7,11 @@ import { BasePlayerState, PlayerStateType } from '../PlayerState';
 import type { Player } from '../Player';
 import type { InputState } from '../../input/actionMap';
 
-// Flight physics constants
-const BASE_MAX_SPEED = 120; // m/s - faster base speed
-const BOOST_MAX_SPEED = 220; // m/s - supersonic boost
-const BASE_ACCELERATION = 40; // m/s^2 - snappier acceleration
-const BOOST_ACCELERATION = 80; // m/s^2
-const DECELERATION = 20; // m/s^2 (natural air drag)
+// Flight physics constants - RT pressure controls speed directly
+const MIN_SPEED = 10; // m/s - minimum flight speed when RT barely pressed
+const MAX_SPEED = 220; // m/s - supersonic speed at full RT pressure
+const ACCELERATION = 60; // m/s^2 - how fast we reach target speed
+const DECELERATION = 30; // m/s^2 (natural air drag when releasing RT)
 const BRAKE_DECELERATION = 200; // m/s^2 - abrupt stop with LT
 
 // Control constants
@@ -35,21 +34,19 @@ export class FlightState extends BasePlayerState {
 
   private currentSpeed: number = 0;
   private targetSpeed: number = 0;
-  private isBoosting: boolean = false;
 
   enter(player: Player): void {
     // Initialize speed from current velocity
     this.currentSpeed = player.getVelocity().length();
     this.targetSpeed = this.currentSpeed;
-    this.isBoosting = false;
 
     // Enable flight effects
     player.setFlightMode(true);
+    player.setBoostActive(false);
   }
 
   exit(player: Player): void {
     player.setFlightMode(false);
-    this.isBoosting = false;
   }
 
   update(player: Player, input: InputState, deltaTime: number): PlayerStateType | null {
@@ -57,14 +54,10 @@ export class FlightState extends BasePlayerState {
     const transitionState = this.checkTransitions(player, input);
     if (transitionState) return transitionState;
 
-    // Update boost state
-    this.isBoosting = input.boostHeld;
-    player.setBoostActive(this.isBoosting);
-
     // Handle flight controls
     this.handleFlightControls(player, input, deltaTime);
 
-    // Update speed
+    // Update speed based on RT pressure
     this.updateSpeed(player, input, deltaTime);
 
     // Apply movement
@@ -85,8 +78,7 @@ export class FlightState extends BasePlayerState {
       }
     }
 
-    // Transition to hover if very slow and no fly trigger - this is the key behavior:
-    // Releasing RT should transition to hover, not continue flying
+    // Transition to hover if very slow and no fly trigger
     if (this.currentSpeed < HOVER_TRANSITION_SPEED && input.flyTrigger < 0.1) {
       return PlayerStateType.Hover;
     }
@@ -94,7 +86,6 @@ export class FlightState extends BasePlayerState {
     // Check for ground collision at high speed
     const height = player.getHeightAboveGround();
     if (height < 1 && player.getVelocity().y < -5) {
-      // Hard landing - could add damage/stun here
       return PlayerStateType.Landing;
     }
 
@@ -103,7 +94,7 @@ export class FlightState extends BasePlayerState {
 
   private handleFlightControls(player: Player, input: InputState, deltaTime: number): void {
     // Calculate speed-based turn rate (slower turns at higher speeds)
-    const speedFactor = this.currentSpeed / BASE_MAX_SPEED;
+    const speedFactor = this.currentSpeed / MAX_SPEED;
     const turnRate = this.lerp(BASE_TURN_RATE, HIGH_SPEED_TURN_RATE, speedFactor);
 
     // Pitch control - airplane style:
@@ -134,32 +125,32 @@ export class FlightState extends BasePlayerState {
   }
 
   private updateSpeed(player: Player, input: InputState, deltaTime: number): void {
-    const maxSpeed = this.isBoosting ? BOOST_MAX_SPEED : BASE_MAX_SPEED;
-    const acceleration = this.isBoosting ? BOOST_ACCELERATION : BASE_ACCELERATION;
-
-    // RT (flyTrigger) controls acceleration - analog input for gradual speed control
-    if (input.flyTrigger > 0.1) {
-      this.targetSpeed = maxSpeed * input.flyTrigger;
+    // RT pressure directly controls target speed (procedural acceleration)
+    // More pressure = faster speed, proportional to trigger position
+    if (input.flyTrigger > 0.05) {
+      // Map trigger pressure to speed range
+      // Use a curve for better feel: slight press = slow, full press = max
+      const triggerCurve = Math.pow(input.flyTrigger, 1.5); // Slight exponential curve
+      this.targetSpeed = MIN_SPEED + (MAX_SPEED - MIN_SPEED) * triggerCurve;
     } else {
       // No fly trigger = decelerate to hover
       this.targetSpeed = 0;
     }
 
-    // LT (descendTrigger) acts as HARD brake in flight - abrupt stop
+    // LT (descendTrigger) acts as HARD brake - abrupt stop
     if (input.descendTrigger > 0.1) {
-      // Hard brake - nearly instant stop
       this.currentSpeed -= BRAKE_DECELERATION * input.descendTrigger * deltaTime;
       this.currentSpeed = Math.max(0, this.currentSpeed);
       // If fully pressing LT, stop almost immediately
       if (input.descendTrigger > 0.8) {
-        this.currentSpeed *= 0.7; // Additional rapid slowdown
+        this.currentSpeed *= 0.7;
       }
     } else if (this.currentSpeed < this.targetSpeed) {
-      // Accelerating
-      this.currentSpeed += acceleration * deltaTime;
+      // Accelerating towards target
+      this.currentSpeed += ACCELERATION * deltaTime;
       this.currentSpeed = Math.min(this.currentSpeed, this.targetSpeed);
     } else if (this.currentSpeed > this.targetSpeed) {
-      // Decelerating
+      // Decelerating towards target
       this.currentSpeed -= DECELERATION * deltaTime;
       this.currentSpeed = Math.max(this.currentSpeed, this.targetSpeed);
     }
@@ -193,20 +184,9 @@ export class FlightState extends BasePlayerState {
 
   fixedUpdate(_player: Player, _input: InputState, _fixedDelta: number): void {
     // Collision handling is done in Player.update()
-    // This is for physics-rate updates if needed
   }
 
-  /**
-   * Gets current speed for UI/effects
-   */
   public getCurrentSpeed(): number {
     return this.currentSpeed;
-  }
-
-  /**
-   * Gets whether boost is active
-   */
-  public getIsBoosting(): boolean {
-    return this.isBoosting;
   }
 }
