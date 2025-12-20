@@ -18,6 +18,7 @@ export class GroundedState extends BasePlayerState {
   readonly type = PlayerStateType.Grounded;
 
   private moveVelocity: Vector3 = Vector3.Zero();
+  private landingGracePeriod: number = 0;
 
   enter(player: Player): void {
     // Reset flight-specific state when landing
@@ -25,14 +26,18 @@ export class GroundedState extends BasePlayerState {
     player.setPitch(0);
     // Reset movement velocity to prevent carrying over flight momentum
     this.moveVelocity = Vector3.Zero();
-    // Clear any residual velocity
-    const vel = player.getVelocity();
-    vel.x = 0;
-    vel.z = 0;
-    player.setVelocity(vel);
+    // Completely zero all velocity to prevent any sliding
+    player.setVelocity(new Vector3(0, 0, 0));
+    // Small grace period where controls are slightly damped for smooth landing
+    this.landingGracePeriod = 0.15;
   }
 
   update(player: Player, input: InputState, deltaTime: number): PlayerStateType | null {
+    // Update landing grace period
+    if (this.landingGracePeriod > 0) {
+      this.landingGracePeriod -= deltaTime;
+    }
+
     // Check for state transitions
     // Jump or press RT (fly trigger) to take off
     if (input.jumpPressed || input.flyTrigger > 0.3) {
@@ -47,7 +52,7 @@ export class GroundedState extends BasePlayerState {
       }
     }
 
-    // Handle movement input
+    // Handle movement input (with grace period damping)
     this.handleMovement(player, input, deltaTime);
 
     // Handle camera rotation from input
@@ -57,7 +62,9 @@ export class GroundedState extends BasePlayerState {
   }
 
   private handleMovement(player: Player, input: InputState, deltaTime: number): void {
-    const moveSpeed = input.boostHeld ? RUN_SPEED : WALK_SPEED;
+    // During landing grace period, reduce responsiveness for smooth transition
+    const graceFactor = this.landingGracePeriod > 0 ? 0.3 : 1.0;
+    const moveSpeed = (input.boostHeld ? RUN_SPEED : WALK_SPEED) * graceFactor;
 
     // Get camera-relative movement direction
     const cameraForward = player.getCameraForward();
@@ -70,7 +77,7 @@ export class GroundedState extends BasePlayerState {
       input.moveX * cameraRight.z + input.moveY * cameraForward.z
     );
 
-    const inputMagnitude = Math.min(1, Math.sqrt(input.moveX ** 2 + input.moveY ** 2));
+    const inputMagnitude = Math.min(1, Math.sqrt(input.moveX ** 2 + input.moveY ** 2)) * graceFactor;
 
     if (inputMagnitude > 0.01) {
       inputDir.normalize();

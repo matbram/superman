@@ -26,8 +26,12 @@ export class LandingState extends BasePlayerState {
     player.setBoostActive(false);
   }
 
-  exit(_player: Player): void {
-    // Landing complete
+  exit(player: Player): void {
+    // Clear all velocity when landing completes to prevent sliding
+    player.setVelocity(new Vector3(0, 0, 0));
+    this.horizontalVelocity = Vector3.Zero();
+    // Ensure player is properly grounded
+    player.setCurrentSpeed(0);
   }
 
   update(player: Player, input: InputState, deltaTime: number): PlayerStateType | null {

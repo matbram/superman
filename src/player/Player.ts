@@ -30,9 +30,8 @@ const PLAYER_HEIGHT = 1.8;
 const PLAYER_RADIUS = 0.4;
 
 // Speed effect thresholds
-const SPEED_PARTICLE_THRESHOLD = 40;  // When wind streaks start
-const SPEED_STREAK_THRESHOLD = 80;    // When streaks intensify
-const SONIC_BOOM_THRESHOLD = 150;     // When shockwave appears
+const SPEED_PARTICLE_THRESHOLD = 40;  // When speed particles start
+const SHOCKWAVE_THRESHOLD = 120;      // When shockwave ring appears
 
 export class Player {
   private scene: Scene;
@@ -62,9 +61,10 @@ export class Player {
   private currentSpeed: number = 0;
   private speedParticles: ParticleSystem | null = null;
   private takeoffParticles: ParticleSystem | null = null;
-  private windStreakParticles: ParticleSystem | null = null;
-  private sonicBoomParticles: ParticleSystem | null = null;
-  private lastSonicBoomTime: number = 0;
+
+  // Shockwave visual effect
+  private shockwaveRings: Mesh[] = [];
+  private lastShockwaveTime: number = 0;
 
   // Audio (placeholder for future implementation)
   // TODO: Add wind audio that scales with speed
@@ -103,8 +103,6 @@ export class Player {
     // Create speed effect particles
     this.createSpeedParticles();
     this.createTakeoffParticles();
-    this.createWindStreakParticles();
-    this.createSonicBoomParticles();
 
     // Initialize state machine
     this.states = new Map<PlayerStateType, IPlayerState>();
@@ -236,81 +234,70 @@ export class Player {
   }
 
   /**
-   * Creates wind streak particles for high-speed flight
+   * Creates a shockwave ring mesh for visual effect
    */
-  private createWindStreakParticles(): void {
-    this.windStreakParticles = new ParticleSystem('windStreaks', 200, this.scene);
+  private createShockwaveRing(): Mesh {
+    // Create a torus (ring) for the shockwave
+    const ring = MeshBuilder.CreateTorus('shockwave', {
+      diameter: 2,
+      thickness: 0.15,
+      tessellation: 32,
+    }, this.scene);
 
-    this.windStreakParticles.particleTexture = new Texture('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAA0SURBVChTY/z//z8DEwMBwESAAOggFgZCYNQEXABZE4omnCbgNQGvCTiB0AS8JuA0gYEBAGqkBQm7+hkOAAAAAElFTkSuQmCC', this.scene);
+    const material = new StandardMaterial('shockwaveMat', this.scene);
+    material.diffuseColor = new Color3(0.8, 0.9, 1);
+    material.emissiveColor = new Color3(0.5, 0.7, 1);
+    material.specularColor = new Color3(1, 1, 1);
+    material.alpha = 0.8;
 
-    this.windStreakParticles.emitter = this.bodyMesh;
-    this.windStreakParticles.minEmitBox = new Vector3(-2, -1, -2);
-    this.windStreakParticles.maxEmitBox = new Vector3(2, 1, 2);
+    ring.material = material;
+    ring.isPickable = false;
+    ring.visibility = 0;
 
-    // White/blue wind streaks
-    this.windStreakParticles.color1 = new Color3(0.9, 0.95, 1).toColor4(0.6);
-    this.windStreakParticles.color2 = new Color3(0.7, 0.85, 1).toColor4(0.4);
-    this.windStreakParticles.colorDead = new Color3(1, 1, 1).toColor4(0);
-
-    // Long thin streaks
-    this.windStreakParticles.minSize = 0.02;
-    this.windStreakParticles.maxSize = 0.08;
-    this.windStreakParticles.minScaleX = 1;
-    this.windStreakParticles.maxScaleX = 1;
-    this.windStreakParticles.minScaleY = 10;
-    this.windStreakParticles.maxScaleY = 30;
-
-    this.windStreakParticles.minLifeTime = 0.05;
-    this.windStreakParticles.maxLifeTime = 0.15;
-
-    this.windStreakParticles.emitRate = 0;
-    this.windStreakParticles.blendMode = ParticleSystem.BLENDMODE_ADD;
-
-    // Streaks fly past player
-    this.windStreakParticles.direction1 = new Vector3(-0.2, -0.1, -1);
-    this.windStreakParticles.direction2 = new Vector3(0.2, 0.1, -1);
-    this.windStreakParticles.minEmitPower = 50;
-    this.windStreakParticles.maxEmitPower = 100;
-
-    this.windStreakParticles.updateSpeed = 0.01;
-    this.windStreakParticles.start();
+    return ring;
   }
 
   /**
-   * Creates sonic boom/shockwave particles for supersonic speed
+   * Spawns a shockwave ring that expands outward
    */
-  private createSonicBoomParticles(): void {
-    this.sonicBoomParticles = new ParticleSystem('sonicBoom', 50, this.scene);
+  private spawnShockwave(): void {
+    const ring = this.createShockwaveRing();
+    ring.position.copyFrom(this.physics.position);
+    ring.rotation.x = Math.PI / 2; // Lay flat perpendicular to flight direction
+    ring.rotation.y = this.yaw;
+    ring.scaling = new Vector3(1, 1, 1);
+    ring.visibility = 1;
 
-    this.sonicBoomParticles.particleTexture = new Texture('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAA0SURBVChTY/z//z8DEwMBwESAAOggFgZCYNQEXABZE4omnCbgNQGvCTiB0AS8JuA0gYEBAGqkBQm7+hkOAAAAAElFTkSuQmCC', this.scene);
+    this.shockwaveRings.push(ring);
 
-    this.sonicBoomParticles.emitter = this.bodyMesh;
-    this.sonicBoomParticles.minEmitBox = new Vector3(-0.5, -0.5, -0.5);
-    this.sonicBoomParticles.maxEmitBox = new Vector3(0.5, 0.5, 0.5);
+    // Add camera shake for impact
+    this.cameraController.addShake(1.5);
+  }
 
-    // Bright white/blue shockwave
-    this.sonicBoomParticles.color1 = new Color3(1, 1, 1).toColor4(0.9);
-    this.sonicBoomParticles.color2 = new Color3(0.8, 0.9, 1).toColor4(0.7);
-    this.sonicBoomParticles.colorDead = new Color3(0.5, 0.7, 1).toColor4(0);
+  /**
+   * Updates shockwave rings (expand and fade)
+   */
+  private updateShockwaves(deltaTime: number): void {
+    const expandSpeed = 15;
+    const fadeSpeed = 3;
 
-    // Expanding ring effect
-    this.sonicBoomParticles.minSize = 0.5;
-    this.sonicBoomParticles.maxSize = 2;
+    for (let i = this.shockwaveRings.length - 1; i >= 0; i--) {
+      const ring = this.shockwaveRings[i];
 
-    this.sonicBoomParticles.minLifeTime = 0.2;
-    this.sonicBoomParticles.maxLifeTime = 0.4;
+      // Expand the ring
+      ring.scaling.x += expandSpeed * deltaTime;
+      ring.scaling.y += expandSpeed * deltaTime;
+      ring.scaling.z += expandSpeed * deltaTime;
 
-    this.sonicBoomParticles.emitRate = 0;
-    this.sonicBoomParticles.blendMode = ParticleSystem.BLENDMODE_ADD;
+      // Fade out
+      ring.visibility -= fadeSpeed * deltaTime;
 
-    // Expand outward in a ring
-    this.sonicBoomParticles.direction1 = new Vector3(-1, -0.3, 0);
-    this.sonicBoomParticles.direction2 = new Vector3(1, 0.3, 0);
-    this.sonicBoomParticles.minEmitPower = 20;
-    this.sonicBoomParticles.maxEmitPower = 40;
-
-    this.sonicBoomParticles.updateSpeed = 0.02;
-    this.sonicBoomParticles.start();
+      // Remove when invisible
+      if (ring.visibility <= 0) {
+        ring.dispose();
+        this.shockwaveRings.splice(i, 1);
+      }
+    }
   }
 
   /**
@@ -415,7 +402,7 @@ export class Player {
   /**
    * Updates visual effects based on speed
    */
-  private updateEffects(_deltaTime: number): void {
+  private updateEffects(deltaTime: number): void {
     const now = performance.now();
 
     // Speed particles (subtle at lower speeds)
@@ -428,40 +415,20 @@ export class Player {
       }
     }
 
-    // Wind streak particles (visible at higher speeds)
-    if (this.windStreakParticles) {
-      if (this.currentSpeed > SPEED_STREAK_THRESHOLD && this.isFlightMode) {
-        const intensity = (this.currentSpeed - SPEED_STREAK_THRESHOLD) / 70;
-        this.windStreakParticles.emitRate = Math.min(200, intensity * 100);
-        // Scale streak power with speed
-        this.windStreakParticles.minEmitPower = 30 + this.currentSpeed * 0.5;
-        this.windStreakParticles.maxEmitPower = 60 + this.currentSpeed * 0.8;
-      } else {
-        this.windStreakParticles.emitRate = 0;
-      }
-    }
+    // Update existing shockwave rings
+    this.updateShockwaves(deltaTime);
 
-    // Sonic boom / shockwave at supersonic speeds
-    if (this.sonicBoomParticles) {
-      if (this.currentSpeed > SONIC_BOOM_THRESHOLD && this.isFlightMode) {
-        // Periodic sonic boom pulses
-        if (now - this.lastSonicBoomTime > 500) { // Every 500ms
-          this.sonicBoomParticles.emitRate = 50;
-          this.lastSonicBoomTime = now;
-          // Also add camera shake for impact
-          this.cameraController.addShake(1.5);
-          // Stop after burst
-          setTimeout(() => {
-            if (this.sonicBoomParticles) {
-              this.sonicBoomParticles.emitRate = 0;
-            }
-          }, 100);
-        }
+    // Spawn shockwave rings at high speed
+    if (this.currentSpeed > SHOCKWAVE_THRESHOLD && this.isFlightMode) {
+      // Spawn periodic shockwaves
+      if (now - this.lastShockwaveTime > 400) { // Every 400ms
+        this.spawnShockwave();
+        this.lastShockwaveTime = now;
       }
     }
 
     // Camera shake at high speed near ground
-    if (this.currentSpeed > SPEED_STREAK_THRESHOLD && this.isFlightMode) {
+    if (this.currentSpeed > 80 && this.isFlightMode) {
       const height = this.getHeightAboveGround();
       if (height < 15) {
         const shakeIntensity = (1 - height / 15) * 0.8 * (this.currentSpeed / 100);
