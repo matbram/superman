@@ -13,8 +13,9 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 
 // Debris constants - optimized for performance
-const MAX_DEBRIS_PIECES = 100;  // Reduced for better framerate
-const DEBRIS_CLEANUP_DISTANCE = 200;  // Cleanup sooner
+const MAX_DEBRIS_PIECES = 50;  // Low cap for better framerate
+const DEBRIS_CLEANUP_DISTANCE = 150;  // Cleanup sooner
+const DEBRIS_SETTLE_CLEANUP_TIME = 10000;  // Remove settled debris after 10 seconds
 const GRAVITY = -30;  // Normal gravity for performance
 
 // Wake damage constants
@@ -63,6 +64,7 @@ interface DebrisPiece {
   angularVelocity: Vector3;
   isChunk: boolean;  // Large structural chunk vs small debris
   settled: boolean;  // Has come to rest on ground
+  settleTime: number;  // When debris settled (for time-based cleanup)
 }
 
 /**
@@ -479,6 +481,7 @@ export class BuildingDamage {
       ),
       isChunk: true,
       settled: false,
+      settleTime: 0,
     });
 
     // Spawn small dust puff at break point
@@ -668,6 +671,7 @@ export class BuildingDamage {
         ),
         isChunk: false,
         settled: false,
+        settleTime: 0,
       });
     }
   }
@@ -797,9 +801,15 @@ export class BuildingDamage {
     for (let i = this.debris.length - 1; i >= 0; i--) {
       const piece = this.debris[i];
 
-      // If settled, only check for distance-based cleanup
+      // If settled, check for time-based and distance-based cleanup
       if (piece.settled) {
-        // Only remove debris if player is far away
+        // Time-based cleanup - remove after 10 seconds regardless of distance
+        if (now - piece.settleTime > DEBRIS_SETTLE_CLEANUP_TIME) {
+          piece.mesh.dispose();
+          this.debris.splice(i, 1);
+          continue;
+        }
+        // Distance-based cleanup - remove if player is far away
         if (playerPosition) {
           const dx = piece.mesh.position.x - playerPosition.x;
           const dz = piece.mesh.position.z - playerPosition.z;
@@ -847,6 +857,7 @@ export class BuildingDamage {
         // Check if settled (very slow)
         if (piece.velocity.length() < 1) {
           piece.settled = true;
+          piece.settleTime = now;  // Record when it settled for time-based cleanup
           piece.velocity = Vector3.Zero();
           piece.angularVelocity = Vector3.Zero();
         }

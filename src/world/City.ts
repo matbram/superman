@@ -368,6 +368,7 @@ export class City {
     chunkGround.material = this.groundMaterial;
     chunkGround.receiveShadows = true;
     chunkGround.isPickable = true;
+    chunkGround.freezeWorldMatrix();  // Static - never moves
     createCollisionBox(chunkGround, this.physicsManager);
     collisionMeshes.push(chunkGround);
 
@@ -380,6 +381,7 @@ export class City {
     sidewalk.position = new Vector3(worldX + halfChunk, SIDEWALK_HEIGHT / 2, worldZ + halfChunk);
     sidewalk.material = this.sidewalkMaterial;
     sidewalk.receiveShadows = true;
+    sidewalk.freezeWorldMatrix();  // Static - never moves
     createCollisionBox(sidewalk, this.physicsManager);
     collisionMeshes.push(sidewalk);
 
