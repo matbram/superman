@@ -163,14 +163,14 @@ export class BuildingDamage {
 
   /**
    * Applies impact damage from player collision
-   * Only breaks chunks near the impact point - building stays standing
+   * Tears chunks off at the impact point - building stays standing
    */
   public applyImpactDamage(building: Mesh, impactPosition: Vector3, speed: number): void {
     const structure = this.getOrCreateStructure(building);
 
-    // Calculate damage based on speed - higher speed = bigger chunks break
-    const damage = speed / 30;
-    structure.shakeTime = Math.min(1.5, structure.shakeTime + damage * 0.2);
+    // Calculate damage based on speed
+    const damage = speed / 20;  // More aggressive - easier to break
+    structure.shakeTime = Math.min(1.5, structure.shakeTime + damage * 0.3);
 
     // Find breakpoints near the impact and break them
     const bounds = structure.bounds;
@@ -184,53 +184,52 @@ export class BuildingDamage {
       (impactPosition.z - buildingCenter.z) / buildingSize.z
     );
 
-    // Only break 1-3 chunks per impact, closest to impact point
-    const maxChunks = Math.min(3, 1 + Math.floor(damage / 2));
-    const impactRadius = 0.35 + damage * 0.05;  // How far from impact to check
+    // Clamp to valid range
+    relativeImpact.x = Math.max(-0.5, Math.min(0.5, relativeImpact.x));
+    relativeImpact.y = Math.max(0, Math.min(1, relativeImpact.y));
+    relativeImpact.z = Math.max(-0.5, Math.min(0.5, relativeImpact.z));
 
-    // Find breakpoints near the impact, sorted by distance
-    const nearbyBreakpoints: { bp: BreakPoint; dist: number }[] = [];
+    // Break 1-4 chunks per impact based on speed
+    const maxChunks = Math.min(4, 1 + Math.floor(damage / 1.5));
+    const impactRadius = 0.5 + damage * 0.1;  // Larger radius for more hits
+
+    // Find ALL breakpoints, sorted by distance to impact
+    const allBreakpoints: { bp: BreakPoint; dist: number }[] = [];
 
     for (const breakPoint of structure.breakPoints) {
       if (breakPoint.broken) continue;
 
-      // Calculate distance from impact to breakpoint
       const dx = breakPoint.relativePosition.x - relativeImpact.x;
       const dy = breakPoint.relativePosition.y - relativeImpact.y;
       const dz = breakPoint.relativePosition.z - relativeImpact.z;
       const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
-      // Only consider breakpoints within impact radius
-      if (distance < impactRadius) {
-        nearbyBreakpoints.push({ bp: breakPoint, dist: distance });
-      }
+      allBreakpoints.push({ bp: breakPoint, dist: distance });
     }
 
-    // Sort by distance and break the closest ones
-    nearbyBreakpoints.sort((a, b) => a.dist - b.dist);
+    // Sort by distance - break closest first
+    allBreakpoints.sort((a, b) => a.dist - b.dist);
 
+    // Always break at least one chunk if any are available and speed is decent
     let chunksCreated = 0;
-    for (const { bp, dist } of nearbyBreakpoints) {
+    for (const { bp, dist } of allBreakpoints) {
       if (chunksCreated >= maxChunks) break;
 
-      // Closer breakpoints are easier to break
-      const effectiveThreshold = bp.threshold * (0.3 + dist);
-      if (damage > effectiveThreshold) {
+      // First chunk always breaks if within reasonable range
+      // Subsequent chunks need to be closer
+      const shouldBreak = chunksCreated === 0
+        ? (dist < impactRadius * 1.5 && speed > 25)  // First chunk: easier
+        : (dist < impactRadius && damage > bp.threshold * 0.5);  // Others: need more damage
+
+      if (shouldBreak) {
         this.breakChunk(structure, bp, impactPosition, speed);
         chunksCreated++;
       }
     }
 
-    // If no breakpoints were close enough, still spawn some debris
-    if (chunksCreated === 0 && speed > 40) {
-      this.spawnImpactDebris(impactPosition, speed, 2 + Math.floor(damage));
-    } else if (chunksCreated > 0) {
-      // Spawn smaller debris around broken chunks
-      this.spawnImpactDebris(impactPosition, speed, 2 + chunksCreated);
-    }
-
-    // NO automatic collapse - building stays standing unless completely destroyed
-    // Player must repeatedly hit building to destroy it piece by piece
+    // Always spawn some debris on impact
+    const debrisCount = chunksCreated > 0 ? 3 + chunksCreated * 2 : Math.floor(damage) + 2;
+    this.spawnImpactDebris(impactPosition, speed, debrisCount);
   }
 
   /**

@@ -825,50 +825,69 @@ export class Player {
    */
   private checkBuildingCollision(): void {
     // Only check when flying at significant speed
-    if (!this.isFlightMode || this.currentSpeed < 25) return;
+    if (!this.isFlightMode || this.currentSpeed < 20) return;
 
-    // Prevent rapid-fire collision triggers
+    // Prevent rapid-fire collision triggers (shorter cooldown for responsiveness)
     const now = performance.now();
-    if (now - this.lastBuildingCollisionTime < 200) return;
+    if (now - this.lastBuildingCollisionTime < 150) return;
 
-    // Cast ray in movement direction
     const velocity = this.physics.velocity;
-    if (velocity.length() < 5) return;
+    if (velocity.length() < 3) return;
 
     // Get direction without modifying original velocity
     const direction = velocity.clone().normalize();
 
-    // Check distance ahead - further at higher speeds for earlier detection
-    const lookAhead = Math.max(3, this.currentSpeed * 0.08);
+    // Simple forward raycast - fast and reliable
+    const lookAhead = Math.max(4, this.currentSpeed * 0.1);
 
-    // Use sphere sweep for more reliable detection
-    const endPoint = this.physics.position.add(direction.scale(lookAhead));
-    const result = this.physicsManager.sphereSweep(
+    const result = this.physicsManager.raycast(
       this.physics.position,
-      endPoint,
-      PLAYER_RADIUS * 1.5
+      direction,
+      lookAhead
     );
 
-    // Trigger collision if we hit something close
-    const hitThreshold = PLAYER_RADIUS * 2.5;
+    // Also cast rays slightly to the sides for wider detection
+    let hitResult = result;
+    if (!result.hit || result.distance > PLAYER_RADIUS * 4) {
+      // Try side rays
+      const right = Vector3.Cross(direction, Vector3.Up()).normalize();
+      const leftRay = this.physicsManager.raycast(
+        this.physics.position.add(right.scale(-PLAYER_RADIUS)),
+        direction,
+        lookAhead
+      );
+      const rightRay = this.physicsManager.raycast(
+        this.physics.position.add(right.scale(PLAYER_RADIUS)),
+        direction,
+        lookAhead
+      );
 
-    if (result.hit && result.mesh && result.distance < hitThreshold) {
-      // Check if this is a building (not ground or sidewalk)
-      const meshName = result.mesh.name.toLowerCase();
+      // Use closest hit
+      if (leftRay.hit && leftRay.distance < (hitResult.distance || Infinity)) {
+        hitResult = leftRay;
+      }
+      if (rightRay.hit && rightRay.distance < (hitResult.distance || Infinity)) {
+        hitResult = rightRay;
+      }
+    }
 
-      // All building parts start with "building_" - simple and reliable check
+    // Trigger collision if we're close enough
+    const hitThreshold = PLAYER_RADIUS * 4 + this.currentSpeed * 0.05;
+
+    if (hitResult.hit && hitResult.mesh && hitResult.distance < hitThreshold) {
+      // Check mesh name - buildings start with "building_"
+      const meshName = hitResult.mesh.name;
+
+      // Direct check without lowercase for speed
       const isBuilding = meshName.startsWith('building_');
 
       // Exclude non-damageable parts
-      const isExcluded = meshName.includes('ground') ||
-                         meshName.includes('sidewalk') ||
-                         meshName.includes('fallback') ||
-                         meshName.includes('_strip');  // Window strips
+      const isExcluded = meshName.includes('strip');
 
       if (isBuilding && !isExcluded) {
         // Trigger building collision damage
         if (this.onBuildingCollision) {
-          this.onBuildingCollision(result.mesh, result.point, this.currentSpeed);
+          this.onBuildingCollision(hitResult.mesh, hitResult.point, this.currentSpeed);
         }
 
         // Add camera shake on impact
