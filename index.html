@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Superman Flight Game</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background-color: #000;
+      }
+
+      #gameCanvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+        touch-action: none;
+      }
+
+      #hud {
+        position: fixed;
+        bottom: 20px;
+        left: 20px;
+        color: #fff;
+        font-family: 'Segoe UI', Arial, sans-serif;
+        font-size: 16px;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+        pointer-events: none;
+        z-index: 100;
+      }
+
+      #hud .speed-bar {
+        width: 200px;
+        height: 8px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 4px;
+        margin-top: 5px;
+        overflow: hidden;
+      }
+
+      #hud .speed-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #00ff88, #ffff00, #ff4444);
+        border-radius: 4px;
+        transition: width 0.1s ease-out;
+      }
+
+      #hud .boost-indicator {
+        margin-top: 10px;
+        color: #ff8800;
+        opacity: 0;
+        transition: opacity 0.2s;
+      }
+
+      #hud .boost-indicator.active {
+        opacity: 1;
+        animation: pulse 0.3s infinite alternate;
+      }
+
+      @keyframes pulse {
+        from { transform: scale(1); }
+        to { transform: scale(1.1); }
+      }
+
+      #debugOverlay {
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        color: #0f0;
+        font-family: 'Courier New', monospace;
+        font-size: 12px;
+        background: rgba(0, 0, 0, 0.7);
+        padding: 10px;
+        border-radius: 5px;
+        pointer-events: none;
+        z-index: 100;
+        display: none;
+      }
+
+      #debugOverlay.visible {
+        display: block;
+      }
+
+      #instructions {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: #fff;
+        font-family: 'Segoe UI', Arial, sans-serif;
+        text-align: center;
+        background: rgba(0, 0, 0, 0.8);
+        padding: 30px;
+        border-radius: 10px;
+        z-index: 200;
+      }
+
+      #instructions h1 {
+        color: #ff4444;
+        margin-bottom: 20px;
+      }
+
+      #instructions .controls {
+        text-align: left;
+        margin: 20px 0;
+      }
+
+      #instructions .controls h3 {
+        color: #88ff88;
+        margin: 10px 0 5px;
+      }
+
+      #instructions button {
+        background: #ff4444;
+        color: #fff;
+        border: none;
+        padding: 15px 40px;
+        font-size: 18px;
+        border-radius: 5px;
+        cursor: pointer;
+        margin-top: 20px;
+        transition: background 0.2s;
+      }
+
+      #instructions button:hover {
+        background: #ff6666;
+      }
+
+      #crosshair {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 20px;
+        height: 20px;
+        pointer-events: none;
+        z-index: 50;
+        opacity: 0.5;
+      }
+
+      #crosshair::before,
+      #crosshair::after {
+        content: '';
+        position: absolute;
+        background: #fff;
+      }
+
+      #crosshair::before {
+        width: 2px;
+        height: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+
+      #crosshair::after {
+        height: 2px;
+        width: 100%;
+        top: 50%;
+        transform: translateY(-50%);
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="hud">
+      <div class="mode">Mode: <span id="hudMode">GROUNDED</span></div>
+      <div class="speed">Speed: <span id="hudSpeed">0</span> m/s</div>
+      <div class="speed-bar">
+        <div class="speed-fill" id="speedFill" style="width: 0%"></div>
+      </div>
+      <div class="boost-indicator" id="boostIndicator">⚡ BOOST ⚡</div>
+    </div>
+
+    <div id="debugOverlay">
+      <div>FPS: <span id="debugFps">0</span></div>
+      <div>State: <span id="debugState">-</span></div>
+      <div>Speed: <span id="debugSpeed">0</span></div>
+      <div>Position: <span id="debugPosition">0, 0, 0</span></div>
+      <div>Velocity: <span id="debugVelocity">0, 0, 0</span></div>
+      <div>Input: <span id="debugInput">-</span></div>
+    </div>
+
+    <div id="crosshair"></div>
+
+    <div id="instructions">
+      <h1>🦸 SUPERMAN FLIGHT</h1>
+      <div class="controls">
+        <h3>🎮 Controller (Recommended)</h3>
+        <p>Left Stick: Move/Fly | Right Stick: Camera</p>
+        <p>RT: Throttle | LT: Brake</p>
+        <p>A: Jump/Takeoff | B: Land</p>
+        <p>RB: Boost</p>
+
+        <h3>⌨️ Keyboard + Mouse</h3>
+        <p>WASD: Move | Mouse: Look</p>
+        <p>Space: Jump/Takeoff | F: Toggle Flight</p>
+        <p>Shift: Boost | Ctrl: Brake</p>
+        <p>` (Backtick): Toggle Debug</p>
+      </div>
+      <button id="startButton">CLICK TO START</button>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
