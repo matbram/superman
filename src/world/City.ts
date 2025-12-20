@@ -477,7 +477,7 @@ export class City {
     style: BuildingStyle,
     x: number, z: number,
     width: number, depth: number, height: number,
-    random: SeededRandom,
+    _random: SeededRandom,  // Prefixed with _ to indicate intentionally unused
     chunkX: number, chunkZ: number
   ): Mesh[] {
     const meshes: Mesh[] = [];
