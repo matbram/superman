@@ -15,6 +15,10 @@ import { Birds } from './world/Birds';
 import { Hud } from './ui/Hud';
 import { DebugOverlay } from './ui/DebugOverlay';
 
+// Performance logging
+const ENABLE_FRAME_PERF_LOGGING = true;
+const FRAME_PERF_LOG_INTERVAL = 2000;  // Log every 2 seconds
+
 /**
  * Main game class
  */
@@ -35,6 +39,21 @@ class Game {
   private isRunning: boolean = false;
   private instructionsElement: HTMLElement;
   private startButton: HTMLElement;
+
+  // Performance tracking
+  private lastPerfLogTime: number = 0;
+  private frameCount: number = 0;
+  private totalFrameTime: number = 0;
+  private maxFrameTime: number = 0;
+  private perfTimings = {
+    player: 0,
+    city: 0,
+    atmosphere: 0,
+    wakeDamage: 0,
+    buildingDamage: 0,
+    birds: 0,
+    render: 0,
+  };
 
   constructor() {
     // Get canvas element
@@ -154,6 +173,9 @@ class Game {
    * Main update loop
    */
   private update(deltaTime: number): void {
+    const frameStart = performance.now();
+    let t0: number, t1: number;
+
     // Update input
     const input = this.inputManager.update();
 
@@ -163,20 +185,30 @@ class Game {
     }
 
     // Update player
+    t0 = performance.now();
     this.player.update(input, deltaTime);
+    t1 = performance.now();
+    this.perfTimings.player += t1 - t0;
 
     // Update city chunks based on player position (procedural generation)
+    t0 = performance.now();
     this.city.updateChunks(this.player.getPosition());
+    t1 = performance.now();
+    this.perfTimings.city += t1 - t0;
 
     // Update atmosphere (clouds, sun positioning, cloud dispersion)
+    t0 = performance.now();
     this.atmosphere.update(
       this.player.getPosition(),
       deltaTime,
       this.player.getVelocity(),
       this.player.getCurrentSpeed()
     );
+    t1 = performance.now();
+    this.perfTimings.atmosphere += t1 - t0;
 
     // Apply supersonic wake damage to nearby buildings (damages buildings on the sides)
+    t0 = performance.now();
     const playerSpeed = this.player.getCurrentSpeed();
     const playerPos = this.player.getPosition();
     if (playerSpeed > 80) {
@@ -188,12 +220,20 @@ class Game {
         buildings
       );
     }
+    t1 = performance.now();
+    this.perfTimings.wakeDamage += t1 - t0;
 
     // Update building damage (debris physics, distance-based cleanup)
+    t0 = performance.now();
     this.buildingDamage.update(deltaTime, playerPos);
+    t1 = performance.now();
+    this.perfTimings.buildingDamage += t1 - t0;
 
     // Update birds
+    t0 = performance.now();
     this.birds.update(deltaTime, playerPos);
+    t1 = performance.now();
+    this.perfTimings.birds += t1 - t0;
 
     // Update HUD
     this.hud.update(
@@ -216,7 +256,54 @@ class Game {
     }
 
     // Render scene
+    t0 = performance.now();
     this.sceneContext.scene.render();
+    t1 = performance.now();
+    this.perfTimings.render += t1 - t0;
+
+    // Performance logging
+    const frameEnd = performance.now();
+    const frameTime = frameEnd - frameStart;
+
+    if (ENABLE_FRAME_PERF_LOGGING) {
+      this.frameCount++;
+      this.totalFrameTime += frameTime;
+      this.maxFrameTime = Math.max(this.maxFrameTime, frameTime);
+
+      if (frameEnd - this.lastPerfLogTime > FRAME_PERF_LOG_INTERVAL) {
+        const avgFrame = this.totalFrameTime / this.frameCount;
+        const avgFps = 1000 / avgFrame;
+        console.log('[Frame Perf]', {
+          avgFrame: avgFrame.toFixed(2) + 'ms',
+          maxFrame: this.maxFrameTime.toFixed(2) + 'ms',
+          avgFps: avgFps.toFixed(1),
+          breakdown: {
+            player: (this.perfTimings.player / this.frameCount).toFixed(2) + 'ms',
+            city: (this.perfTimings.city / this.frameCount).toFixed(2) + 'ms',
+            atmosphere: (this.perfTimings.atmosphere / this.frameCount).toFixed(2) + 'ms',
+            wakeDamage: (this.perfTimings.wakeDamage / this.frameCount).toFixed(2) + 'ms',
+            buildingDamage: (this.perfTimings.buildingDamage / this.frameCount).toFixed(2) + 'ms',
+            birds: (this.perfTimings.birds / this.frameCount).toFixed(2) + 'ms',
+            render: (this.perfTimings.render / this.frameCount).toFixed(2) + 'ms',
+          }
+        });
+
+        // Reset
+        this.lastPerfLogTime = frameEnd;
+        this.frameCount = 0;
+        this.totalFrameTime = 0;
+        this.maxFrameTime = 0;
+        this.perfTimings = {
+          player: 0,
+          city: 0,
+          atmosphere: 0,
+          wakeDamage: 0,
+          buildingDamage: 0,
+          birds: 0,
+          render: 0,
+        };
+      }
+    }
   }
 
   /**

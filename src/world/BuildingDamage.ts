@@ -25,6 +25,13 @@ const WAKE_SPEED_THRESHOLD = 80;
 const COLLAPSE_TILT_SPEED = 0.25;  // Moderate tipping speed
 const COLLAPSE_FALL_SPEED = 0.6;   // Moderate fall speed
 
+// Debris spawn cooldown - prevents chain spawning from continuous damage (heat vision)
+const DEBRIS_SPAWN_COOLDOWN = 500;  // ms between debris spawns per building
+
+// Performance logging
+const ENABLE_PERF_LOGGING = true;
+const PERF_LOG_INTERVAL = 2000;  // Log every 2 seconds
+
 /**
  * Structural breakpoint - defines where a building can break
  */
@@ -91,6 +98,14 @@ export class BuildingDamage {
   private debrisMaterials: StandardMaterial[] = [];
   private collapsingBuildings: CollapsingBuilding[] = [];
   private dustClouds: DustCloud[] = [];
+
+  // Debris spawn cooldown tracking - prevents chain spawning
+  private lastDebrisSpawnTime: Map<string, number> = new Map();
+
+  // Performance tracking
+  private lastPerfLogTime: number = 0;
+  private frameCount: number = 0;
+  private totalUpdateTime: number = 0;
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -576,12 +591,35 @@ export class BuildingDamage {
 
   /**
    * Spawns smaller debris around an impact point
+   * Uses cooldown to prevent chain spawning from continuous damage sources
    */
   private spawnImpactDebris(
     impactPosition: Vector3,
     speed: number,
-    count: number
+    count: number,
+    skipCooldown: boolean = false
   ): void {
+    // Check cooldown based on position (rounded to grid)
+    const posKey = `${Math.round(impactPosition.x / 5) * 5}_${Math.round(impactPosition.z / 5) * 5}`;
+    const now = performance.now();
+
+    if (!skipCooldown) {
+      const lastSpawn = this.lastDebrisSpawnTime.get(posKey) || 0;
+      if (now - lastSpawn < DEBRIS_SPAWN_COOLDOWN) {
+        return;  // Skip spawning - too soon since last spawn at this location
+      }
+      this.lastDebrisSpawnTime.set(posKey, now);
+
+      // Clean up old cooldown entries every so often
+      if (this.lastDebrisSpawnTime.size > 100) {
+        for (const [key, time] of this.lastDebrisSpawnTime) {
+          if (now - time > 5000) {
+            this.lastDebrisSpawnTime.delete(key);
+          }
+        }
+      }
+    }
+
     const actualCount = Math.min(count, MAX_DEBRIS_PIECES - this.debris.length);
     if (actualCount <= 0) return;
 
@@ -665,6 +703,8 @@ export class BuildingDamage {
    * Only cleans up debris when player is far away
    */
   public update(deltaTime: number, playerPosition?: Vector3): void {
+    const updateStart = performance.now();
+
     // Update collapsing buildings
     const now = performance.now();
     for (let i = this.collapsingBuildings.length - 1; i >= 0; i--) {
@@ -830,6 +870,29 @@ export class BuildingDamage {
         if (structure.shakeTime <= 0) {
           building.position = structure.originalPosition.clone();
         }
+      }
+    }
+
+    // Performance logging
+    if (ENABLE_PERF_LOGGING) {
+      const updateEnd = performance.now();
+      this.totalUpdateTime += updateEnd - updateStart;
+      this.frameCount++;
+
+      if (now - this.lastPerfLogTime > PERF_LOG_INTERVAL) {
+        const avgUpdateTime = this.totalUpdateTime / this.frameCount;
+        console.log('[BuildingDamage Perf]', {
+          avgUpdateTime: avgUpdateTime.toFixed(2) + 'ms',
+          debris: this.debris.length,
+          settledDebris: this.debris.filter(d => d.settled).length,
+          dustClouds: this.dustClouds.length,
+          collapsingBuildings: this.collapsingBuildings.length,
+          trackedBuildings: this.buildingStructures.size,
+          cooldownEntries: this.lastDebrisSpawnTime.size,
+        });
+        this.lastPerfLogTime = now;
+        this.frameCount = 0;
+        this.totalUpdateTime = 0;
       }
     }
   }

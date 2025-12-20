@@ -18,6 +18,10 @@ const LOAD_RADIUS = 4;  // Load chunks much further out for seamless generation
 const UNLOAD_DISTANCE = 6;  // Keep chunks loaded longer
 const CHUNKS_PER_FRAME = 3;  // Generate multiple chunks per frame when needed
 
+// Performance logging
+const ENABLE_CITY_PERF_LOGGING = true;
+const CITY_PERF_LOG_INTERVAL = 2000;  // Log every 2 seconds
+
 // Building generation - dense city
 const SIDEWALK_HEIGHT = 0.15;
 const MIN_BUILDING_HEIGHT = 35;
@@ -94,6 +98,12 @@ export class City {
   private chunks: Map<string, CityChunk> = new Map();
   private pendingChunks: PendingChunk[] = [];
   private groundMesh: Mesh | null = null;
+
+  // Performance tracking
+  private lastPerfLogTime: number = 0;
+  private totalUpdateTime: number = 0;
+  private updateCount: number = 0;
+  private chunksGeneratedSinceLog: number = 0;
 
   // Shared materials - reused across all buildings
   private buildingMaterials: StandardMaterial[] = [];
@@ -228,6 +238,7 @@ export class City {
    * Updates loaded chunks - with throttled generation and fade-in
    */
   public updateChunks(playerPosition: Vector3): void {
+    const updateStart = performance.now();
     const playerChunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
     const playerChunkZ = Math.floor(playerPosition.z / CHUNK_SIZE);
 
@@ -267,6 +278,7 @@ export class City {
       for (let i = 0; i < chunksToGenerate; i++) {
         const next = this.pendingChunks.shift()!;
         this.generateChunk(next.chunkX, next.chunkZ);
+        this.chunksGeneratedSinceLog++;
       }
     }
 
@@ -297,6 +309,35 @@ export class City {
         if (now - chunk.lastAccess > 5000) {  // Longer delay before unloading
           this.unloadChunk(key);
         }
+      }
+    }
+
+    // Performance logging
+    if (ENABLE_CITY_PERF_LOGGING) {
+      const updateEnd = performance.now();
+      this.totalUpdateTime += updateEnd - updateStart;
+      this.updateCount++;
+
+      if (now - this.lastPerfLogTime > CITY_PERF_LOG_INTERVAL) {
+        const avgUpdateTime = this.totalUpdateTime / this.updateCount;
+        let totalMeshes = 0;
+        let totalBuildings = 0;
+        for (const chunk of this.chunks.values()) {
+          totalMeshes += chunk.collisionMeshes.length;
+          totalBuildings += chunk.collisionMeshes.filter(m => m.name.startsWith('building_')).length;
+        }
+        console.log('[City Perf]', {
+          avgUpdateTime: avgUpdateTime.toFixed(2) + 'ms',
+          loadedChunks: this.chunks.size,
+          pendingChunks: this.pendingChunks.length,
+          totalMeshes,
+          totalBuildings,
+          chunksGenerated: this.chunksGeneratedSinceLog,
+        });
+        this.lastPerfLogTime = now;
+        this.updateCount = 0;
+        this.totalUpdateTime = 0;
+        this.chunksGeneratedSinceLog = 0;
       }
     }
   }
