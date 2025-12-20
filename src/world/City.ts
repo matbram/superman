@@ -14,27 +14,27 @@ import { PhysicsManager, createCollisionBox } from '../physics/physics';
 
 // Chunk and city generation constants
 const CHUNK_SIZE = 200; // Larger chunks = fewer total chunks
-const LOAD_RADIUS = 3;  // Reduced load radius for better performance with lower render distance
-const UNLOAD_DISTANCE = 4;  // Unload chunks sooner to save memory
-const CHUNKS_PER_FRAME = 2;  // Reduced chunks per frame for smoother performance
+const LOAD_RADIUS = 2;  // Reduced: 5x5=25 chunks instead of 7x7=49
+const UNLOAD_DISTANCE = 3;  // Unload chunks sooner
+const CHUNKS_PER_FRAME = 1;  // Generate 1 chunk per frame to avoid stutters
 
 // LOD culling constants
 const LOD_FADE_START_DISTANCE = 1;  // Start fading buildings at chunk distance 1
-const LOD_FADE_END_DISTANCE = 3;    // Fully faded at chunk distance 3
-const LOD_MIN_VISIBILITY = 0.2;     // Minimum visibility for distant buildings
+const LOD_FADE_END_DISTANCE = 2;    // Fully faded at chunk distance 2
+const LOD_MIN_VISIBILITY = 0.3;     // Minimum visibility for distant buildings
 
 // Performance logging
 const ENABLE_CITY_PERF_LOGGING = true;
 const CITY_PERF_LOG_INTERVAL = 2000;  // Log every 2 seconds
 
-// Building generation - dense city
+// Building generation - optimized for performance
 const SIDEWALK_HEIGHT = 0.15;
-const MIN_BUILDING_HEIGHT = 35;
-const MAX_BUILDING_HEIGHT = 140;
-const MIN_BUILDING_WIDTH = 8;   // Smaller min for more buildings
-const MAX_BUILDING_WIDTH = 25;  // Smaller max for tighter packing
-const BUILDING_SPACING = 4;     // Tighter spacing for denser city
-const BUILDINGS_PER_CHUNK = 24; // More buildings per chunk for density
+const MIN_BUILDING_HEIGHT = 40;
+const MAX_BUILDING_HEIGHT = 120;
+const MIN_BUILDING_WIDTH = 12;
+const MAX_BUILDING_WIDTH = 28;
+const BUILDING_SPACING = 5;
+const BUILDINGS_PER_CHUNK = 12; // Reduced for performance (was 24)
 
 // Building style types
 enum BuildingStyle {
@@ -78,9 +78,11 @@ interface CityChunk {
   chunkZ: number;
   mergedMesh: Mesh | null;
   collisionMeshes: Mesh[];
+  buildingMeshes: Mesh[];  // Cached reference to just buildings
   lastAccess: number;
   fadeProgress: number;  // 0 to 1, for smooth fade-in
   fullyVisible: boolean;
+  currentLodVisibility: number;  // Cache current LOD level to avoid updates
 }
 
 /**
@@ -142,9 +144,9 @@ export class City {
    * Generates initial chunks around spawn point synchronously
    */
   private generateInitialChunks(): void {
-    // Generate a 5x5 grid of chunks around origin immediately for seamless start
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dz = -2; dz <= 2; dz++) {
+    // Generate a 3x3 grid of chunks around origin immediately for seamless start
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
         this.generateChunk(dx, dz);
 
         // Make initial chunks fully visible immediately (no fade-in)
@@ -153,11 +155,10 @@ export class City {
         if (chunk) {
           chunk.fadeProgress = 1;
           chunk.fullyVisible = true;
-          // Set all buildings to fully visible
-          for (const mesh of chunk.collisionMeshes) {
-            if (mesh.name.startsWith('building_')) {
-              mesh.visibility = 1;
-            }
+          chunk.currentLodVisibility = 1;
+          // Set all buildings to fully visible using cached array
+          for (const mesh of chunk.buildingMeshes) {
+            mesh.visibility = 1;
           }
         }
       }
@@ -297,40 +298,38 @@ export class City {
       // Calculate LOD visibility based on distance (smooth fade from 1.0 to LOD_MIN_VISIBILITY)
       let lodVisibility = 1.0;
       if (chunkDistance >= LOD_FADE_END_DISTANCE) {
-        lodVisibility = LOD_MIN_VISIBILITY;  // Minimum visibility at far distance
+        lodVisibility = LOD_MIN_VISIBILITY;
       } else if (chunkDistance >= LOD_FADE_START_DISTANCE) {
-        // Smooth fade between start and end distance
         const fadeRange = LOD_FADE_END_DISTANCE - LOD_FADE_START_DISTANCE;
         const fadeProgress = (chunkDistance - LOD_FADE_START_DISTANCE) / fadeRange;
         lodVisibility = 1.0 - (fadeProgress * (1.0 - LOD_MIN_VISIBILITY));
       }
 
-      // Smooth fade-in for buildings combined with LOD visibility
+      // Handle fade-in for new chunks
       if (!chunk.fullyVisible) {
-        chunk.fadeProgress = Math.min(1, chunk.fadeProgress + 0.03);  // Fade in over ~33 frames
+        chunk.fadeProgress = Math.min(1, chunk.fadeProgress + 0.05);  // Faster fade-in
+        const targetVisibility = chunk.fadeProgress * lodVisibility;
 
-        // Apply visibility to all building meshes (fade-in * LOD visibility)
-        for (const mesh of chunk.collisionMeshes) {
-          if (mesh.name.startsWith('building_')) {
-            mesh.visibility = chunk.fadeProgress * lodVisibility;
-          }
+        // Update building visibility during fade-in
+        for (const mesh of chunk.buildingMeshes) {
+          mesh.visibility = targetVisibility;
         }
 
         if (chunk.fadeProgress >= 1) {
           chunk.fullyVisible = true;
+          chunk.currentLodVisibility = lodVisibility;
         }
-      } else {
-        // Apply LOD visibility to fully loaded chunks
-        for (const mesh of chunk.collisionMeshes) {
-          if (mesh.name.startsWith('building_')) {
-            mesh.visibility = lodVisibility;
-          }
+      } else if (Math.abs(chunk.currentLodVisibility - lodVisibility) > 0.05) {
+        // Only update visibility if LOD level changed significantly
+        chunk.currentLodVisibility = lodVisibility;
+        for (const mesh of chunk.buildingMeshes) {
+          mesh.visibility = lodVisibility;
         }
       }
 
       // Unload distant chunks
       if (dx > UNLOAD_DISTANCE || dz > UNLOAD_DISTANCE) {
-        if (now - chunk.lastAccess > 3000) {  // Faster unloading for reduced memory
+        if (now - chunk.lastAccess > 2000) {
           this.unloadChunk(key);
         }
       }
@@ -452,20 +451,25 @@ export class City {
       currentX += random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH) + BUILDING_SPACING + random.range(2, 8);
     }
 
+    // Extract building meshes for efficient LOD updates
+    const buildingMeshes = collisionMeshes.filter(m => m.name.startsWith('building_'));
+
     this.chunks.set(key, {
       key,
       chunkX,
       chunkZ,
       mergedMesh: null,
       collisionMeshes,
+      buildingMeshes,
       lastAccess: performance.now(),
       fadeProgress: 0,
       fullyVisible: false,
+      currentLodVisibility: 0,
     });
   }
 
   /**
-   * Creates a building with varied architecture based on style
+   * Creates a building - simplified to single mesh for performance
    */
   private createBuilding(
     chunkKey: string,
@@ -480,166 +484,49 @@ export class City {
     const baseName = `building_${chunkKey}_${index}`;
     const matIndex = Math.abs(chunkX + chunkZ + index) % this.buildingMaterials.length;
 
+    // All styles now create single mesh for performance (reduces draw calls by ~60%)
+    // Visual variety comes from different heights, widths, and materials
+    let finalWidth = width;
+    let finalDepth = depth;
+    let finalHeight = height;
+
+    // Apply style-based size variations
     switch (style) {
-      case BuildingStyle.Tower: {
-        // Tall thin tower with a wider base
-        const baseHeight = height * 0.2;
-        const towerHeight = height * 0.8;
-
-        // Base section
-        const base = MeshBuilder.CreateBox(
-          `${baseName}_base`,
-          { width: width, height: baseHeight, depth: depth },
-          this.scene
-        );
-        base.position = new Vector3(x, baseHeight / 2 + SIDEWALK_HEIGHT, z);
-        base.material = this.buildingMaterials[matIndex];
-        base.receiveShadows = true;
-        meshes.push(base);
-
-        // Tower section (thinner)
-        const tower = MeshBuilder.CreateBox(
-          `${baseName}_main`,
-          { width: width * 0.65, height: towerHeight, depth: depth * 0.65 },
-          this.scene
-        );
-        tower.position = new Vector3(x, baseHeight + towerHeight / 2 + SIDEWALK_HEIGHT, z);
-        tower.material = this.buildingMaterials[(matIndex + 1) % this.buildingMaterials.length];
-        tower.receiveShadows = true;
-        meshes.push(tower);
+      case BuildingStyle.Tower:
+        // Taller and thinner
+        finalWidth *= 0.7;
+        finalDepth *= 0.7;
+        finalHeight *= 1.2;
         break;
-      }
-
-      case BuildingStyle.Tiered: {
-        // Stepped building with setbacks
-        const numTiers = 2 + random.intRange(0, 2);
-        const tierHeight = height / numTiers;
-        let currentWidth = width;
-        let currentDepth = depth;
-
-        for (let t = 0; t < numTiers; t++) {
-          const tier = MeshBuilder.CreateBox(
-            `${baseName}_tier${t}${t === 0 ? '_main' : ''}`,
-            { width: currentWidth, height: tierHeight, depth: currentDepth },
-            this.scene
-          );
-          tier.position = new Vector3(
-            x,
-            t * tierHeight + tierHeight / 2 + SIDEWALK_HEIGHT,
-            z
-          );
-          tier.material = this.buildingMaterials[(matIndex + t) % this.buildingMaterials.length];
-          tier.receiveShadows = true;
-          meshes.push(tier);
-
-          currentWidth *= 0.75;
-          currentDepth *= 0.75;
-        }
+      case BuildingStyle.Tiered:
+        // Wider base feel
+        finalWidth *= 1.1;
+        finalDepth *= 1.1;
+        finalHeight *= 0.9;
         break;
-      }
-
-      case BuildingStyle.LShape: {
-        // L-shaped building
-        const wingHeight = height * (0.6 + random.next() * 0.3);
-
-        // Main section
-        const main = MeshBuilder.CreateBox(
-          `${baseName}_main`,
-          { width: width, height: height, depth: depth * 0.6 },
-          this.scene
-        );
-        main.position = new Vector3(x, height / 2 + SIDEWALK_HEIGHT, z - depth * 0.2);
-        main.material = this.buildingMaterials[matIndex];
-        main.receiveShadows = true;
-        meshes.push(main);
-
-        // Wing section
-        const wing = MeshBuilder.CreateBox(
-          `${baseName}_wing`,
-          { width: width * 0.5, height: wingHeight, depth: depth * 0.6 },
-          this.scene
-        );
-        wing.position = new Vector3(
-          x + width * 0.25,
-          wingHeight / 2 + SIDEWALK_HEIGHT,
-          z + depth * 0.2
-        );
-        wing.material = this.buildingMaterials[(matIndex + 1) % this.buildingMaterials.length];
-        wing.receiveShadows = true;
-        meshes.push(wing);
+      case BuildingStyle.LShape:
+        // Slightly offset
+        finalWidth *= 0.9;
         break;
-      }
-
-      case BuildingStyle.Modern: {
-        // Modern building with rooftop features
-        const mainHeight = height * 0.9;
-
-        // Main building
-        const main = MeshBuilder.CreateBox(
-          `${baseName}_main`,
-          { width: width, height: mainHeight, depth: depth },
-          this.scene
-        );
-        main.position = new Vector3(x, mainHeight / 2 + SIDEWALK_HEIGHT, z);
-        main.material = this.buildingMaterials[matIndex];
-        main.receiveShadows = true;
-        meshes.push(main);
-
-        // Rooftop structure
-        const roofWidth = width * 0.4;
-        const roofHeight = height * 0.15;
-        const rooftop = MeshBuilder.CreateBox(
-          `${baseName}_roof`,
-          { width: roofWidth, height: roofHeight, depth: roofWidth },
-          this.scene
-        );
-        rooftop.position = new Vector3(
-          x + (random.next() - 0.5) * width * 0.3,
-          mainHeight + roofHeight / 2 + SIDEWALK_HEIGHT,
-          z + (random.next() - 0.5) * depth * 0.3
-        );
-        rooftop.material = this.rooftopMaterial;
-        rooftop.receiveShadows = true;
-        meshes.push(rooftop);
+      case BuildingStyle.Modern:
+        // Standard proportions
         break;
-      }
-
       case BuildingStyle.Classic:
-      default: {
-        // Standard box building with window strips
-        const main = MeshBuilder.CreateBox(
-          `${baseName}_main`,
-          { width: width, height: height, depth: depth },
-          this.scene
-        );
-        main.position = new Vector3(x, height / 2 + SIDEWALK_HEIGHT, z);
-        main.material = this.buildingMaterials[matIndex];
-        main.receiveShadows = true;
-        meshes.push(main);
-
-        // Add horizontal window strip for visual interest
-        if (height > 40) {
-          const stripHeight = 2;
-          const numStrips = Math.floor(height / 20);
-          for (let s = 1; s <= numStrips && s <= 3; s++) {
-            const strip = MeshBuilder.CreateBox(
-              `${baseName}_strip${s}`,
-              { width: width + 0.2, height: stripHeight, depth: depth + 0.2 },
-              this.scene
-            );
-            strip.position = new Vector3(
-              x,
-              (height * s / (numStrips + 1)) + SIDEWALK_HEIGHT,
-              z
-            );
-            strip.material = this.windowMaterial;
-            strip.receiveShadows = true;
-            meshes.push(strip);
-          }
-        }
+      default:
+        // Standard box
         break;
-      }
     }
+
+    const building = MeshBuilder.CreateBox(
+      `${baseName}_main`,
+      { width: finalWidth, height: finalHeight, depth: finalDepth },
+      this.scene
+    );
+    building.position = new Vector3(x, finalHeight / 2 + SIDEWALK_HEIGHT, z);
+    building.material = this.buildingMaterials[matIndex];
+    building.receiveShadows = true;
+    building.freezeWorldMatrix();  // Static mesh - freeze for performance
+    meshes.push(building);
 
     return meshes;
   }
@@ -682,15 +569,14 @@ export class City {
   }
 
   /**
-   * Gets buildings for collision checking
+   * Gets buildings for collision checking - uses cached building meshes
    */
   public getBuildings(): Mesh[] {
     const buildings: Mesh[] = [];
     for (const chunk of this.chunks.values()) {
-      for (const mesh of chunk.collisionMeshes) {
-        if (mesh.name.startsWith('building_')) {
-          buildings.push(mesh);
-        }
+      // Use cached buildingMeshes array instead of filtering every time
+      for (const mesh of chunk.buildingMeshes) {
+        buildings.push(mesh);
       }
     }
     return buildings;
