@@ -778,6 +778,7 @@ export class Player {
 
   /**
    * Updates heat vision based on input
+   * When active, left stick controls beam direction instead of movement
    */
   private updateHeatVision(input: InputState, deltaTime: number): void {
     // Activate/deactivate based on input
@@ -786,17 +787,45 @@ export class Player {
         this.heatVision.activate();
       }
 
-      // Get head position and look direction
-      const headOffset = new Vector3(0, 2.0, 0);  // Head height
-      const headPosition = this.physics.position.add(headOffset);
+      // Calculate eye position properly:
+      // Head is at 2.0 units up, eyes are at about 1.5 voxels up on the head (VOXEL_SIZE = 0.45)
+      // Plus need to account for character rotation when flying
+      const headHeight = 2.0 + 0.45 * 1.5;  // Head base + eyes on head
+      const eyeForward = 0.45 * 1.1;  // Eyes are slightly forward on head
+
+      // Calculate eye position in world space accounting for character pitch
+      const cosPitch = Math.cos(this.pitch);
+      const sinPitch = Math.sin(this.pitch);
+      const cosYaw = Math.cos(this.yaw);
+      const sinYaw = Math.sin(this.yaw);
+
+      // Transform the local eye offset by character rotation
+      const eyeOffset = new Vector3(
+        eyeForward * sinYaw * cosPitch,
+        headHeight * cosPitch - eyeForward * sinPitch,
+        eyeForward * cosYaw * cosPitch
+      );
+
+      const eyePosition = this.physics.position.add(eyeOffset);
       const lookDirection = this.getForwardDirection();
 
-      this.heatVision.update(deltaTime, headPosition, lookDirection, this.yaw, this.pitch);
+      // Left stick controls beam aiming when heat vision is active
+      const aimX = input.moveX;  // Horizontal aim
+      const aimY = input.moveY;  // Vertical aim (forward/back = up/down for beam)
+
+      this.heatVision.update(deltaTime, eyePosition, lookDirection, this.yaw, this.pitch, aimX, aimY);
     } else {
       if (this.heatVision.isHeatVisionActive()) {
         this.heatVision.deactivate();
       }
     }
+  }
+
+  /**
+   * Returns true if heat vision is currently active (for blocking movement input)
+   */
+  public isHeatVisionActive(): boolean {
+    return this.heatVision.isHeatVisionActive();
   }
 
   /**

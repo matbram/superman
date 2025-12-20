@@ -14,9 +14,9 @@ import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import { PhysicsManager } from '../physics/physics';
 
 // Heat vision constants
-const BEAM_LENGTH = 200;
-const BEAM_WIDTH = 0.15;
-const DAMAGE_PER_SECOND = 80;  // Damage dealt per second of continuous fire
+const BEAM_LENGTH = 300;
+const BEAM_WIDTH = 1.5;  // Much thicker beams
+const DAMAGE_PER_SECOND = 500;  // Massive destruction
 
 /**
  * Heat Vision system
@@ -76,31 +76,31 @@ export class HeatVision {
   }
 
   /**
-   * Creates particle system for beam impact
+   * Creates particle system for beam impact - massive explosion effects
    */
   private createImpactParticles(): void {
-    this.impactParticles = new ParticleSystem('heatImpact', 100, this.scene);
+    this.impactParticles = new ParticleSystem('heatImpact', 500, this.scene);
 
-    // Fire/spark colors
-    this.impactParticles.color1 = new Color4(1, 0.6, 0.1, 1);
-    this.impactParticles.color2 = new Color4(1, 0.2, 0, 0.8);
-    this.impactParticles.colorDead = new Color4(0.3, 0.1, 0, 0);
+    // Fire/spark colors - intense
+    this.impactParticles.color1 = new Color4(1, 0.8, 0.2, 1);
+    this.impactParticles.color2 = new Color4(1, 0.3, 0, 0.9);
+    this.impactParticles.colorDead = new Color4(0.5, 0.1, 0, 0);
 
-    this.impactParticles.minSize = 0.3;
-    this.impactParticles.maxSize = 0.8;
+    this.impactParticles.minSize = 1.5;
+    this.impactParticles.maxSize = 4.0;
 
-    this.impactParticles.minLifeTime = 0.1;
-    this.impactParticles.maxLifeTime = 0.3;
+    this.impactParticles.minLifeTime = 0.2;
+    this.impactParticles.maxLifeTime = 0.6;
 
     this.impactParticles.emitRate = 0;
     this.impactParticles.blendMode = ParticleSystem.BLENDMODE_ADD;
 
-    this.impactParticles.direction1 = new Vector3(-2, 2, -2);
-    this.impactParticles.direction2 = new Vector3(2, 4, 2);
-    this.impactParticles.minEmitPower = 3;
-    this.impactParticles.maxEmitPower = 8;
+    this.impactParticles.direction1 = new Vector3(-5, 5, -5);
+    this.impactParticles.direction2 = new Vector3(5, 10, 5);
+    this.impactParticles.minEmitPower = 10;
+    this.impactParticles.maxEmitPower = 25;
 
-    this.impactParticles.gravity = new Vector3(0, -5, 0);
+    this.impactParticles.gravity = new Vector3(0, -8, 0);
 
     this.impactParticles.emitter = this.impactPoint;
     this.impactParticles.start();
@@ -145,29 +145,42 @@ export class HeatVision {
 
   /**
    * Updates heat vision - positions beams and checks for hits
+   * @param aimOffsetX - Left stick X (-1 to 1) for horizontal aiming
+   * @param aimOffsetY - Left stick Y (-1 to 1) for vertical aiming
    */
   public update(
     deltaTime: number,
-    headPosition: Vector3,
-    lookDirection: Vector3,
+    eyePosition: Vector3,
+    _baseDirection: Vector3,
     yaw: number,
-    _pitch: number
+    pitch: number,
+    aimOffsetX: number = 0,
+    aimOffsetY: number = 0
   ): void {
     if (!this.isActive) return;
 
-    // Eye positions (offset from head center)
-    const eyeOffset = 0.25;  // Distance between eyes
-    const eyeForward = 0.4;  // How far forward eyes are
+    // Calculate aim direction based on left stick input
+    // Rotate the base direction by the aim offset
+    const aimYaw = yaw + aimOffsetX * 1.2;  // About 70 degrees max turn
+    const aimPitch = pitch + aimOffsetY * 0.8;  // About 45 degrees max up/down
 
-    // Calculate eye positions in world space
-    const right = new Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-    const forward = lookDirection.clone();
+    // Build aim direction from yaw and pitch
+    const cosPitch = Math.cos(aimPitch);
+    const aimDirection = new Vector3(
+      Math.sin(aimYaw) * cosPitch,
+      -Math.sin(aimPitch),
+      Math.cos(aimYaw) * cosPitch
+    ).normalize();
 
-    const leftEyePos = headPosition.add(right.scale(-eyeOffset)).add(forward.scale(eyeForward));
-    const rightEyePos = headPosition.add(right.scale(eyeOffset)).add(forward.scale(eyeForward));
+    // Eye positions (offset from eye center - eyes are about 0.2 units apart)
+    const eyeOffset = 0.2;
+    const right = new Vector3(Math.cos(aimYaw), 0, -Math.sin(aimYaw));
+
+    const leftEyePos = eyePosition.add(right.scale(-eyeOffset));
+    const rightEyePos = eyePosition.add(right.scale(eyeOffset));
 
     // Raycast to find what we're hitting
-    const rayResult = this.physicsManager.raycast(headPosition, forward, BEAM_LENGTH);
+    const rayResult = this.physicsManager.raycast(eyePosition, aimDirection, BEAM_LENGTH);
 
     let beamLength = BEAM_LENGTH;
     let hitPoint: Vector3 | null = null;
@@ -176,13 +189,13 @@ export class HeatVision {
       beamLength = rayResult.distance;
       hitPoint = rayResult.point;
 
-      // Check if we hit a building
-      if (rayResult.mesh.name.startsWith('building_')) {
-        // Accumulate damage
+      // Check if we hit a building or ground
+      if (rayResult.mesh.name.startsWith('building_') || rayResult.mesh.name.startsWith('ground')) {
+        // Accumulate damage - continuous stream
         this.damageAccumulator += DAMAGE_PER_SECOND * deltaTime;
 
-        // Deal damage in chunks
-        if (this.damageAccumulator >= 20) {
+        // Deal damage frequently for massive destruction
+        if (this.damageAccumulator >= 30) {
           if (this.onBuildingDamage) {
             this.onBuildingDamage(rayResult.mesh, hitPoint, this.damageAccumulator);
           }
@@ -191,24 +204,24 @@ export class HeatVision {
       }
     }
 
-    // Position and orient beams
-    this.positionBeam(this.leftBeam, leftEyePos, forward, beamLength);
-    this.positionBeam(this.rightBeam, rightEyePos, forward, beamLength);
+    // Position and orient beams from eyes
+    this.positionBeam(this.leftBeam, leftEyePos, aimDirection, beamLength);
+    this.positionBeam(this.rightBeam, rightEyePos, aimDirection, beamLength);
 
-    // Update impact particles
+    // Update impact particles - massive when hitting
     if (this.impactParticles) {
       if (hitPoint) {
         this.impactPoint.copyFrom(hitPoint);
         this.impactParticles.emitter = this.impactPoint;
-        this.impactParticles.emitRate = 80;
+        this.impactParticles.emitRate = 300;  // Massive particle spray
       } else {
         this.impactParticles.emitRate = 0;
       }
     }
 
-    // Pulse beam intensity
-    const pulse = 0.8 + Math.sin(performance.now() * 0.02) * 0.2;
-    this.beamMaterial.emissiveColor = new Color3(pulse, 0.3 * pulse, 0.1 * pulse);
+    // Pulse beam intensity - brighter
+    const pulse = 0.9 + Math.sin(performance.now() * 0.03) * 0.1;
+    this.beamMaterial.emissiveColor = new Color3(pulse, 0.4 * pulse, 0.1 * pulse);
   }
 
   /**

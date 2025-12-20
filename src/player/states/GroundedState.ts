@@ -62,6 +62,10 @@ export class GroundedState extends BasePlayerState {
   }
 
   private handleMovement(player: Player, input: InputState, deltaTime: number): void {
+    // When heat vision is active, left stick controls beam aim, not movement
+    // Player stands still and aims the beams
+    const heatVisionActive = player.isHeatVisionActive();
+
     // During landing grace period, reduce responsiveness for smooth transition
     const graceFactor = this.landingGracePeriod > 0 ? 0.3 : 1.0;
     const moveSpeed = (input.boostHeld ? RUN_SPEED : WALK_SPEED) * graceFactor;
@@ -70,14 +74,17 @@ export class GroundedState extends BasePlayerState {
     const cameraForward = player.getCameraForward();
     const cameraRight = player.getCameraRight();
 
-    // Calculate movement direction from input
+    // Calculate movement direction from input (zero if heat vision active)
+    const moveX = heatVisionActive ? 0 : input.moveX;
+    const moveY = heatVisionActive ? 0 : input.moveY;
+
     const inputDir = new Vector3(
-      input.moveX * cameraRight.x + input.moveY * cameraForward.x,
+      moveX * cameraRight.x + moveY * cameraForward.x,
       0,
-      input.moveX * cameraRight.z + input.moveY * cameraForward.z
+      moveX * cameraRight.z + moveY * cameraForward.z
     );
 
-    const inputMagnitude = Math.min(1, Math.sqrt(input.moveX ** 2 + input.moveY ** 2)) * graceFactor;
+    const inputMagnitude = Math.min(1, Math.sqrt(moveX ** 2 + moveY ** 2)) * graceFactor;
 
     if (inputMagnitude > 0.01) {
       inputDir.normalize();

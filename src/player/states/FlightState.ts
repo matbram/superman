@@ -100,6 +100,10 @@ export class FlightState extends BasePlayerState {
   }
 
   private handleFlightControls(player: Player, input: InputState, deltaTime: number): void {
+    // When heat vision is active, left stick controls beam aim, not movement
+    // Still allow auto-leveling and camera control
+    const heatVisionActive = player.isHeatVisionActive();
+
     // Calculate speed-based turn rate (slower turns at higher speeds)
     const speedFactor = this.currentSpeed / MAX_SPEED;
     const turnRate = this.lerp(BASE_TURN_RATE, HIGH_SPEED_TURN_RATE, speedFactor);
@@ -107,23 +111,23 @@ export class FlightState extends BasePlayerState {
     // Pitch control - airplane style:
     // Push stick forward (up) = dive down, pull back (down) = climb up
     let targetPitch = player.getPitch();
-    if (Math.abs(input.moveY) > 0.1) {
+    if (!heatVisionActive && Math.abs(input.moveY) > 0.1) {
       targetPitch += input.moveY * PITCH_RATE * deltaTime;
     } else {
-      // Auto-level pitch gradually when no input
+      // Auto-level pitch gradually when no input or heat vision active
       targetPitch = this.damp(targetPitch, 0, AUTO_LEVEL_RATE, deltaTime);
     }
     player.setPitch(this.clamp(targetPitch, -MAX_PITCH, MAX_PITCH));
 
-    // Yaw control (left/right turning)
-    if (Math.abs(input.moveX) > 0.1) {
+    // Yaw control (left/right turning) - disabled during heat vision
+    if (!heatVisionActive && Math.abs(input.moveX) > 0.1) {
       const yaw = player.getYaw();
       player.setYaw(yaw + input.moveX * turnRate * deltaTime);
     }
 
     // Roll based on yaw input (banking into turns)
     let targetRoll = 0;
-    if (Math.abs(input.moveX) > 0.1) {
+    if (!heatVisionActive && Math.abs(input.moveX) > 0.1) {
       targetRoll = -input.moveX * MAX_ROLL;
     }
     const currentRoll = player.getRoll();
