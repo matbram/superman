@@ -1,14 +1,16 @@
 /**
  * Building Damage System - Handles building destruction with structural breakpoints
  * Buildings break apart at defined structural points, creating realistic destruction
+ * Features realistic falling/collapse physics and dust/smoke effects
  */
 
 import { Scene } from '@babylonjs/core/scene';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
-import { Color3 } from '@babylonjs/core/Maths/math.color';
+import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 
 // Debris constants
 const MAX_DEBRIS_PIECES = 150;
@@ -18,6 +20,10 @@ const GRAVITY = -35;
 // Wake damage constants
 const WAKE_BASE_RADIUS = 40;  // Much larger base radius for side damage
 const WAKE_SPEED_THRESHOLD = 80;  // Lower threshold - starts earlier
+
+// Collapse constants
+const COLLAPSE_TILT_SPEED = 0.8;  // How fast buildings tip over
+const COLLAPSE_FALL_SPEED = 2.0;  // How fast buildings fall after tipping
 
 /**
  * Structural breakpoint - defines where a building can break
@@ -53,6 +59,27 @@ interface DebrisPiece {
 }
 
 /**
+ * Collapsing building - building that is falling over
+ */
+interface CollapsingBuilding {
+  mesh: Mesh;
+  originalPosition: Vector3;
+  fallDirection: Vector3;  // Direction building tips towards
+  tiltAngle: number;       // Current tilt in radians
+  fallProgress: number;    // 0 = standing, 1 = fallen
+  height: number;          // Building height for pivot calculation
+  dustSpawned: boolean;    // Whether we've spawned the big dust cloud
+}
+
+/**
+ * Dust cloud particle system
+ */
+interface DustCloud {
+  particles: ParticleSystem;
+  lifetime: number;
+}
+
+/**
  * Building damage system with structural breakpoints
  */
 export class BuildingDamage {
@@ -60,6 +87,8 @@ export class BuildingDamage {
   private debris: DebrisPiece[] = [];
   private buildingStructures: Map<Mesh, BuildingStructure> = new Map();
   private debrisMaterials: StandardMaterial[] = [];
+  private collapsingBuildings: CollapsingBuilding[] = [];
+  private dustClouds: DustCloud[] = [];
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -247,7 +276,7 @@ export class BuildingDamage {
   }
 
   /**
-   * Completely destroys a building
+   * Completely destroys a building - starts collapse animation
    */
   private destroyBuilding(structure: BuildingStructure, impactPosition: Vector3, speed: number): void {
     // Break ALL breakpoints
@@ -260,9 +289,31 @@ export class BuildingDamage {
     // Lots of debris
     this.spawnImpactDebris(impactPosition, speed, 20);
 
-    // Collapse the building mesh
-    structure.mesh.scaling.y *= 0.15;
-    structure.mesh.position.y = structure.originalPosition.y * 0.15;
+    // Calculate fall direction (away from impact)
+    const fallDir = structure.originalPosition.subtract(impactPosition);
+    fallDir.y = 0;
+    if (fallDir.length() < 0.1) {
+      fallDir.x = Math.random() - 0.5;
+      fallDir.z = Math.random() - 0.5;
+    }
+    fallDir.normalize();
+
+    // Get building height
+    const height = structure.bounds.max.y - structure.bounds.min.y;
+
+    // Start collapse animation
+    this.collapsingBuildings.push({
+      mesh: structure.mesh,
+      originalPosition: structure.originalPosition.clone(),
+      fallDirection: fallDir,
+      tiltAngle: 0,
+      fallProgress: 0,
+      height: height,
+      dustSpawned: false,
+    });
+
+    // Initial dust cloud at impact
+    this.spawnDustCloud(impactPosition, 5, 1);
 
     this.buildingStructures.delete(structure.mesh);
   }
@@ -350,6 +401,7 @@ export class BuildingDamage {
 
   /**
    * Breaks a chunk off the building at a breakpoint
+   * Chunks fall realistically with gravity, not explosion-style
    */
   private breakChunk(
     structure: BuildingStructure,
@@ -384,10 +436,20 @@ export class BuildingDamage {
     chunk.material = this.debrisMaterials[Math.floor(Math.random() * this.debrisMaterials.length)];
     chunk.isPickable = false;
 
-    // Calculate velocity - chunk flies away from impact
-    const dirFromImpact = chunkPos.subtract(impactPosition).normalize();
-    const velocity = dirFromImpact.scale(speed * 0.4 + 10);
-    velocity.y += 5 + Math.random() * 10;
+    // Calculate velocity - chunks fall with slight outward push, not explosion
+    const dirFromImpact = chunkPos.subtract(impactPosition);
+    dirFromImpact.y = 0;  // Keep horizontal only
+    if (dirFromImpact.length() > 0.1) {
+      dirFromImpact.normalize();
+    }
+
+    // Much less horizontal velocity - chunks mainly fall down
+    const horizontalPush = Math.min(speed * 0.08, 8);  // Reduced from 0.4
+    const velocity = new Vector3(
+      dirFromImpact.x * horizontalPush + (Math.random() - 0.5) * 3,
+      2 + Math.random() * 3,  // Small upward pop, then gravity takes over
+      dirFromImpact.z * horizontalPush + (Math.random() - 0.5) * 3
+    );
 
     // Random rotation
     chunk.rotation = new Vector3(
@@ -400,12 +462,120 @@ export class BuildingDamage {
       mesh: chunk,
       velocity,
       angularVelocity: new Vector3(
-        (Math.random() - 0.5) * 3,
         (Math.random() - 0.5) * 2,
-        (Math.random() - 0.5) * 3
+        (Math.random() - 0.5) * 1,
+        (Math.random() - 0.5) * 2
       ),
       isChunk: true,
       settled: false,
+    });
+
+    // Spawn small dust puff at break point
+    this.spawnDustCloud(chunkPos, 3, 0.5);
+  }
+
+  /**
+   * Spawns a dust/smoke cloud at a position
+   */
+  private spawnDustCloud(position: Vector3, size: number, duration: number): void {
+    const particles = new ParticleSystem(`dust_${Date.now()}`, 50, this.scene);
+
+    // Use simple sphere emitter
+    particles.createSphereEmitter(size * 0.5);
+
+    // Dust colors - tan/brown/gray
+    particles.color1 = new Color4(0.7, 0.6, 0.5, 0.6);
+    particles.color2 = new Color4(0.5, 0.45, 0.4, 0.4);
+    particles.colorDead = new Color4(0.4, 0.35, 0.3, 0);
+
+    // Particle sizes
+    particles.minSize = size * 0.8;
+    particles.maxSize = size * 2;
+
+    // Slow billowing motion
+    particles.minLifeTime = duration * 0.5;
+    particles.maxLifeTime = duration * 1.5;
+
+    // Slow upward drift
+    particles.direction1 = new Vector3(-size * 0.3, size * 0.5, -size * 0.3);
+    particles.direction2 = new Vector3(size * 0.3, size * 1.5, size * 0.3);
+
+    particles.minEmitPower = 1;
+    particles.maxEmitPower = 3;
+
+    particles.emitter = position.clone();
+    particles.emitRate = 30;
+
+    // Grow then shrink
+    particles.addSizeGradient(0, 0.5);
+    particles.addSizeGradient(0.3, 1);
+    particles.addSizeGradient(1, 0.3);
+
+    particles.blendMode = ParticleSystem.BLENDMODE_STANDARD;
+    particles.gravity = new Vector3(0, -2, 0);
+
+    particles.start();
+
+    // Stop emitting after burst
+    setTimeout(() => {
+      particles.emitRate = 0;
+    }, 200);
+
+    this.dustClouds.push({
+      particles,
+      lifetime: duration + 2,
+    });
+  }
+
+  /**
+   * Spawns a large dust cloud for building collapse
+   */
+  private spawnCollapseDust(position: Vector3, buildingHeight: number): void {
+    const particles = new ParticleSystem(`collapse_dust_${Date.now()}`, 200, this.scene);
+
+    // Large ground-level emission
+    particles.createCylinderEmitter(buildingHeight * 0.3, buildingHeight * 0.1, 0, 0);
+
+    // Dust colors
+    particles.color1 = new Color4(0.65, 0.55, 0.45, 0.7);
+    particles.color2 = new Color4(0.5, 0.45, 0.4, 0.5);
+    particles.colorDead = new Color4(0.4, 0.35, 0.3, 0);
+
+    // Large billowing particles
+    particles.minSize = 8;
+    particles.maxSize = 20;
+
+    particles.minLifeTime = 3;
+    particles.maxLifeTime = 6;
+
+    // Spread outward and up
+    particles.direction1 = new Vector3(-15, 5, -15);
+    particles.direction2 = new Vector3(15, 25, 15);
+
+    particles.minEmitPower = 5;
+    particles.maxEmitPower = 15;
+
+    particles.emitter = position.add(new Vector3(0, 2, 0));
+    particles.emitRate = 100;
+
+    particles.addSizeGradient(0, 0.3);
+    particles.addSizeGradient(0.2, 1);
+    particles.addSizeGradient(0.7, 1.2);
+    particles.addSizeGradient(1, 0.5);
+
+    particles.blendMode = ParticleSystem.BLENDMODE_STANDARD;
+    particles.gravity = new Vector3(0, -3, 0);
+
+    particles.start();
+
+    // Stop emitting after initial burst
+    setTimeout(() => {
+      particles.emitRate = 0;
+    }, 800);
+
+    this.dustClouds.push({
+      particles,
+      lifetime: 8,
     });
   }
 
@@ -496,10 +666,63 @@ export class BuildingDamage {
   }
 
   /**
-   * Updates debris physics and building shake effects
+   * Updates debris physics, building collapse, dust clouds, and shake effects
    * Only cleans up debris when player is far away
    */
   public update(deltaTime: number, playerPosition?: Vector3): void {
+    // Update collapsing buildings
+    for (let i = this.collapsingBuildings.length - 1; i >= 0; i--) {
+      const collapse = this.collapsingBuildings[i];
+
+      // Increase tilt angle (building tips over)
+      collapse.tiltAngle += COLLAPSE_TILT_SPEED * deltaTime;
+
+      // Apply rotation around the base (pivot at ground level)
+      const tiltAxis = new Vector3(-collapse.fallDirection.z, 0, collapse.fallDirection.x);
+      collapse.mesh.rotationQuaternion = null;
+
+      // Rotate around base - tilt towards fall direction
+      collapse.mesh.rotation.x = Math.sin(Math.atan2(tiltAxis.x, tiltAxis.z)) * collapse.tiltAngle;
+      collapse.mesh.rotation.z = Math.cos(Math.atan2(tiltAxis.x, tiltAxis.z)) * collapse.tiltAngle;
+
+      // Move position to simulate pivot at base
+      const pivotOffset = collapse.height * 0.5 * Math.sin(collapse.tiltAngle);
+      collapse.mesh.position.x = collapse.originalPosition.x + collapse.fallDirection.x * pivotOffset;
+      collapse.mesh.position.z = collapse.originalPosition.z + collapse.fallDirection.z * pivotOffset;
+
+      // Lower as it tips
+      collapse.mesh.position.y = collapse.originalPosition.y - collapse.height * 0.5 * (1 - Math.cos(collapse.tiltAngle));
+
+      // When fully fallen (roughly 90 degrees)
+      if (collapse.tiltAngle > Math.PI * 0.45) {
+        collapse.fallProgress += COLLAPSE_FALL_SPEED * deltaTime;
+
+        // Spawn big dust cloud when hitting ground
+        if (!collapse.dustSpawned) {
+          this.spawnCollapseDust(collapse.mesh.position, collapse.height);
+          collapse.dustSpawned = true;
+        }
+
+        // Scale down and sink into ground
+        if (collapse.fallProgress > 1) {
+          collapse.mesh.scaling.y *= 0.3;
+          collapse.mesh.position.y = 2;
+          this.collapsingBuildings.splice(i, 1);
+        }
+      }
+    }
+
+    // Update dust clouds
+    for (let i = this.dustClouds.length - 1; i >= 0; i--) {
+      const dust = this.dustClouds[i];
+      dust.lifetime -= deltaTime;
+
+      if (dust.lifetime <= 0) {
+        dust.particles.dispose();
+        this.dustClouds.splice(i, 1);
+      }
+    }
+
     // Update debris pieces
     for (let i = this.debris.length - 1; i >= 0; i--) {
       const piece = this.debris[i];
@@ -538,11 +761,18 @@ export class BuildingDamage {
       // Ground collision
       const groundLevel = piece.isChunk ? 1 : 0.3;
       if (piece.mesh.position.y < groundLevel) {
+        const impactSpeed = Math.abs(piece.velocity.y);
+
         piece.mesh.position.y = groundLevel;
         piece.velocity.y *= -0.3;
         piece.velocity.x *= 0.6;
         piece.velocity.z *= 0.6;
         piece.angularVelocity.scaleInPlace(0.4);
+
+        // Spawn dust on ground impact
+        if (impactSpeed > 10) {
+          this.spawnDustCloud(piece.mesh.position, piece.isChunk ? 4 : 1.5, 0.8);
+        }
 
         // Chunks spawn smaller debris on ground impact
         if (piece.isChunk && piece.velocity.length() > 5) {
@@ -580,14 +810,22 @@ export class BuildingDamage {
   }
 
   /**
-   * Cleans up all debris
+   * Cleans up all debris and effects
    */
   public dispose(): void {
     for (const piece of this.debris) {
       piece.mesh.dispose();
     }
     this.debris = [];
+
+    for (const dust of this.dustClouds) {
+      dust.particles.dispose();
+    }
+    this.dustClouds = [];
+
+    this.collapsingBuildings = [];
     this.buildingStructures.clear();
+
     for (const mat of this.debrisMaterials) {
       mat.dispose();
     }
