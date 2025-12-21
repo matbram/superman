@@ -207,6 +207,10 @@ class Game {
     this.menuItems = Array.from(this.mainMenu.querySelectorAll('.menu-item'));
     this.setupPauseMenu();
 
+    // Debug: verify pause menu element exists
+    console.log('[Game] Pause menu element:', this.pauseMenu ? 'FOUND' : 'NOT FOUND');
+    console.log('[Game] Menu items found:', this.menuItems.length);
+
     // Set up start button
     this.setupStartButton();
 
@@ -382,9 +386,13 @@ class Game {
    */
   private togglePause(): void {
     this.isPaused = !this.isPaused;
+    console.log('[Game] togglePause called, isPaused:', this.isPaused);
 
     if (this.isPaused) {
+      console.log('[Game] Showing pause menu...');
       this.pauseMenu.classList.add('visible');
+      console.log('[Game] pauseMenu classList:', this.pauseMenu.classList.toString());
+      console.log('[Game] pauseMenu display:', getComputedStyle(this.pauseMenu).display);
       this.showMainMenu();
       this.selectedMenuIndex = 0;
       this.updateMenuSelection();
@@ -395,6 +403,7 @@ class Game {
       this.menuHintKb.style.display = hasGamepad ? 'none' : 'inline';
       this.menuHintPad.style.display = hasGamepad ? 'inline' : 'none';
     } else {
+      console.log('[Game] Hiding pause menu...');
       this.pauseMenu.classList.remove('visible');
       // Re-acquire pointer lock when unpausing
       this.inputManager.requestPointerLock();

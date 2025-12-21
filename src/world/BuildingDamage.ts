@@ -187,19 +187,17 @@ export class BuildingDamage {
    * Creates procedural textures for particle effects
    */
   private createParticleTextures(): void {
-    // Use a simple white circle as base64 PNG - this is the most reliable approach
-    // 32x32 white circle with soft edges
-    const circleDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAhklEQVRYR+2WwQ3AIAwD89+hbMImbMImMAmb0A0CE9RKVaWq4kFCvhw+7ARj8rD4fKYABShAAQr8K4C1lpN0s/deJ9dZ3ntNAV0A1xZKKXVybXNOOwCr9yHQNMYcJDrnnBMARqC11kGic0qJAIgZKKXUQaKjlHT/CUavA6xFLBz/GihAAQpQgAJ/E/gABfMwIY0lPj8AAAAASUVORK5CYII=';
+    // Use Babylon.js built-in flare texture from their CDN - most reliable for particles
+    const flareUrl = 'https://playground.babylonjs.com/textures/flare.png';
 
-    // Create texture from data URL
-    this.fireTexture = new Texture(circleDataUrl, this.scene, false, true, Texture.BILINEAR_SAMPLINGMODE);
+    this.fireTexture = new Texture(flareUrl, this.scene, false, true, Texture.BILINEAR_SAMPLINGMODE);
     this.fireTexture.hasAlpha = true;
 
     // Smoke and sparks use same texture
     this.smokeTexture = this.fireTexture;
     this.sparkTexture = this.fireTexture;
 
-    console.log('[BuildingDamage] Particle textures created from data URL');
+    console.log('[BuildingDamage] Particle textures loaded from CDN');
   }
 
   /**
