@@ -14,10 +14,10 @@ import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 
 // Debris constants - optimized for performance (FEWER, BIGGER pieces)
-const MAX_DEBRIS_PIECES = 80;  // Hard cap on total debris (reduced from 100)
-const MAX_DEBRIS_PER_BUILDING = 5;  // Max debris spawned per building hit (reduced from 8)
+const MAX_DEBRIS_PIECES = 20;  // Hard cap on total debris
+const MAX_DEBRIS_PER_BUILDING = 4;  // Max debris spawned per building hit
 const DEBRIS_CLEANUP_DISTANCE = 120;  // Cleanup sooner
-const DEBRIS_SETTLE_CLEANUP_TIME = 6000;  // Remove settled debris after 6 seconds
+const DEBRIS_SETTLE_CLEANUP_TIME = 5000;  // Remove settled debris after 5 seconds
 const GRAVITY = -30;  // Normal gravity for performance
 
 // Wake damage constants
@@ -1101,7 +1101,7 @@ export class BuildingDamage {
         this.spawnDustCloud(dustPos, 3, 1);
 
         // Spawn fewer debris during collapse - very limited for performance
-        if (collapse.debrisSpawned < 4) {  // Reduced from 8
+        if (collapse.debrisSpawned < 2) {  // Max 2 during collapse
           const debrisPos = collapse.mesh.position.add(new Vector3(
             (Math.random() - 0.5) * 12,
             collapse.height * Math.random(),
@@ -1127,7 +1127,7 @@ export class BuildingDamage {
           );
           this.spawnDustCloud(collapse.mesh.position.add(offset), 8, 3);
           // Final debris burst - limited to maintain performance
-          this.spawnImpactDebris(collapse.mesh.position, 30, 5);  // Reduced from 12
+          this.spawnImpactDebris(collapse.mesh.position, 30, 3);  // Very limited
 
           // MASSIVE EXPLOSION when building hits the ground - BAYHEM!
           this.spawnExplosion(collapse.mesh.position, 2, 1.8);
