@@ -107,10 +107,10 @@ class Game {
     // Initialize traffic system
     this.traffic = new Traffic(this.sceneContext.scene);
 
-    // Initialize enemy AI
+    // Initialize enemy AI - spawn in front of player at visible height
     this.enemy = new Enemy(
       this.sceneContext.scene,
-      new Vector3(10, 5, 10)  // Spawn right next to player
+      new Vector3(30, 25, 30)  // Spawn nearby and elevated so player can see them
     );
 
     // Connect enemy attacks to building damage

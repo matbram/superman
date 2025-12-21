@@ -19,9 +19,9 @@ const ENEMY_MAX_HEALTH = 500;
 const ENEMY_FLIGHT_SPEED = 60;
 const ENEMY_ATTACK_RANGE = 80;
 const ENEMY_ATTACK_COOLDOWN = 2000;  // ms between attacks
-const ENEMY_PATROL_RADIUS = 300;
-const ENEMY_HEIGHT_MIN = 40;
-const ENEMY_HEIGHT_MAX = 120;
+const ENEMY_PATROL_RADIUS = 150;  // Stay closer to player
+const ENEMY_HEIGHT_MIN = 15;  // Lower minimum height
+const ENEMY_HEIGHT_MAX = 80;
 
 // AI behavior states
 enum EnemyState {
@@ -99,7 +99,7 @@ export class Enemy {
     eyeMat.emissiveColor = new Color3(0.8, 0.1, 0.1);
     eyeMat.freeze();
 
-    const V = 0.45;  // Voxel size - matches player
+    const V = 2.0;  // Voxel size - much larger to be visible
 
     // Body/torso
     const torso = MeshBuilder.CreateBox('torso', {
@@ -195,25 +195,25 @@ export class Enemy {
 
     // Use first body mesh (torso) as emitter - it follows the root
     this.thrusterParticles.emitter = this.bodyMeshes[0] || this.position;
-    this.thrusterParticles.minEmitBox = new Vector3(-0.3, -1, -0.3);
-    this.thrusterParticles.maxEmitBox = new Vector3(0.3, -1, 0.3);
+    this.thrusterParticles.minEmitBox = new Vector3(-2, -5, -2);
+    this.thrusterParticles.maxEmitBox = new Vector3(2, -5, 2);
 
     this.thrusterParticles.color1 = new Color3(0.6, 0.1, 0.8).toColor4(0.8);  // Purple
     this.thrusterParticles.color2 = new Color3(0.8, 0.2, 1).toColor4(0.6);
     this.thrusterParticles.colorDead = new Color3(0.3, 0, 0.4).toColor4(0);
 
-    this.thrusterParticles.minSize = 0.3;
-    this.thrusterParticles.maxSize = 0.6;
-    this.thrusterParticles.minLifeTime = 0.2;
-    this.thrusterParticles.maxLifeTime = 0.4;
+    this.thrusterParticles.minSize = 1.5;
+    this.thrusterParticles.maxSize = 3;
+    this.thrusterParticles.minLifeTime = 0.3;
+    this.thrusterParticles.maxLifeTime = 0.6;
 
-    this.thrusterParticles.emitRate = 40;
+    this.thrusterParticles.emitRate = 60;
     this.thrusterParticles.blendMode = ParticleSystem.BLENDMODE_ADD;
 
-    this.thrusterParticles.direction1 = new Vector3(-0.3, -1, -0.3);
-    this.thrusterParticles.direction2 = new Vector3(0.3, -1, 0.3);
-    this.thrusterParticles.minEmitPower = 4;
-    this.thrusterParticles.maxEmitPower = 8;
+    this.thrusterParticles.direction1 = new Vector3(-1, -1, -1);
+    this.thrusterParticles.direction2 = new Vector3(1, -1, 1);
+    this.thrusterParticles.minEmitPower = 8;
+    this.thrusterParticles.maxEmitPower = 15;
 
     this.thrusterParticles.start();
   }
@@ -247,21 +247,21 @@ export class Enemy {
    * Creates target indicator for lock-on system
    */
   private createTargetIndicator(): void {
-    // Create diamond-shaped target indicator
+    // Create diamond-shaped target indicator - large and visible
     this.targetIndicator = MeshBuilder.CreateBox('targetIndicator', {
-      width: 4, height: 4, depth: 0.2
+      width: 15, height: 15, depth: 0.5
     }, this.scene);
 
     const indicatorMat = new StandardMaterial('targetMat', this.scene);
-    indicatorMat.diffuseColor = new Color3(1, 0.2, 0.2);
-    indicatorMat.emissiveColor = new Color3(0.8, 0.1, 0.1);
+    indicatorMat.diffuseColor = new Color3(1, 0.3, 0.3);
+    indicatorMat.emissiveColor = new Color3(1, 0.2, 0.2);
     indicatorMat.alpha = 0;
     indicatorMat.backFaceCulling = false;
 
     this.targetIndicator.material = indicatorMat;
     this.targetIndicator.rotation.z = Math.PI / 4;  // Diamond shape
     this.targetIndicator.parent = this.root;
-    this.targetIndicator.position.y = 5;
+    this.targetIndicator.position.y = 20;  // Above the larger character
     this.targetIndicator.isPickable = false;
   }
 
