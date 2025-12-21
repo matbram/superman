@@ -18,6 +18,9 @@ const DEBRIS_CLEANUP_DISTANCE = 150;  // Cleanup sooner
 const DEBRIS_SETTLE_CLEANUP_TIME = 10000;  // Remove settled debris after 10 seconds
 const GRAVITY = -30;  // Normal gravity for performance
 
+// Import gravity zone type
+import type { GravityZone } from './AlienShip';
+
 // Dust cloud limits - particle systems are expensive!
 const MAX_DUST_CLOUDS = 30;  // Hard cap on active particle systems
 const DUST_CLOUD_COOLDOWN = 200;  // ms between dust spawns at same location
@@ -111,6 +114,10 @@ export class BuildingDamage {
   // Dust cloud cooldown tracking - prevents particle system spam
   private lastDustSpawnTime: Map<string, number> = new Map();
 
+  // Gravity zone for alien ship beam effect
+  private gravityZone: GravityZone | null = null;
+  private getGravityAtPosition: ((position: Vector3) => number) | null = null;
+
   // Performance tracking
   private lastPerfLogTime: number = 0;
   private frameCount: number = 0;
@@ -119,6 +126,14 @@ export class BuildingDamage {
   constructor(scene: Scene) {
     this.scene = scene;
     this.createDebrisMaterials();
+  }
+
+  /**
+   * Sets the gravity zone for oscillating gravity effects (from alien ship)
+   */
+  public setGravityZone(zone: GravityZone, gravityFunc: (position: Vector3) => number): void {
+    this.gravityZone = zone;
+    this.getGravityAtPosition = gravityFunc;
   }
 
   /**
@@ -864,45 +879,97 @@ export class BuildingDamage {
         continue;
       }
 
-      // Apply gravity
-      piece.velocity.y += GRAVITY * deltaTime;
+      // Apply gravity - check for gravity zone (alien ship beam)
+      let currentGravity = GRAVITY;
+      let inGravityZone = false;
 
-      // Air resistance for large chunks
+      if (this.gravityZone && this.getGravityAtPosition) {
+        const zoneCenter = this.gravityZone.center;
+        const dx = piece.mesh.position.x - zoneCenter.x;
+        const dz = piece.mesh.position.z - zoneCenter.z;
+        const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+
+        if (horizontalDist < this.gravityZone.radius && piece.mesh.position.y < 230) {
+          inGravityZone = true;
+          currentGravity = this.getGravityAtPosition(piece.mesh.position);
+
+          // In gravity zone, debris never fully settles - unsettle if it was settled
+          if (piece.settled) {
+            piece.settled = false;
+            // Give it a small velocity to start moving again
+            piece.velocity = new Vector3(
+              (Math.random() - 0.5) * 5,
+              Math.random() * 10 + 5,
+              (Math.random() - 0.5) * 5
+            );
+            piece.angularVelocity = new Vector3(
+              (Math.random() - 0.5) * 3,
+              (Math.random() - 0.5) * 2,
+              (Math.random() - 0.5) * 3
+            );
+          }
+        }
+      }
+
+      piece.velocity.y += currentGravity * deltaTime;
+
+      // Air resistance for large chunks (less resistance in gravity zone for floatier feel)
       if (piece.isChunk) {
-        piece.velocity.scaleInPlace(1 - 0.5 * deltaTime);
+        const resistanceFactor = inGravityZone ? 0.3 : 0.5;
+        piece.velocity.scaleInPlace(1 - resistanceFactor * deltaTime);
       }
 
       // Update position
       piece.mesh.position.addInPlace(piece.velocity.scale(deltaTime));
 
-      // Update rotation
-      piece.mesh.rotation.x += piece.angularVelocity.x * deltaTime;
-      piece.mesh.rotation.y += piece.angularVelocity.y * deltaTime;
-      piece.mesh.rotation.z += piece.angularVelocity.z * deltaTime;
+      // Update rotation (faster spinning in gravity zone)
+      const rotationMultiplier = inGravityZone ? 1.5 : 1.0;
+      piece.mesh.rotation.x += piece.angularVelocity.x * deltaTime * rotationMultiplier;
+      piece.mesh.rotation.y += piece.angularVelocity.y * deltaTime * rotationMultiplier;
+      piece.mesh.rotation.z += piece.angularVelocity.z * deltaTime * rotationMultiplier;
 
-      // Ground collision
+      // Ground collision - debris can be lifted back up in gravity zone
       const groundLevel = piece.isChunk ? 1 : 0.3;
       if (piece.mesh.position.y < groundLevel) {
         const impactSpeed = Math.abs(piece.velocity.y);
 
         piece.mesh.position.y = groundLevel;
-        piece.velocity.y *= -0.3;
-        piece.velocity.x *= 0.6;
-        piece.velocity.z *= 0.6;
-        piece.angularVelocity.scaleInPlace(0.4);
+
+        if (inGravityZone) {
+          // In gravity zone, bounce higher and more erratically
+          piece.velocity.y = Math.abs(piece.velocity.y) * 0.5 + 8;
+          piece.velocity.x += (Math.random() - 0.5) * 10;
+          piece.velocity.z += (Math.random() - 0.5) * 10;
+          piece.angularVelocity = new Vector3(
+            (Math.random() - 0.5) * 5,
+            (Math.random() - 0.5) * 3,
+            (Math.random() - 0.5) * 5
+          );
+        } else {
+          piece.velocity.y *= -0.3;
+          piece.velocity.x *= 0.6;
+          piece.velocity.z *= 0.6;
+          piece.angularVelocity.scaleInPlace(0.4);
+        }
 
         // Spawn dust on ground impact (only for large chunks)
         if (impactSpeed > 15 && piece.isChunk) {
           this.spawnDustCloud(piece.mesh.position, 3, 0.5);
         }
 
-        // Check if settled (very slow)
-        if (piece.velocity.length() < 1) {
+        // Check if settled (very slow) - only if NOT in gravity zone
+        if (!inGravityZone && piece.velocity.length() < 1) {
           piece.settled = true;
           piece.settleTime = now;  // Record when it settled for time-based cleanup
           piece.velocity = Vector3.Zero();
           piece.angularVelocity = Vector3.Zero();
         }
+      }
+
+      // Height cap - prevent debris from going too high
+      if (inGravityZone && piece.mesh.position.y > 180) {
+        piece.mesh.position.y = 180;
+        piece.velocity.y = -Math.abs(piece.velocity.y) * 0.3;
       }
     }
 

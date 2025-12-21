@@ -11,6 +11,7 @@ import { Player } from './player/Player';
 import { City } from './world/City';
 import { Atmosphere } from './world/Atmosphere';
 import { BuildingDamage } from './world/BuildingDamage';
+import { AlienShip } from './world/AlienShip';
 import { Birds } from './world/Birds';
 import { Hud } from './ui/Hud';
 import { DebugOverlay } from './ui/DebugOverlay';
@@ -32,6 +33,7 @@ class Game {
   private city: City;
   private atmosphere: Atmosphere;
   private buildingDamage: BuildingDamage;
+  private alienShip: AlienShip;
   private birds: Birds;
   private hud: Hud;
   private debugOverlay: DebugOverlay;
@@ -51,6 +53,7 @@ class Game {
     atmosphere: 0,
     wakeDamage: 0,
     buildingDamage: 0,
+    alienShip: 0,
     birds: 0,
     render: 0,
   };
@@ -90,6 +93,21 @@ class Game {
 
     // Initialize building damage system
     this.buildingDamage = new BuildingDamage(this.sceneContext.scene);
+
+    // Initialize alien ship (World Engine style gravity beam)
+    this.alienShip = new AlienShip(this.sceneContext.scene);
+
+    // Connect alien ship gravity zone to building damage system
+    this.buildingDamage.setGravityZone(
+      this.alienShip.getGravityZone(),
+      (pos) => this.alienShip.getGravityAtPosition(pos)
+    );
+
+    // Connect alien ship to damage buildings in beam zone
+    this.alienShip.setOnBuildingDamage((position, radius, damage) => {
+      const buildings = this.city.getBuildings();
+      this.buildingDamage.applyShockwaveDamage(position, radius, damage, buildings);
+    });
 
     // Initialize birds
     this.birds = new Birds(this.sceneContext.scene);
@@ -229,6 +247,12 @@ class Game {
     t1 = performance.now();
     this.perfTimings.buildingDamage += t1 - t0;
 
+    // Update alien ship (gravity beam, oscillating effects)
+    t0 = performance.now();
+    this.alienShip.update(deltaTime);
+    t1 = performance.now();
+    this.perfTimings.alienShip += t1 - t0;
+
     // Update birds
     t0 = performance.now();
     this.birds.update(deltaTime, playerPos);
@@ -283,6 +307,7 @@ class Game {
             atmosphere: (this.perfTimings.atmosphere / this.frameCount).toFixed(2) + 'ms',
             wakeDamage: (this.perfTimings.wakeDamage / this.frameCount).toFixed(2) + 'ms',
             buildingDamage: (this.perfTimings.buildingDamage / this.frameCount).toFixed(2) + 'ms',
+            alienShip: (this.perfTimings.alienShip / this.frameCount).toFixed(2) + 'ms',
             birds: (this.perfTimings.birds / this.frameCount).toFixed(2) + 'ms',
             render: (this.perfTimings.render / this.frameCount).toFixed(2) + 'ms',
           }
@@ -299,6 +324,7 @@ class Game {
           atmosphere: 0,
           wakeDamage: 0,
           buildingDamage: 0,
+          alienShip: 0,
           birds: 0,
           render: 0,
         };
