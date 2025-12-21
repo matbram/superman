@@ -8,7 +8,7 @@ import { createScene } from './core/scene';
 import { InputManager } from './input/inputManager';
 import { PhysicsManager } from './physics/physics';
 import { Player } from './player/Player';
-import { City } from './world/City';
+import { City, WorldSettings } from './world/City';
 import { Atmosphere } from './world/Atmosphere';
 import { BuildingDamage, DebrisSettings } from './world/BuildingDamage';
 import { Birds } from './world/Birds';
@@ -62,7 +62,7 @@ class Game {
   private selectedMenuIndex: number = 0;
   private menuItems: HTMLElement[] = [];
 
-  // Settings navigation
+  // Settings navigation (destruction settings)
   private selectedSettingIndex: number = 0;
   private settingsControls: {
     input: HTMLInputElement;
@@ -72,6 +72,20 @@ class Game {
     isCheckbox: boolean;
   }[] = [];
   private updateSettingsFromInputs: () => void = () => {};
+
+  // World settings navigation
+  private worldSettingsSubmenu: HTMLElement;
+  private inWorldSettingsSubmenu: boolean = false;
+  private selectedWorldSettingIndex: number = 0;
+  private worldSettingsControls: {
+    input: HTMLInputElement;
+    valueDisplay: HTMLElement;
+    container: HTMLElement;
+    step: number;
+  }[] = [];
+  private buildingCountElement: HTMLElement;
+  private chunkCountElement: HTMLElement;
+  private updateWorldSettingsFromInputs: () => void = () => {};
 
   // Performance tracking
   private lastPerfLogTime: number = 0;
@@ -214,13 +228,17 @@ class Game {
     this.pauseMenu = document.getElementById('pauseMenu')!;
     this.mainMenu = document.getElementById('mainMenu')!;
     this.settingsSubmenu = document.getElementById('settingsSubmenu')!;
+    this.worldSettingsSubmenu = document.getElementById('worldSettingsSubmenu')!;
     this.debrisCountElement = document.getElementById('debrisCount')!;
+    this.buildingCountElement = document.getElementById('buildingCount')!;
+    this.chunkCountElement = document.getElementById('chunkCount')!;
     this.menuHintKb = document.getElementById('menuHintKb')!;
     this.menuHintPad = document.getElementById('menuHintPad')!;
     this.settingsHintKb = document.getElementById('settingsHintKb')!;
     this.settingsHintPad = document.getElementById('settingsHintPad')!;
     this.menuItems = Array.from(this.mainMenu.querySelectorAll('.menu-item'));
     this.setupPauseMenu();
+    this.setupWorldSettingsMenu();
 
     // Debug: verify pause menu element exists
     console.log('[Game] Pause menu element:', this.pauseMenu ? 'FOUND' : 'NOT FOUND');
@@ -335,6 +353,81 @@ class Game {
   }
 
   /**
+   * Sets up the world settings menu
+   */
+  private setupWorldSettingsMenu(): void {
+    // Get all input elements
+    const densityInput = document.getElementById('settingBuildingDensity') as HTMLInputElement;
+    const minHeightInput = document.getElementById('settingMinHeight') as HTMLInputElement;
+    const maxHeightInput = document.getElementById('settingMaxHeight') as HTMLInputElement;
+    const minWidthInput = document.getElementById('settingMinWidth') as HTMLInputElement;
+    const maxWidthInput = document.getElementById('settingMaxWidth') as HTMLInputElement;
+    const spacingInput = document.getElementById('settingSpacing') as HTMLInputElement;
+
+    // Get value display elements
+    const valueDensity = document.getElementById('valueBuildingDensity')!;
+    const valueMinHeight = document.getElementById('valueMinHeight')!;
+    const valueMaxHeight = document.getElementById('valueMaxHeight')!;
+    const valueMinWidth = document.getElementById('valueMinWidth')!;
+    const valueMaxWidth = document.getElementById('valueMaxWidth')!;
+    const valueSpacing = document.getElementById('valueSpacing')!;
+
+    // Build world settings controls array for controller navigation
+    this.worldSettingsControls = [
+      { input: densityInput, valueDisplay: valueDensity, container: densityInput.closest('.setting-group')!, step: 2 },
+      { input: minHeightInput, valueDisplay: valueMinHeight, container: minHeightInput.closest('.setting-group')!, step: 5 },
+      { input: maxHeightInput, valueDisplay: valueMaxHeight, container: maxHeightInput.closest('.setting-group')!, step: 10 },
+      { input: minWidthInput, valueDisplay: valueMinWidth, container: minWidthInput.closest('.setting-group')!, step: 1 },
+      { input: maxWidthInput, valueDisplay: valueMaxWidth, container: maxWidthInput.closest('.setting-group')!, step: 2 },
+      { input: spacingInput, valueDisplay: valueSpacing, container: spacingInput.closest('.setting-group')!, step: 1 },
+    ];
+
+    // Helper to update settings
+    const updateWorldSettings = () => {
+      const newSettings: Partial<WorldSettings> = {
+        buildingsPerChunk: parseInt(densityInput.value),
+        minBuildingHeight: parseInt(minHeightInput.value),
+        maxBuildingHeight: parseInt(maxHeightInput.value),
+        minBuildingWidth: parseInt(minWidthInput.value),
+        maxBuildingWidth: parseInt(maxWidthInput.value),
+        buildingSpacing: parseInt(spacingInput.value),
+      };
+      this.city.updateSettings(newSettings);
+
+      // Update value displays
+      valueDensity.textContent = densityInput.value;
+      valueMinHeight.textContent = minHeightInput.value;
+      valueMaxHeight.textContent = maxHeightInput.value;
+      valueMinWidth.textContent = minWidthInput.value;
+      valueMaxWidth.textContent = maxWidthInput.value;
+      valueSpacing.textContent = spacingInput.value;
+    };
+
+    // Store updateSettings for controller use
+    this.updateWorldSettingsFromInputs = updateWorldSettings;
+
+    // Wire up slider inputs
+    densityInput.addEventListener('input', updateWorldSettings);
+    minHeightInput.addEventListener('input', updateWorldSettings);
+    maxHeightInput.addEventListener('input', updateWorldSettings);
+    minWidthInput.addEventListener('input', updateWorldSettings);
+    maxWidthInput.addEventListener('input', updateWorldSettings);
+    spacingInput.addEventListener('input', updateWorldSettings);
+
+    // Wire up regenerate button
+    const regenerateBtn = this.worldSettingsSubmenu.querySelector('.regenerate-btn');
+    if (regenerateBtn) {
+      regenerateBtn.addEventListener('click', () => this.city.regenerate());
+    }
+
+    // Wire up back button
+    const backBtn = this.worldSettingsSubmenu.querySelector('.back-btn');
+    if (backBtn) {
+      backBtn.addEventListener('click', () => this.showMainMenu());
+    }
+  }
+
+  /**
    * Updates visual selection of menu items
    */
   private updateMenuSelection(): void {
@@ -348,19 +441,61 @@ class Game {
    */
   private showMainMenu(): void {
     this.inSettingsSubmenu = false;
+    this.inWorldSettingsSubmenu = false;
     this.mainMenu.style.display = 'block';
     this.settingsSubmenu.classList.remove('visible');
+    this.worldSettingsSubmenu.classList.remove('visible');
   }
 
   /**
-   * Shows the settings submenu
+   * Shows the settings submenu (destruction settings)
    */
   private showSettingsSubmenu(): void {
     this.inSettingsSubmenu = true;
+    this.inWorldSettingsSubmenu = false;
     this.mainMenu.style.display = 'none';
     this.settingsSubmenu.classList.add('visible');
     this.selectedSettingIndex = 0;
     this.updateSettingSelection();
+  }
+
+  /**
+   * Shows the world settings submenu
+   */
+  private showWorldSettingsSubmenu(): void {
+    this.inSettingsSubmenu = false;
+    this.inWorldSettingsSubmenu = true;
+    this.mainMenu.style.display = 'none';
+    this.worldSettingsSubmenu.classList.add('visible');
+    this.selectedWorldSettingIndex = 0;
+    this.updateWorldSettingSelection();
+  }
+
+  /**
+   * Updates visual selection of world settings controls
+   */
+  private updateWorldSettingSelection(): void {
+    this.worldSettingsControls.forEach((control, index) => {
+      control.container.classList.toggle('selected', index === this.selectedWorldSettingIndex);
+    });
+  }
+
+  /**
+   * Adjusts the currently selected world setting value
+   */
+  private adjustSelectedWorldSetting(direction: number): void {
+    const control = this.worldSettingsControls[this.selectedWorldSettingIndex];
+    if (!control) return;
+
+    const currentValue = parseFloat(control.input.value);
+    const min = parseFloat(control.input.min);
+    const max = parseFloat(control.input.max);
+    const step = parseFloat(control.input.step) || control.step;
+    const newValue = Math.max(min, Math.min(max, currentValue + direction * step));
+    control.input.value = newValue.toString();
+
+    // Trigger update
+    this.updateWorldSettingsFromInputs();
   }
 
   /**
@@ -405,6 +540,12 @@ class Game {
         break;
       case 'settings':
         this.showSettingsSubmenu();
+        break;
+      case 'worldSettings':
+        this.showWorldSettingsSubmenu();
+        break;
+      case 'regenerate':
+        this.city.regenerate();
         break;
       case 'restart':
         this.restartGame();
@@ -479,7 +620,8 @@ class Game {
   private handleMenuInput(input: ReturnType<typeof this.inputManager.update>): void {
     // Update hint based on input device and current menu
     const hasGamepad = this.inputManager.hasGamepad();
-    if (this.inSettingsSubmenu) {
+    const inAnySubmenu = this.inSettingsSubmenu || this.inWorldSettingsSubmenu;
+    if (inAnySubmenu) {
       this.menuHintKb.style.display = 'none';
       this.menuHintPad.style.display = 'none';
       this.settingsHintKb.style.display = hasGamepad ? 'none' : 'inline';
@@ -492,7 +634,7 @@ class Game {
     }
 
     if (this.inSettingsSubmenu) {
-      // In settings submenu - navigate and adjust settings
+      // In destruction settings submenu - navigate and adjust settings
       if (input.menuUp) {
         this.selectedSettingIndex = (this.selectedSettingIndex - 1 + this.settingsControls.length) % this.settingsControls.length;
         this.updateSettingSelection();
@@ -515,6 +657,31 @@ class Game {
           control.input.checked = !control.input.checked;
           this.updateSettingsFromInputs();
         }
+      }
+      // B/Backspace goes back to main menu
+      if (input.menuBack || input.pausePressed) {
+        this.showMainMenu();
+      }
+    } else if (this.inWorldSettingsSubmenu) {
+      // In world settings submenu - navigate and adjust settings
+      if (input.menuUp) {
+        this.selectedWorldSettingIndex = (this.selectedWorldSettingIndex - 1 + this.worldSettingsControls.length) % this.worldSettingsControls.length;
+        this.updateWorldSettingSelection();
+      }
+      if (input.menuDown) {
+        this.selectedWorldSettingIndex = (this.selectedWorldSettingIndex + 1) % this.worldSettingsControls.length;
+        this.updateWorldSettingSelection();
+      }
+      // D-pad left/right adjusts the selected setting
+      if (input.menuLeft) {
+        this.adjustSelectedWorldSetting(-1);
+      }
+      if (input.menuRight) {
+        this.adjustSelectedWorldSetting(1);
+      }
+      // A button triggers regenerate
+      if (input.menuSelect) {
+        this.city.regenerate();
       }
       // B/Backspace goes back to main menu
       if (input.menuBack || input.pausePressed) {
@@ -592,6 +759,9 @@ class Game {
     if (this.isPaused) {
       // Update debris count display
       this.debrisCountElement.textContent = this.buildingDamage.getDebrisCount().toString();
+      // Update building/chunk count display for world settings
+      this.buildingCountElement.textContent = this.city.getBuildingCount().toString();
+      this.chunkCountElement.textContent = this.city.getChunkCount().toString();
       // Handle menu navigation (including pause button to close or go back)
       this.handleMenuInput(input);
       // Still render the scene (frozen)

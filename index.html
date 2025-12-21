@@ -311,6 +311,107 @@
         font-family: monospace;
       }
 
+      /* World Settings Submenu - same styling as settingsSubmenu */
+      #worldSettingsSubmenu {
+        display: none;
+      }
+
+      #worldSettingsSubmenu.visible {
+        display: block;
+      }
+
+      #worldSettingsSubmenu h3 {
+        color: #44aaff;
+        font-size: 20px;
+        margin-bottom: 20px;
+      }
+
+      #worldSettingsSubmenu .setting-group {
+        text-align: left;
+        margin: 15px 0;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 6px;
+        border: 2px solid transparent;
+        transition: all 0.15s;
+      }
+
+      #worldSettingsSubmenu .setting-group.selected {
+        background: rgba(68, 170, 255, 0.15);
+        border-color: #44aaff;
+      }
+
+      #worldSettingsSubmenu .setting-label {
+        color: #fff;
+        font-size: 14px;
+        font-weight: bold;
+        margin-bottom: 4px;
+      }
+
+      #worldSettingsSubmenu .setting-desc {
+        color: #aaa;
+        font-size: 11px;
+        margin-bottom: 8px;
+      }
+
+      #worldSettingsSubmenu .setting-control {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      #worldSettingsSubmenu input[type="range"] {
+        flex: 1;
+        height: 6px;
+      }
+
+      #worldSettingsSubmenu .setting-value {
+        color: #88ff88;
+        font-family: monospace;
+        font-size: 14px;
+        min-width: 40px;
+        text-align: right;
+      }
+
+      #worldSettingsSubmenu .back-btn {
+        margin-top: 20px;
+        padding: 12px 30px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 2px solid #888;
+        border-radius: 8px;
+        color: #fff;
+        cursor: pointer;
+        font-size: 14px;
+      }
+
+      #worldSettingsSubmenu .back-btn:hover {
+        border-color: #44aaff;
+        background: rgba(68, 170, 255, 0.2);
+      }
+
+      #worldSettingsSubmenu .regenerate-btn {
+        margin-top: 10px;
+        padding: 12px 30px;
+        background: rgba(68, 170, 255, 0.2);
+        border: 2px solid #44aaff;
+        border-radius: 8px;
+        color: #fff;
+        cursor: pointer;
+        font-size: 14px;
+      }
+
+      #worldSettingsSubmenu .regenerate-btn:hover {
+        background: rgba(68, 170, 255, 0.4);
+      }
+
+      #worldSettingsSubmenu .world-info {
+        margin-top: 15px;
+        padding-top: 15px;
+        border-top: 1px solid #444;
+        color: #88ff88;
+        font-family: monospace;
+      }
+
       #instructions {
         position: fixed;
         top: 50%;
@@ -420,7 +521,8 @@
       <!-- Main Menu -->
       <div id="mainMenu">
         <div class="menu-item selected" data-action="resume">▶️ Resume Game</div>
-        <div class="menu-item" data-action="settings">⚙️ Destruction Settings</div>
+        <div class="menu-item" data-action="settings">💥 Destruction Settings</div>
+        <div class="menu-item" data-action="worldSettings">🏙️ World Settings</div>
         <div class="menu-item" data-action="restart">🔄 Restart Game</div>
       </div>
 
@@ -488,6 +590,66 @@
           Currently Active: <span id="debrisCount">0</span> pieces
         </div>
 
+        <div class="back-btn" data-action="back">← Back to Menu</div>
+      </div>
+
+      <!-- World Settings Submenu -->
+      <div id="worldSettingsSubmenu">
+        <h3>🏙️ World Generation</h3>
+
+        <div class="setting-group">
+          <div class="setting-label">Building Density</div>
+          <div class="setting-desc">Number of buildings per city chunk (4-30).</div>
+          <div class="setting-control">
+            <input type="range" id="settingBuildingDensity" min="4" max="30" value="16">
+            <span class="setting-value" id="valueBuildingDensity">16</span>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Min Building Height</div>
+          <div class="setting-desc">Shortest buildings in meters (20-100).</div>
+          <div class="setting-control">
+            <input type="range" id="settingMinHeight" min="20" max="100" step="5" value="50">
+            <span class="setting-value" id="valueMinHeight">50</span>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Max Building Height</div>
+          <div class="setting-desc">Tallest skyscrapers in meters (100-400).</div>
+          <div class="setting-control">
+            <input type="range" id="settingMaxHeight" min="100" max="400" step="10" value="250">
+            <span class="setting-value" id="valueMaxHeight">250</span>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Building Size</div>
+          <div class="setting-desc">Building footprint range (min to max width).</div>
+          <div class="setting-control">
+            <input type="range" id="settingMinWidth" min="10" max="30" value="15">
+            <span class="setting-value" id="valueMinWidth">15</span>
+            <span style="color:#888">to</span>
+            <input type="range" id="settingMaxWidth" min="20" max="60" value="40">
+            <span class="setting-value" id="valueMaxWidth">40</span>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Building Spacing</div>
+          <div class="setting-desc">Gap between buildings (2-15 meters).</div>
+          <div class="setting-control">
+            <input type="range" id="settingSpacing" min="2" max="15" value="5">
+            <span class="setting-value" id="valueSpacing">5</span>
+          </div>
+        </div>
+
+        <div class="world-info">
+          Buildings: <span id="buildingCount">0</span> | Chunks: <span id="chunkCount">0</span>
+        </div>
+
+        <div class="regenerate-btn" data-action="regenerate">🔄 Regenerate City</div>
         <div class="back-btn" data-action="back">← Back to Menu</div>
       </div>
 

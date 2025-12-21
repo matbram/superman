@@ -32,14 +32,35 @@ export const STREET_WIDTH = 20;          // Width of streets at chunk edges (rea
 export const CITY_CHUNK_SIZE = 200;      // Exported chunk size for traffic
 const SIDEWALK_HEIGHT = 0.3;
 
-// Building generation - NYC-style dense city
-// Player is 1.8m tall, so buildings should be 30-300m (realistic NYC scale)
-const MIN_BUILDING_HEIGHT = 50;   // ~25 stories minimum
-const MAX_BUILDING_HEIGHT = 250;  // ~125 stories for tall skyscrapers
-const MIN_BUILDING_WIDTH = 15;    // Realistic NYC building footprint
-const MAX_BUILDING_WIDTH = 40;    // Large office buildings
-const BUILDING_SPACING = 5;       // Space between buildings
-const BUILDINGS_PER_CHUNK = 16;   // Dense but performant
+// Default building generation - NYC-style dense city
+const DEFAULT_MIN_BUILDING_HEIGHT = 50;   // ~25 stories minimum
+const DEFAULT_MAX_BUILDING_HEIGHT = 250;  // ~125 stories for tall skyscrapers
+const DEFAULT_MIN_BUILDING_WIDTH = 15;    // Realistic NYC building footprint
+const DEFAULT_MAX_BUILDING_WIDTH = 40;    // Large office buildings
+const DEFAULT_BUILDING_SPACING = 5;       // Space between buildings
+const DEFAULT_BUILDINGS_PER_CHUNK = 16;   // Dense but performant
+
+/**
+ * World generation settings - can be adjusted at runtime
+ */
+export interface WorldSettings {
+  buildingsPerChunk: number;       // 4-30: density of buildings
+  minBuildingHeight: number;       // 20-100: shortest buildings
+  maxBuildingHeight: number;       // 100-400: tallest skyscrapers
+  minBuildingWidth: number;        // 10-30: building footprint min
+  maxBuildingWidth: number;        // 20-60: building footprint max
+  buildingSpacing: number;         // 2-15: gap between buildings
+}
+
+// Default world settings
+const DEFAULT_WORLD_SETTINGS: WorldSettings = {
+  buildingsPerChunk: DEFAULT_BUILDINGS_PER_CHUNK,
+  minBuildingHeight: DEFAULT_MIN_BUILDING_HEIGHT,
+  maxBuildingHeight: DEFAULT_MAX_BUILDING_HEIGHT,
+  minBuildingWidth: DEFAULT_MIN_BUILDING_WIDTH,
+  maxBuildingWidth: DEFAULT_MAX_BUILDING_WIDTH,
+  buildingSpacing: DEFAULT_BUILDING_SPACING,
+};
 
 // Building zone - area where buildings can be placed (inside the streets)
 const BUILDING_ZONE_START = STREET_WIDTH;  // Buildings start after street
@@ -117,6 +138,9 @@ export class City {
   private chunks: Map<string, CityChunk> = new Map();
   private pendingChunks: PendingChunk[] = [];
   private groundMesh: Mesh | null = null;
+
+  // Runtime configurable settings
+  private settings: WorldSettings = { ...DEFAULT_WORLD_SETTINGS };
 
   // Performance tracking
   private lastPerfLogTime: number = 0;
@@ -428,17 +452,17 @@ export class City {
 
     // Generate buildings with varied styles - ONLY within the building zone
     let buildingCount = 0;
-    let currentX = worldX + BUILDING_ZONE_START + BUILDING_SPACING;
-    const endX = worldX + BUILDING_ZONE_END - BUILDING_SPACING;
-    const endZ = worldZ + BUILDING_ZONE_END - BUILDING_SPACING;
+    let currentX = worldX + BUILDING_ZONE_START + this.settings.buildingSpacing;
+    const endX = worldX + BUILDING_ZONE_END - this.settings.buildingSpacing;
+    const endZ = worldZ + BUILDING_ZONE_END - this.settings.buildingSpacing;
 
-    while (currentX < endX && buildingCount < BUILDINGS_PER_CHUNK) {
-      let currentZ = worldZ + BUILDING_ZONE_START + BUILDING_SPACING;
+    while (currentX < endX && buildingCount < this.settings.buildingsPerChunk) {
+      let currentZ = worldZ + BUILDING_ZONE_START + this.settings.buildingSpacing;
 
-      while (currentZ < endZ && buildingCount < BUILDINGS_PER_CHUNK) {
-        const bWidth = random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH);
-        const bDepth = random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH);
-        const bHeight = random.range(MIN_BUILDING_HEIGHT, MAX_BUILDING_HEIGHT);
+      while (currentZ < endZ && buildingCount < this.settings.buildingsPerChunk) {
+        const bWidth = random.range(this.settings.minBuildingWidth, this.settings.maxBuildingWidth);
+        const bDepth = random.range(this.settings.minBuildingWidth, this.settings.maxBuildingWidth);
+        const bHeight = random.range(this.settings.minBuildingHeight, this.settings.maxBuildingHeight);
 
         const bx = currentX + bWidth / 2;
         const bz = currentZ + bDepth / 2;
@@ -464,10 +488,10 @@ export class City {
         }
 
         buildingCount++;
-        currentZ += bDepth + BUILDING_SPACING + random.range(2, 8);
+        currentZ += bDepth + this.settings.buildingSpacing + random.range(2, 8);
       }
 
-      currentX += random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH) + BUILDING_SPACING + random.range(2, 8);
+      currentX += random.range(this.settings.minBuildingWidth, this.settings.maxBuildingWidth) + this.settings.buildingSpacing + random.range(2, 8);
     }
 
     // Extract building meshes for efficient LOD updates
@@ -777,5 +801,57 @@ export class City {
       }
     }
     return false;
+  }
+
+  /**
+   * Gets current world settings
+   */
+  public getSettings(): WorldSettings {
+    return { ...this.settings };
+  }
+
+  /**
+   * Updates world settings - changes take effect on newly generated chunks
+   */
+  public updateSettings(newSettings: Partial<WorldSettings>): void {
+    this.settings = { ...this.settings, ...newSettings };
+    console.log('[City] Settings updated:', this.settings);
+  }
+
+  /**
+   * Regenerates the city with current settings
+   * Clears all existing chunks and regenerates them
+   */
+  public regenerate(): void {
+    console.log('[City] Regenerating city with new settings...');
+
+    // Clear all existing chunks
+    for (const chunk of this.chunks.values()) {
+      this.unloadChunk(chunk.key);
+    }
+    this.pendingChunks = [];
+
+    // Regenerate initial chunks
+    this.generateInitialChunks();
+
+    console.log('[City] City regenerated');
+  }
+
+  /**
+   * Gets total building count across all chunks
+   */
+  public getBuildingCount(): number {
+    let count = 0;
+    for (const chunk of this.chunks.values()) {
+      count += chunk.buildingMeshes.length;
+    }
+    return count;
+  }
+
+  /**
+   * Gets loaded chunk count
+   */
+  public getChunkCount(): number {
+    return this.chunks.size;
   }
 }
