@@ -418,15 +418,15 @@ export class Player {
    */
   private createDistortionSphere(): Mesh {
     const sphere = MeshBuilder.CreateSphere('distortionSphere', {
-      diameter: 3,
-      segments: 24,
+      diameter: 2,
+      segments: 16,
     }, this.scene);
 
     const material = new StandardMaterial('distortionMat', this.scene);
-    material.diffuseColor = new Color3(0.7, 0.85, 1);
-    material.emissiveColor = new Color3(0.4, 0.6, 0.9);
+    material.diffuseColor = new Color3(0.85, 0.92, 1);
+    material.emissiveColor = new Color3(0.6, 0.75, 0.95);
     material.specularColor = new Color3(1, 1, 1);
-    material.alpha = 0.4;
+    material.alpha = 0.15;  // Much more transparent
     material.backFaceCulling = false;
 
     sphere.material = material;
@@ -441,11 +441,11 @@ export class Player {
    * Called from FlightState when braking at supersonic speeds
    */
   public triggerBrakeShockwave(previousSpeed: number): void {
-    // Create expanding distortion sphere
+    // Create expanding distortion sphere - subtle flash effect
     const distortionSphere = this.createDistortionSphere();
     distortionSphere.position.copyFrom(this.physics.position);
     distortionSphere.scaling = new Vector3(1, 1, 1);
-    distortionSphere.visibility = 0.6;
+    distortionSphere.visibility = 0.3;  // Reduced initial visibility
     this.shockwaveRings.push(distortionSphere);
 
     // Create multiple concentric rings for visual impact
@@ -478,13 +478,15 @@ export class Player {
     for (let i = this.shockwaveRings.length - 1; i >= 0; i--) {
       const mesh = this.shockwaveRings[i];
 
-      // Different expand/fade speeds for different effect types - MUCH faster and dramatic
+      // Different expand/fade speeds for different effect types
       const isDistortionSphere = mesh.name.includes('distortion');
       const isStopShockwave = mesh.name.includes('stop');
-      const expandSpeed = isDistortionSphere ? 80 : (isStopShockwave ? 60 : 45);
-      const fadeSpeed = isDistortionSphere ? 2.5 : 2;
 
-      // Expand the mesh rapidly
+      // Distortion sphere should fade VERY quickly to avoid big blue circle
+      const expandSpeed = isDistortionSphere ? 25 : (isStopShockwave ? 60 : 45);
+      const fadeSpeed = isDistortionSphere ? 8 : 2;
+
+      // Expand the mesh
       mesh.scaling.x += expandSpeed * deltaTime;
       mesh.scaling.y += expandSpeed * deltaTime;
       mesh.scaling.z += expandSpeed * deltaTime;
