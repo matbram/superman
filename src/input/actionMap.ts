@@ -31,6 +31,7 @@ export interface InputState {
   heatVisionHeld: boolean; // LB - heat vision (laser eyes)
   lockOnPressed: boolean; // Tab/Y - toggle lock-on to enemy
   debugPressed: boolean;  // Backtick - toggle debug
+  pausePressed: boolean;  // Escape/Start - toggle pause menu
 }
 
 /**
@@ -50,6 +51,7 @@ export function createEmptyInputState(): InputState {
     heatVisionHeld: false,
     lockOnPressed: false,
     debugPressed: false,
+    pausePressed: false,
   };
 }
 
@@ -68,6 +70,7 @@ export const KeyboardBindings = {
   heatVision: ['KeyE'],  // E for heat vision (laser eyes)
   lockOn: ['Tab'],  // Tab to lock-on to enemy
   toggleDebug: ['Backquote'],
+  pause: ['Escape'],  // Escape to pause/open settings
 } as const;
 
 /**
@@ -90,6 +93,9 @@ export const GamepadBindings = {
   // Triggers (buttons 6 and 7 in standard mapping)
   leftTriggerButton: 6,   // LT
   rightTriggerButton: 7,  // RT
+
+  // Menu buttons
+  pause: 9,             // Start/Menu (Xbox) / Options (PlayStation)
 } as const;
 
 /**

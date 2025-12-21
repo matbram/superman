@@ -48,10 +48,10 @@ class Game {
   private instructionsElement: HTMLElement;
   private startButton: HTMLElement;
 
-  // Settings panel
+  // Settings/Pause panel
   private settingsPanel: HTMLElement;
-  private settingsPanelVisible: boolean = false;
   private debrisCountElement: HTMLElement;
+  private isPaused: boolean = false;
 
   // Performance tracking
   private lastPerfLogTime: number = 0;
@@ -268,19 +268,25 @@ class Game {
     cleanupDistInput.addEventListener('input', updateSettings);
     settleTimeInput.addEventListener('input', updateSettings);
     explosionsInput.addEventListener('change', updateSettings);
+  }
 
-    // Toggle panel with Tab key
-    window.addEventListener('keydown', (e) => {
-      if (e.key === 'Tab' && this.isRunning) {
-        e.preventDefault();
-        this.settingsPanelVisible = !this.settingsPanelVisible;
-        if (this.settingsPanelVisible) {
-          this.settingsPanel.classList.add('visible');
-        } else {
-          this.settingsPanel.classList.remove('visible');
-        }
-      }
-    });
+  /**
+   * Toggles pause state and shows/hides settings panel
+   */
+  private togglePause(): void {
+    this.isPaused = !this.isPaused;
+
+    if (this.isPaused) {
+      this.settingsPanel.classList.add('visible');
+      // Release pointer lock when paused so user can interact with settings
+      this.inputManager.releasePointerLock();
+    } else {
+      this.settingsPanel.classList.remove('visible');
+      // Re-acquire pointer lock when unpausing
+      this.inputManager.requestPointerLock();
+    }
+
+    console.log(this.isPaused ? 'Game paused' : 'Game resumed');
   }
 
   /**
@@ -312,12 +318,26 @@ class Game {
     const frameStart = performance.now();
     let t0: number, t1: number;
 
-    // Update input
+    // Update input (always, even when paused)
     const input = this.inputManager.update();
+
+    // Toggle pause/settings menu
+    if (input.pausePressed) {
+      this.togglePause();
+    }
 
     // Toggle debug overlay
     if (input.debugPressed) {
       this.debugOverlay.toggle();
+    }
+
+    // If paused, only render and update UI, skip game logic
+    if (this.isPaused) {
+      // Update debris count display
+      this.debrisCountElement.textContent = this.buildingDamage.getDebrisCount().toString();
+      // Still render the scene (frozen)
+      this.sceneContext.scene.render();
+      return;
     }
 
     // Toggle lock-on to enemy
@@ -441,11 +461,6 @@ class Game {
         this.player.getVelocity(),
         inputInfo
       );
-    }
-
-    // Update settings panel debris count
-    if (this.settingsPanelVisible) {
-      this.debrisCountElement.textContent = this.buildingDamage.getDebrisCount().toString();
     }
 
     // Render scene

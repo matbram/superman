@@ -159,10 +159,12 @@ export class InputManager {
     const boostButton = gamepad.buttons[GamepadBindings.boost];
     const heatVisionButton = gamepad.buttons[GamepadBindings.heatVision];
     const lockOnButton = gamepad.buttons[GamepadBindings.lockOn];
+    const pauseButton = gamepad.buttons[GamepadBindings.pause];
 
     // Detect button press (not held from last frame)
     const wasJumpPressed = this.previousGamepadButtons[GamepadBindings.jump] ?? false;
     const wasLockOnPressed = this.previousGamepadButtons[GamepadBindings.lockOn] ?? false;
+    const wasPausePressed = this.previousGamepadButtons[GamepadBindings.pause] ?? false;
 
     this.currentState.jumpHeld = jumpButton?.pressed ?? false;
     this.currentState.jumpPressed = this.currentState.jumpHeld && !wasJumpPressed;
@@ -171,6 +173,9 @@ export class InputManager {
 
     const lockOnHeld = lockOnButton?.pressed ?? false;
     this.currentState.lockOnPressed = lockOnHeld && !wasLockOnPressed;
+
+    const pauseHeld = pauseButton?.pressed ?? false;
+    this.currentState.pausePressed = pauseHeld && !wasPausePressed;
 
     // Store button states for next frame
     this.previousGamepadButtons = gamepad.buttons.map((b) => b.pressed);
@@ -236,6 +241,11 @@ export class InputManager {
 
     // Debug toggle
     this.currentState.debugPressed = this.isKeyPressed(KeyboardBindings.toggleDebug);
+
+    // Pause toggle (Escape)
+    if (!this.currentState.pausePressed) {
+      this.currentState.pausePressed = this.isKeyPressed(KeyboardBindings.pause);
+    }
   }
 
   /**
