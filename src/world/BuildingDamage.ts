@@ -11,6 +11,8 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
+import { Texture } from '@babylonjs/core/Materials/Textures/texture';
+import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
 
 // Debris constants - optimized for performance
 const MAX_DEBRIS_PIECES = 50;  // Low cap for better framerate
@@ -116,6 +118,11 @@ export class BuildingDamage {
   private dustClouds: DustCloud[] = [];
   private explosions: Explosion[] = [];
 
+  // Particle textures for effects
+  private fireTexture: Texture | null = null;
+  private smokeTexture: Texture | null = null;
+  private sparkTexture: Texture | null = null;
+
   // Debris spawn cooldown tracking - prevents chain spawning
   private lastDebrisSpawnTime: Map<string, number> = new Map();
 
@@ -131,6 +138,71 @@ export class BuildingDamage {
   constructor(scene: Scene) {
     this.scene = scene;
     this.createDebrisMaterials();
+    this.createParticleTextures();
+  }
+
+  /**
+   * Creates procedural textures for particle effects
+   */
+  private createParticleTextures(): void {
+    // Create fire/explosion texture - soft radial gradient
+    const fireSize = 128;
+    const fireTex = new DynamicTexture('fireTexture', fireSize, this.scene, false);
+    const fireCtx = fireTex.getContext();
+
+    // Radial gradient from white center to transparent edge
+    const fireGradient = fireCtx.createRadialGradient(
+      fireSize / 2, fireSize / 2, 0,
+      fireSize / 2, fireSize / 2, fireSize / 2
+    );
+    fireGradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    fireGradient.addColorStop(0.2, 'rgba(255, 200, 50, 1)');
+    fireGradient.addColorStop(0.5, 'rgba(255, 100, 20, 0.8)');
+    fireGradient.addColorStop(0.8, 'rgba(200, 50, 10, 0.3)');
+    fireGradient.addColorStop(1, 'rgba(100, 20, 5, 0)');
+
+    fireCtx.fillStyle = fireGradient;
+    fireCtx.fillRect(0, 0, fireSize, fireSize);
+    fireTex.update();
+    this.fireTexture = fireTex;
+
+    // Create smoke texture - soft gray blob
+    const smokeSize = 128;
+    const smokeTex = new DynamicTexture('smokeTexture', smokeSize, this.scene, false);
+    const smokeCtx = smokeTex.getContext();
+
+    const smokeGradient = smokeCtx.createRadialGradient(
+      smokeSize / 2, smokeSize / 2, 0,
+      smokeSize / 2, smokeSize / 2, smokeSize / 2
+    );
+    smokeGradient.addColorStop(0, 'rgba(80, 80, 80, 0.8)');
+    smokeGradient.addColorStop(0.4, 'rgba(60, 60, 60, 0.5)');
+    smokeGradient.addColorStop(0.7, 'rgba(40, 40, 40, 0.2)');
+    smokeGradient.addColorStop(1, 'rgba(20, 20, 20, 0)');
+
+    smokeCtx.fillStyle = smokeGradient;
+    smokeCtx.fillRect(0, 0, smokeSize, smokeSize);
+    smokeTex.update();
+    this.smokeTexture = smokeTex;
+
+    // Create spark texture - bright point
+    const sparkSize = 32;
+    const sparkTex = new DynamicTexture('sparkTexture', sparkSize, this.scene, false);
+    const sparkCtx = sparkTex.getContext();
+
+    const sparkGradient = sparkCtx.createRadialGradient(
+      sparkSize / 2, sparkSize / 2, 0,
+      sparkSize / 2, sparkSize / 2, sparkSize / 2
+    );
+    sparkGradient.addColorStop(0, 'rgba(255, 255, 200, 1)');
+    sparkGradient.addColorStop(0.3, 'rgba(255, 200, 100, 0.8)');
+    sparkGradient.addColorStop(0.6, 'rgba(255, 150, 50, 0.3)');
+    sparkGradient.addColorStop(1, 'rgba(255, 100, 0, 0)');
+
+    sparkCtx.fillStyle = sparkGradient;
+    sparkCtx.fillRect(0, 0, sparkSize, sparkSize);
+    sparkTex.update();
+    this.sparkTexture = sparkTex;
   }
 
   /**
@@ -695,6 +767,7 @@ export class BuildingDamage {
 
     // === CORE FIREBALL - Bright white/yellow center ===
     const coreFire = new ParticleSystem(`explosion_core_${Date.now()}`, particleCount, this.scene);
+    coreFire.particleTexture = this.fireTexture;
     coreFire.createSphereEmitter(baseSize * 0.3);
 
     // Blazing hot core colors - white to yellow
@@ -726,6 +799,7 @@ export class BuildingDamage {
 
     // === OUTER FLAMES - Orange/red billowing fire ===
     const outerFlames = new ParticleSystem(`explosion_flames_${Date.now()}`, particleCount * 1.5, this.scene);
+    outerFlames.particleTexture = this.fireTexture;
     outerFlames.createSphereEmitter(baseSize * 0.8);
 
     // Classic fire colors
@@ -756,6 +830,7 @@ export class BuildingDamage {
 
     // === DARK SMOKE - Rising black/gray plume ===
     const smoke = new ParticleSystem(`explosion_smoke_${Date.now()}`, particleCount, this.scene);
+    smoke.particleTexture = this.smokeTexture;
     smoke.createSphereEmitter(baseSize);
 
     // Dark smoke colors
@@ -785,6 +860,7 @@ export class BuildingDamage {
 
     // === SPARKS & EMBERS - Flying hot particles ===
     const sparks = new ParticleSystem(`explosion_sparks_${Date.now()}`, particleCount * 0.5, this.scene);
+    sparks.particleTexture = this.sparkTexture;
     sparks.createSphereEmitter(baseSize * 0.5);
 
     // Hot ember colors
@@ -1289,6 +1365,11 @@ export class BuildingDamage {
       explosion.sparks.dispose();
     }
     this.explosions = [];
+
+    // Dispose particle textures
+    if (this.fireTexture) this.fireTexture.dispose();
+    if (this.smokeTexture) this.smokeTexture.dispose();
+    if (this.sparkTexture) this.sparkTexture.dispose();
 
     this.collapsingBuildings = [];
     this.buildingStructures.clear();
