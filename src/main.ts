@@ -310,8 +310,11 @@ class Game {
     const buildings = this.city.getBuildings();
     this.enemy.update(deltaTime, playerPos, buildings);
 
-    // If locked on, check heat vision damage
+    // If locked on, check heat vision damage and update camera tracking
     if (this.isLockedOn && this.enemy.isAlive()) {
+      // Pass enemy position to camera for tracking
+      this.player.setLockOnTarget(this.enemy.getPosition());
+
       if (input.heatVisionHeld) {
         // Damage enemy with heat vision when locked on
         const heatVisionDamage = 30 * deltaTime;  // DPS when using heat vision
@@ -321,6 +324,10 @@ class Game {
       // Release lock-on if enemy dies
       this.isLockedOn = false;
       this.enemy.setTargeted(false);
+      this.player.setLockOnTarget(null);
+    } else {
+      // Not locked on - clear target
+      this.player.setLockOnTarget(null);
     }
     t1 = performance.now();
     this.perfTimings.enemy += t1 - t0;

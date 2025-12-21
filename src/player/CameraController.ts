@@ -56,6 +56,10 @@ export class CameraController {
   private flightStopEffect: number = 0; // 0-1, decays over time
   private flightStopFOVBoost: number = 0;
 
+  // Lock-on tracking
+  private lockOnTarget: Vector3 | null = null;
+  private lockOnSmooth: number = 0; // 0-1 interpolation for smooth transition
+
   constructor(camera: FreeCamera) {
     this.camera = camera;
     this.cameraPosition = camera.position.clone();
@@ -81,6 +85,14 @@ export class CameraController {
    */
   public setSpeed(speed: number): void {
     this.speed = speed;
+  }
+
+  /**
+   * Sets lock-on target position (null to disable)
+   * Camera will track between player and target
+   */
+  public setLockOnTarget(target: Vector3 | null): void {
+    this.lockOnTarget = target;
   }
 
   /**
@@ -172,7 +184,30 @@ export class CameraController {
 
     // Look at target (slightly ahead of player)
     const lookAhead = this.targetForward.scale(this.speed * 0.05);
-    const lookTarget = this.targetPosition.add(new Vector3(0, 1, 0)).add(lookAhead);
+    let lookTarget = this.targetPosition.add(new Vector3(0, 1, 0)).add(lookAhead);
+
+    // Lock-on tracking: smoothly transition look target to enemy
+    if (this.lockOnTarget) {
+      // Smoothly ramp up lock-on blend
+      this.lockOnSmooth = Math.min(1, this.lockOnSmooth + deltaTime * 3);
+
+      // Calculate look target between player and enemy (weighted toward enemy)
+      const toEnemy = this.lockOnTarget.subtract(this.targetPosition);
+      const midPoint = this.targetPosition.add(toEnemy.scale(0.6)); // Look 60% toward enemy
+
+      // Blend between normal look and lock-on look
+      lookTarget = Vector3.Lerp(lookTarget, midPoint, this.lockOnSmooth * 0.8);
+
+      // Position camera to better see both player and enemy
+      // Offset camera to the side for better view of both
+      const perpendicular = Vector3.Cross(toEnemy.normalizeToNew(), Vector3.Up()).normalize();
+      const sideOffset = perpendicular.scale(3 * this.lockOnSmooth);
+      this.cameraPosition.addInPlace(sideOffset.scale(deltaTime * 2));
+    } else {
+      // Smoothly ramp down lock-on blend
+      this.lockOnSmooth = Math.max(0, this.lockOnSmooth - deltaTime * 4);
+    }
+
     this.camera.setTarget(lookTarget);
   }
 

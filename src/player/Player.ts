@@ -731,6 +731,14 @@ export class Player {
     this.cameraController.addShake(intensity);
   }
 
+  /**
+   * Sets lock-on target for camera tracking
+   * Camera will look towards the target while still following player
+   */
+  public setLockOnTarget(target: Vector3 | null): void {
+    this.cameraController.setLockOnTarget(target);
+  }
+
   public isGrounded(): boolean {
     return this.physics.isGrounded;
   }
