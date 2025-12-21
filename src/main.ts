@@ -104,9 +104,20 @@ class Game {
     );
 
     // Connect alien ship to damage buildings in beam zone
+    // Use horizontal distance check and direct impact damage for more reliable destruction
     this.alienShip.setOnBuildingDamage((position, radius, damage) => {
       const buildings = this.city.getBuildings();
-      this.buildingDamage.applyShockwaveDamage(position, radius, damage, buildings);
+      for (const building of buildings) {
+        const dx = building.position.x - position.x;
+        const dz = building.position.z - position.z;
+        const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+
+        if (horizontalDist < radius) {
+          // Apply high-speed impact damage to tear chunks off
+          const impactSpeed = 40 + damage * (1 - horizontalDist / radius);
+          this.buildingDamage.applyImpactDamage(building, position, impactSpeed);
+        }
+      }
     });
 
     // Initialize birds

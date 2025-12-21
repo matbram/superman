@@ -17,8 +17,8 @@ import { GlowLayer } from '@babylonjs/core/Layers/glowLayer';
 // Ship constants
 const SHIP_HEIGHT = 250;  // Height above ground
 const SHIP_SIZE = 80;  // Diameter of ship
-const BEAM_RADIUS = 35;  // Radius of the gravity beam effect zone
-const BEAM_DAMAGE_RADIUS = 30;  // Buildings within this radius get damaged
+const BEAM_RADIUS = 45;  // Radius of the gravity beam effect zone
+const BEAM_DAMAGE_RADIUS = 50;  // Buildings within this radius get damaged
 
 // Gravity beam oscillation
 const GRAVITY_CYCLE_TIME = 2.5;  // Seconds for one up/down cycle
@@ -464,11 +464,12 @@ export class AlienShip {
     }
 
     // Apply continuous damage to buildings in beam zone
+    // Use high damage value to ensure buildings get destroyed
     if (this.onBuildingDamage) {
       this.onBuildingDamage(
         this.gravityZone.center,
         BEAM_DAMAGE_RADIUS,
-        50 * deltaTime  // Continuous damage
+        200 * deltaTime  // High continuous damage to tear buildings apart
       );
     }
   }
