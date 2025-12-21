@@ -486,6 +486,10 @@ class Game {
     if (input.pausePressed && !this.isPaused) {
       console.log('[Game] Pause triggered!');
       this.togglePause();
+      // Don't process menu input on the same frame we entered pause
+      // (pausePressed is still true and would immediately close the menu)
+      this.sceneContext.scene.render();
+      return;
     }
 
     // If paused, handle menu input and render only
