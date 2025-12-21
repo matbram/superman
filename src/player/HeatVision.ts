@@ -38,8 +38,8 @@ export class HeatVision {
   private isActive: boolean = false;
   private damageAccumulator: number = 0;
 
-  // Callbacks
-  private onBuildingDamage: ((building: AbstractMesh, position: Vector3, damage: number) => void) | null = null;
+  // Callbacks - now includes force direction for force field effect
+  private onBuildingDamage: ((building: AbstractMesh, position: Vector3, damage: number, forceDirection?: Vector3) => void) | null = null;
 
   constructor(scene: Scene, physicsManager: PhysicsManager) {
     this.scene = scene;
@@ -107,9 +107,9 @@ export class HeatVision {
   }
 
   /**
-   * Sets callback for building damage
+   * Sets callback for building damage with force field effect
    */
-  public setOnBuildingDamage(callback: (building: AbstractMesh, position: Vector3, damage: number) => void): void {
+  public setOnBuildingDamage(callback: (building: AbstractMesh, position: Vector3, damage: number, forceDirection?: Vector3) => void): void {
     this.onBuildingDamage = callback;
   }
 
@@ -197,8 +197,30 @@ export class HeatVision {
         // Deal damage frequently for massive destruction
         if (this.damageAccumulator >= 50) {
           if (this.onBuildingDamage) {
-            // Pass high damage value to trigger full building destruction
-            this.onBuildingDamage(rayResult.mesh, hitPoint, this.damageAccumulator * 2);
+            // DEVASTATING FORCE FIELD - blows everything across the level
+            // Force direction is where the beam is pointing
+            const forceDirection = aimDirection.scale(300);  // Massive force
+
+            // Main impact with force field explosion
+            this.onBuildingDamage(rayResult.mesh, hitPoint, this.damageAccumulator * 2, forceDirection);
+
+            // Radial blast wave that pushes everything outward
+            const splashRadius = 60;
+            const splashDamage = 120;
+            const numAngles = 8;
+            for (let i = 0; i < numAngles; i++) {
+              const angle = (i / numAngles) * Math.PI * 2;
+              const splashPos = hitPoint.clone();
+              splashPos.x += Math.cos(angle) * splashRadius * 0.5;
+              splashPos.z += Math.sin(angle) * splashRadius * 0.5;
+              // Powerful radial force - launches debris across the level
+              const radialForce = new Vector3(
+                Math.cos(angle) * 200,
+                80,  // Strong upward force
+                Math.sin(angle) * 200
+              );
+              this.onBuildingDamage(rayResult.mesh, splashPos, splashDamage, radialForce);
+            }
           }
           this.damageAccumulator = 0;
         }

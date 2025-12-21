@@ -164,9 +164,14 @@ class Game {
       this.buildingDamage.applyImpactDamage(buildingMesh, impactPosition, speed);
     });
 
-    // Connect heat vision to damage system
-    this.player.setOnHeatVisionDamage((building, position, damage) => {
+    // Connect heat vision to damage system with force field effect
+    this.player.setOnHeatVisionDamage((building, position, damage, forceDirection) => {
       this.buildingDamage.applyImpactDamage(building, position, damage);
+
+      // Apply devastating force field effect - blows debris across the level
+      if (forceDirection) {
+        this.buildingDamage.applyForceToDebris(position, forceDirection, 60);
+      }
     });
 
     // Connect building damage camera shake to player camera (distance-based)

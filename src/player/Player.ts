@@ -797,9 +797,9 @@ export class Player {
   }
 
   /**
-   * Sets callback for heat vision building damage
+   * Sets callback for heat vision building damage with force field effect
    */
-  public setOnHeatVisionDamage(callback: (building: any, position: Vector3, damage: number) => void): void {
+  public setOnHeatVisionDamage(callback: (building: any, position: Vector3, damage: number, forceDirection?: Vector3) => void): void {
     this.heatVision.setOnBuildingDamage(callback);
   }
 
