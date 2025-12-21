@@ -12,7 +12,6 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
-import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
 
 // Debris constants - optimized for performance
 const MAX_DEBRIS_PIECES = 50;  // Low cap for better framerate
@@ -145,57 +144,19 @@ export class BuildingDamage {
    * Creates procedural textures for particle effects
    */
   private createParticleTextures(): void {
-    // Create fire/explosion texture - simple white circle that gets colored by particle system
-    const fireSize = 64;
-    const fireTex = new DynamicTexture('fireTexture', fireSize, this.scene, false);
-    fireTex.hasAlpha = true;
-    const fireCtx = fireTex.getContext();
+    // Use a simple white circle as base64 PNG - this is the most reliable approach
+    // 32x32 white circle with soft edges
+    const circleDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAhklEQVRYR+2WwQ3AIAwD89+hbMImbMImMAmb0A0CE9RKVaWq4kFCvhw+7ARj8rD4fKYABShAAQr8K4C1lpN0s/deJ9dZ3ntNAV0A1xZKKXVybXNOOwCr9yHQNMYcJDrnnBMARqC11kGic0qJAIgZKKXUQaKjlHT/CUavA6xFLBz/GihAAQpQgAJ/E/gABfMwIY0lPj8AAAAASUVORK5CYII=';
 
-    // Clear with transparent
-    fireCtx.clearRect(0, 0, fireSize, fireSize);
+    // Create texture from data URL
+    this.fireTexture = new Texture(circleDataUrl, this.scene, false, true, Texture.BILINEAR_SAMPLINGMODE);
+    this.fireTexture.hasAlpha = true;
 
-    // Draw a simple radial gradient circle
-    const centerX = fireSize / 2;
-    const centerY = fireSize / 2;
-    const radius = fireSize / 2;
+    // Smoke and sparks use same texture
+    this.smokeTexture = this.fireTexture;
+    this.sparkTexture = this.fireTexture;
 
-    // Draw concentric circles with decreasing opacity for soft edge
-    for (let r = radius; r > 0; r -= 1) {
-      const alpha = (r / radius);  // Fade from center
-      const brightness = Math.min(255, 255 * (r / radius) + 100);
-      fireCtx.beginPath();
-      fireCtx.arc(centerX, centerY, r, 0, Math.PI * 2);
-      fireCtx.fillStyle = `rgba(${brightness}, ${brightness}, ${brightness}, ${alpha})`;
-      fireCtx.fill();
-    }
-
-    fireTex.update();
-    this.fireTexture = fireTex;
-
-    // Smoke uses same texture
-    this.smokeTexture = fireTex;
-
-    // Spark texture - smaller, brighter
-    const sparkSize = 32;
-    const sparkTex = new DynamicTexture('sparkTexture', sparkSize, this.scene, false);
-    sparkTex.hasAlpha = true;
-    const sparkCtx = sparkTex.getContext();
-
-    sparkCtx.clearRect(0, 0, sparkSize, sparkSize);
-
-    // Bright center point
-    for (let r = sparkSize / 2; r > 0; r -= 1) {
-      const alpha = (r / (sparkSize / 2));
-      sparkCtx.beginPath();
-      sparkCtx.arc(sparkSize / 2, sparkSize / 2, r, 0, Math.PI * 2);
-      sparkCtx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-      sparkCtx.fill();
-    }
-
-    sparkTex.update();
-    this.sparkTexture = sparkTex;
-
-    console.log('[BuildingDamage] Particle textures created');
+    console.log('[BuildingDamage] Particle textures created from data URL');
   }
 
   /**
@@ -1361,10 +1322,8 @@ export class BuildingDamage {
     }
     this.explosions = [];
 
-    // Dispose particle textures
+    // Dispose particle texture (all share the same texture)
     if (this.fireTexture) this.fireTexture.dispose();
-    if (this.smokeTexture) this.smokeTexture.dispose();
-    if (this.sparkTexture) this.sparkTexture.dispose();
 
     this.collapsingBuildings = [];
     this.buildingStructures.clear();
