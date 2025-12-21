@@ -36,6 +36,8 @@ export interface InputState {
   // Menu navigation (only used when paused)
   menuUp: boolean;        // D-pad up / Arrow up
   menuDown: boolean;      // D-pad down / Arrow down
+  menuLeft: boolean;      // D-pad left / Arrow left - decrease value
+  menuRight: boolean;     // D-pad right / Arrow right - increase value
   menuSelect: boolean;    // A button / Enter
   menuBack: boolean;      // B button / Escape (when in submenu)
 }
@@ -60,6 +62,8 @@ export function createEmptyInputState(): InputState {
     pausePressed: false,
     menuUp: false,
     menuDown: false,
+    menuLeft: false,
+    menuRight: false,
     menuSelect: false,
     menuBack: false,
   };
@@ -85,6 +89,8 @@ export const KeyboardBindings = {
   // Menu navigation
   menuUp: ['ArrowUp'],
   menuDown: ['ArrowDown'],
+  menuLeft: ['ArrowLeft'],
+  menuRight: ['ArrowRight'],
   menuSelect: ['Enter', 'Space'],
   menuBack: ['Backspace'],
 } as const;
@@ -116,6 +122,8 @@ export const GamepadBindings = {
   // D-pad for menu navigation
   dpadUp: 12,
   dpadDown: 13,
+  dpadLeft: 14,
+  dpadRight: 15,
 
   // Menu actions
   select: 0,            // A button - select menu item

@@ -240,6 +240,13 @@
         padding: 12px;
         background: rgba(255, 255, 255, 0.05);
         border-radius: 6px;
+        border: 2px solid transparent;
+        transition: all 0.15s;
+      }
+
+      #settingsSubmenu .setting-group.selected {
+        background: rgba(255, 136, 68, 0.15);
+        border-color: #ff8844;
       }
 
       #settingsSubmenu .setting-label {
@@ -487,6 +494,8 @@
       <div class="menu-hint">
         <span id="menuHintKb">↑↓ Navigate • Enter Select • ESC Close</span>
         <span id="menuHintPad" style="display:none">D-Pad Navigate • A Select • B Back</span>
+        <span id="settingsHintKb" style="display:none">↑↓ Navigate • ←→ Adjust • Backspace Back</span>
+        <span id="settingsHintPad" style="display:none">D-Pad ↑↓ Navigate • D-Pad ←→ Adjust • B Back</span>
       </div>
     </div>
 

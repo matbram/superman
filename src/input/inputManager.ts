@@ -203,21 +203,29 @@ export class InputManager {
     // Menu navigation (D-pad and face buttons)
     const dpadUpButton = gamepad.buttons[GamepadBindings.dpadUp];
     const dpadDownButton = gamepad.buttons[GamepadBindings.dpadDown];
+    const dpadLeftButton = gamepad.buttons[GamepadBindings.dpadLeft];
+    const dpadRightButton = gamepad.buttons[GamepadBindings.dpadRight];
     const selectButton = gamepad.buttons[GamepadBindings.select];
     const backButton = gamepad.buttons[GamepadBindings.back];
 
     const wasDpadUpPressed = this.previousGamepadButtons[GamepadBindings.dpadUp] ?? false;
     const wasDpadDownPressed = this.previousGamepadButtons[GamepadBindings.dpadDown] ?? false;
+    const wasDpadLeftPressed = this.previousGamepadButtons[GamepadBindings.dpadLeft] ?? false;
+    const wasDpadRightPressed = this.previousGamepadButtons[GamepadBindings.dpadRight] ?? false;
     const wasSelectPressed = this.previousGamepadButtons[GamepadBindings.select] ?? false;
     const wasBackPressed = this.previousGamepadButtons[GamepadBindings.back] ?? false;
 
     const dpadUpHeld = dpadUpButton?.pressed ?? false;
     const dpadDownHeld = dpadDownButton?.pressed ?? false;
+    const dpadLeftHeld = dpadLeftButton?.pressed ?? false;
+    const dpadRightHeld = dpadRightButton?.pressed ?? false;
     const selectHeld = selectButton?.pressed ?? false;
     const backHeld = backButton?.pressed ?? false;
 
     this.currentState.menuUp = dpadUpHeld && !wasDpadUpPressed;
     this.currentState.menuDown = dpadDownHeld && !wasDpadDownPressed;
+    this.currentState.menuLeft = dpadLeftHeld && !wasDpadLeftPressed;
+    this.currentState.menuRight = dpadRightHeld && !wasDpadRightPressed;
     this.currentState.menuSelect = selectHeld && !wasSelectPressed;
     this.currentState.menuBack = backHeld && !wasBackPressed;
 
@@ -297,6 +305,12 @@ export class InputManager {
     }
     if (!this.currentState.menuDown) {
       this.currentState.menuDown = this.isKeyPressed(KeyboardBindings.menuDown);
+    }
+    if (!this.currentState.menuLeft) {
+      this.currentState.menuLeft = this.isKeyPressed(KeyboardBindings.menuLeft);
+    }
+    if (!this.currentState.menuRight) {
+      this.currentState.menuRight = this.isKeyPressed(KeyboardBindings.menuRight);
     }
     if (!this.currentState.menuSelect) {
       this.currentState.menuSelect = this.isKeyPressed(KeyboardBindings.menuSelect);

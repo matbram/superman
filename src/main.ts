@@ -55,10 +55,23 @@ class Game {
   private debrisCountElement: HTMLElement;
   private menuHintKb: HTMLElement;
   private menuHintPad: HTMLElement;
+  private settingsHintKb: HTMLElement;
+  private settingsHintPad: HTMLElement;
   private isPaused: boolean = false;
   private inSettingsSubmenu: boolean = false;
   private selectedMenuIndex: number = 0;
   private menuItems: HTMLElement[] = [];
+
+  // Settings navigation
+  private selectedSettingIndex: number = 0;
+  private settingsControls: {
+    input: HTMLInputElement;
+    valueDisplay: HTMLElement;
+    container: HTMLElement;
+    step: number;
+    isCheckbox: boolean;
+  }[] = [];
+  private updateSettingsFromInputs: () => void = () => {};
 
   // Performance tracking
   private lastPerfLogTime: number = 0;
@@ -204,6 +217,8 @@ class Game {
     this.debrisCountElement = document.getElementById('debrisCount')!;
     this.menuHintKb = document.getElementById('menuHintKb')!;
     this.menuHintPad = document.getElementById('menuHintPad')!;
+    this.settingsHintKb = document.getElementById('settingsHintKb')!;
+    this.settingsHintPad = document.getElementById('settingsHintPad')!;
     this.menuItems = Array.from(this.mainMenu.querySelectorAll('.menu-item'));
     this.setupPauseMenu();
 
@@ -254,6 +269,17 @@ class Game {
     const valueCleanupDist = document.getElementById('valueCleanupDist')!;
     const valueSettleTime = document.getElementById('valueSettleTime')!;
 
+    // Build settings controls array for controller navigation
+    this.settingsControls = [
+      { input: maxDebrisInput, valueDisplay: valueMaxDebris, container: maxDebrisInput.closest('.setting-group')!, step: 5, isCheckbox: false },
+      { input: perBuildingInput, valueDisplay: valuePerBuilding, container: perBuildingInput.closest('.setting-group')!, step: 1, isCheckbox: false },
+      { input: minSizeInput, valueDisplay: valueMinSize, container: minSizeInput.closest('.setting-group')!, step: 0.5, isCheckbox: false },
+      { input: maxSizeInput, valueDisplay: valueMaxSize, container: maxSizeInput.closest('.setting-group')!, step: 0.5, isCheckbox: false },
+      { input: cleanupDistInput, valueDisplay: valueCleanupDist, container: cleanupDistInput.closest('.setting-group')!, step: 10, isCheckbox: false },
+      { input: settleTimeInput, valueDisplay: valueSettleTime, container: settleTimeInput.closest('.setting-group')!, step: 1, isCheckbox: false },
+      { input: explosionsInput, valueDisplay: explosionsInput, container: explosionsInput.closest('.setting-group')!, step: 1, isCheckbox: true },
+    ];
+
     // Helper to update settings
     const updateSettings = () => {
       const newSettings: Partial<DebrisSettings> = {
@@ -275,6 +301,9 @@ class Game {
       valueCleanupDist.textContent = cleanupDistInput.value;
       valueSettleTime.textContent = settleTimeInput.value;
     };
+
+    // Store updateSettings for controller use
+    this.updateSettingsFromInputs = updateSettings;
 
     // Wire up slider inputs
     maxDebrisInput.addEventListener('input', updateSettings);
@@ -330,6 +359,40 @@ class Game {
     this.inSettingsSubmenu = true;
     this.mainMenu.style.display = 'none';
     this.settingsSubmenu.classList.add('visible');
+    this.selectedSettingIndex = 0;
+    this.updateSettingSelection();
+  }
+
+  /**
+   * Updates visual selection of settings controls
+   */
+  private updateSettingSelection(): void {
+    this.settingsControls.forEach((control, index) => {
+      control.container.classList.toggle('selected', index === this.selectedSettingIndex);
+    });
+  }
+
+  /**
+   * Adjusts the currently selected setting value
+   */
+  private adjustSelectedSetting(direction: number): void {
+    const control = this.settingsControls[this.selectedSettingIndex];
+    if (!control) return;
+
+    if (control.isCheckbox) {
+      // Toggle checkbox
+      control.input.checked = !control.input.checked;
+    } else {
+      // Adjust slider value
+      const currentValue = parseFloat(control.input.value);
+      const min = parseFloat(control.input.min);
+      const max = parseFloat(control.input.max);
+      const newValue = Math.max(min, Math.min(max, currentValue + direction * control.step));
+      control.input.value = newValue.toString();
+    }
+
+    // Trigger update
+    this.updateSettingsFromInputs();
   }
 
   /**
@@ -414,13 +477,46 @@ class Game {
    * Handles menu navigation input
    */
   private handleMenuInput(input: ReturnType<typeof this.inputManager.update>): void {
-    // Update hint based on input device
+    // Update hint based on input device and current menu
     const hasGamepad = this.inputManager.hasGamepad();
-    this.menuHintKb.style.display = hasGamepad ? 'none' : 'inline';
-    this.menuHintPad.style.display = hasGamepad ? 'inline' : 'none';
+    if (this.inSettingsSubmenu) {
+      this.menuHintKb.style.display = 'none';
+      this.menuHintPad.style.display = 'none';
+      this.settingsHintKb.style.display = hasGamepad ? 'none' : 'inline';
+      this.settingsHintPad.style.display = hasGamepad ? 'inline' : 'none';
+    } else {
+      this.menuHintKb.style.display = hasGamepad ? 'none' : 'inline';
+      this.menuHintPad.style.display = hasGamepad ? 'inline' : 'none';
+      this.settingsHintKb.style.display = 'none';
+      this.settingsHintPad.style.display = 'none';
+    }
 
     if (this.inSettingsSubmenu) {
-      // In settings submenu - B/Backspace goes back
+      // In settings submenu - navigate and adjust settings
+      if (input.menuUp) {
+        this.selectedSettingIndex = (this.selectedSettingIndex - 1 + this.settingsControls.length) % this.settingsControls.length;
+        this.updateSettingSelection();
+      }
+      if (input.menuDown) {
+        this.selectedSettingIndex = (this.selectedSettingIndex + 1) % this.settingsControls.length;
+        this.updateSettingSelection();
+      }
+      // D-pad left/right adjusts the selected setting
+      if (input.menuLeft) {
+        this.adjustSelectedSetting(-1);
+      }
+      if (input.menuRight) {
+        this.adjustSelectedSetting(1);
+      }
+      // A button toggles checkbox settings
+      if (input.menuSelect) {
+        const control = this.settingsControls[this.selectedSettingIndex];
+        if (control?.isCheckbox) {
+          control.input.checked = !control.input.checked;
+          this.updateSettingsFromInputs();
+        }
+      }
+      // B/Backspace goes back to main menu
       if (input.menuBack || input.pausePressed) {
         this.showMainMenu();
       }
