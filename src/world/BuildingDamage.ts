@@ -147,7 +147,8 @@ export class BuildingDamage {
   private createParticleTextures(): void {
     // Create fire/explosion texture - soft radial gradient
     const fireSize = 128;
-    const fireTex = new DynamicTexture('fireTexture', fireSize, this.scene, false);
+    const fireTex = new DynamicTexture('fireTexture', fireSize, this.scene, true);  // generateMipMaps = true
+    fireTex.hasAlpha = true;
     const fireCtx = fireTex.getContext();
 
     // Radial gradient from white center to transparent edge
@@ -168,7 +169,8 @@ export class BuildingDamage {
 
     // Create smoke texture - soft gray blob
     const smokeSize = 128;
-    const smokeTex = new DynamicTexture('smokeTexture', smokeSize, this.scene, false);
+    const smokeTex = new DynamicTexture('smokeTexture', smokeSize, this.scene, true);
+    smokeTex.hasAlpha = true;
     const smokeCtx = smokeTex.getContext();
 
     const smokeGradient = smokeCtx.createRadialGradient(
@@ -187,7 +189,8 @@ export class BuildingDamage {
 
     // Create spark texture - bright point
     const sparkSize = 32;
-    const sparkTex = new DynamicTexture('sparkTexture', sparkSize, this.scene, false);
+    const sparkTex = new DynamicTexture('sparkTexture', sparkSize, this.scene, true);
+    sparkTex.hasAlpha = true;
     const sparkCtx = sparkTex.getContext();
 
     const sparkGradient = sparkCtx.createRadialGradient(
@@ -203,6 +206,8 @@ export class BuildingDamage {
     sparkCtx.fillRect(0, 0, sparkSize, sparkSize);
     sparkTex.update();
     this.sparkTexture = sparkTex;
+
+    console.log('[BuildingDamage] Particle textures created');
   }
 
   /**
@@ -751,6 +756,8 @@ export class BuildingDamage {
    * @param intensity How dramatic (0.5 = subtle, 1 = normal, 2 = MAXIMUM BAYHEM)
    */
   private spawnExplosion(position: Vector3, size: number = 1, intensity: number = 1): void {
+    console.log('[EXPLOSION] Spawning at', position.toString(), 'size:', size, 'intensity:', intensity);
+
     // Cap explosions for performance
     if (this.explosions.length >= MAX_EXPLOSIONS) {
       const oldest = this.explosions.shift();
