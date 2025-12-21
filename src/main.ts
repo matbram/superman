@@ -48,10 +48,17 @@ class Game {
   private instructionsElement: HTMLElement;
   private startButton: HTMLElement;
 
-  // Settings/Pause panel
-  private settingsPanel: HTMLElement;
+  // Pause Menu
+  private pauseMenu: HTMLElement;
+  private mainMenu: HTMLElement;
+  private settingsSubmenu: HTMLElement;
   private debrisCountElement: HTMLElement;
+  private menuHintKb: HTMLElement;
+  private menuHintPad: HTMLElement;
   private isPaused: boolean = false;
+  private inSettingsSubmenu: boolean = false;
+  private selectedMenuIndex: number = 0;
+  private menuItems: HTMLElement[] = [];
 
   // Performance tracking
   private lastPerfLogTime: number = 0;
@@ -190,10 +197,15 @@ class Game {
     this.hud = new Hud();
     this.debugOverlay = new DebugOverlay();
 
-    // Initialize settings panel
-    this.settingsPanel = document.getElementById('settingsPanel')!;
+    // Initialize pause menu
+    this.pauseMenu = document.getElementById('pauseMenu')!;
+    this.mainMenu = document.getElementById('mainMenu')!;
+    this.settingsSubmenu = document.getElementById('settingsSubmenu')!;
     this.debrisCountElement = document.getElementById('debrisCount')!;
-    this.setupSettingsPanel();
+    this.menuHintKb = document.getElementById('menuHintKb')!;
+    this.menuHintPad = document.getElementById('menuHintPad')!;
+    this.menuItems = Array.from(this.mainMenu.querySelectorAll('.menu-item'));
+    this.setupPauseMenu();
 
     // Set up start button
     this.setupStartButton();
@@ -218,9 +230,9 @@ class Game {
   }
 
   /**
-   * Sets up the settings panel with real-time controls
+   * Sets up the pause menu with settings controls
    */
-  private setupSettingsPanel(): void {
+  private setupPauseMenu(): void {
     // Get all input elements
     const maxDebrisInput = document.getElementById('settingMaxDebris') as HTMLInputElement;
     const perBuildingInput = document.getElementById('settingPerBuilding') as HTMLInputElement;
@@ -260,7 +272,7 @@ class Game {
       valueSettleTime.textContent = settleTimeInput.value;
     };
 
-    // Wire up all inputs
+    // Wire up slider inputs
     maxDebrisInput.addEventListener('input', updateSettings);
     perBuildingInput.addEventListener('input', updateSettings);
     minSizeInput.addEventListener('input', updateSettings);
@@ -268,25 +280,160 @@ class Game {
     cleanupDistInput.addEventListener('input', updateSettings);
     settleTimeInput.addEventListener('input', updateSettings);
     explosionsInput.addEventListener('change', updateSettings);
+
+    // Wire up menu item clicks
+    this.menuItems.forEach((item, index) => {
+      item.addEventListener('click', () => {
+        this.selectedMenuIndex = index;
+        this.updateMenuSelection();
+        this.executeMenuAction(item.dataset.action || '');
+      });
+      item.addEventListener('mouseenter', () => {
+        this.selectedMenuIndex = index;
+        this.updateMenuSelection();
+      });
+    });
+
+    // Wire up back button
+    const backBtn = this.settingsSubmenu.querySelector('.back-btn');
+    if (backBtn) {
+      backBtn.addEventListener('click', () => this.showMainMenu());
+    }
   }
 
   /**
-   * Toggles pause state and shows/hides settings panel
+   * Updates visual selection of menu items
+   */
+  private updateMenuSelection(): void {
+    this.menuItems.forEach((item, index) => {
+      item.classList.toggle('selected', index === this.selectedMenuIndex);
+    });
+  }
+
+  /**
+   * Shows the main menu, hides settings
+   */
+  private showMainMenu(): void {
+    this.inSettingsSubmenu = false;
+    this.mainMenu.style.display = 'block';
+    this.settingsSubmenu.classList.remove('visible');
+  }
+
+  /**
+   * Shows the settings submenu
+   */
+  private showSettingsSubmenu(): void {
+    this.inSettingsSubmenu = true;
+    this.mainMenu.style.display = 'none';
+    this.settingsSubmenu.classList.add('visible');
+  }
+
+  /**
+   * Executes a menu action
+   */
+  private executeMenuAction(action: string): void {
+    switch (action) {
+      case 'resume':
+        this.togglePause();
+        break;
+      case 'settings':
+        this.showSettingsSubmenu();
+        break;
+      case 'restart':
+        this.restartGame();
+        break;
+    }
+  }
+
+  /**
+   * Restarts the game
+   */
+  private restartGame(): void {
+    // Hide pause menu
+    this.isPaused = false;
+    this.pauseMenu.classList.remove('visible');
+    this.showMainMenu();
+
+    // Reset player position
+    this.player.setPosition(this.city.getSpawnPosition());
+
+    // Clear all debris and effects
+    this.buildingDamage.dispose();
+    this.buildingDamage = new BuildingDamage(this.sceneContext.scene);
+
+    // Reconnect callbacks
+    this.buildingDamage.setOnCameraShake((intensity, _position) => {
+      this.player.addCameraShake(intensity * 4);
+    });
+
+    // Reset lock-on
+    this.isLockedOn = false;
+    this.enemy.setTargeted(false);
+    this.player.setLockOnTarget(null);
+
+    // Re-acquire pointer lock
+    this.inputManager.requestPointerLock();
+
+    console.log('Game restarted');
+  }
+
+  /**
+   * Toggles pause state and shows/hides pause menu
    */
   private togglePause(): void {
     this.isPaused = !this.isPaused;
 
     if (this.isPaused) {
-      this.settingsPanel.classList.add('visible');
-      // Release pointer lock when paused so user can interact with settings
+      this.pauseMenu.classList.add('visible');
+      this.showMainMenu();
+      this.selectedMenuIndex = 0;
+      this.updateMenuSelection();
+      // Release pointer lock when paused
       this.inputManager.releasePointerLock();
+      // Update hint based on input device
+      const hasGamepad = this.inputManager.hasGamepad();
+      this.menuHintKb.style.display = hasGamepad ? 'none' : 'inline';
+      this.menuHintPad.style.display = hasGamepad ? 'inline' : 'none';
     } else {
-      this.settingsPanel.classList.remove('visible');
+      this.pauseMenu.classList.remove('visible');
       // Re-acquire pointer lock when unpausing
       this.inputManager.requestPointerLock();
     }
+  }
 
-    console.log(this.isPaused ? 'Game paused' : 'Game resumed');
+  /**
+   * Handles menu navigation input
+   */
+  private handleMenuInput(input: ReturnType<typeof this.inputManager.update>): void {
+    // Update hint based on input device
+    const hasGamepad = this.inputManager.hasGamepad();
+    this.menuHintKb.style.display = hasGamepad ? 'none' : 'inline';
+    this.menuHintPad.style.display = hasGamepad ? 'inline' : 'none';
+
+    if (this.inSettingsSubmenu) {
+      // In settings submenu - B/Backspace goes back
+      if (input.menuBack || input.pausePressed) {
+        this.showMainMenu();
+      }
+    } else {
+      // In main menu - navigate and select
+      if (input.menuUp) {
+        this.selectedMenuIndex = (this.selectedMenuIndex - 1 + this.menuItems.length) % this.menuItems.length;
+        this.updateMenuSelection();
+      }
+      if (input.menuDown) {
+        this.selectedMenuIndex = (this.selectedMenuIndex + 1) % this.menuItems.length;
+        this.updateMenuSelection();
+      }
+      if (input.menuSelect) {
+        const action = this.menuItems[this.selectedMenuIndex].dataset.action || '';
+        this.executeMenuAction(action);
+      }
+      // ESC while in main menu closes pause
+      if (input.pausePressed) {
+        this.togglePause();
+      }
+    }
   }
 
   /**
@@ -321,20 +468,22 @@ class Game {
     // Update input (always, even when paused)
     const input = this.inputManager.update();
 
-    // Toggle pause/settings menu
-    if (input.pausePressed) {
-      this.togglePause();
-    }
-
     // Toggle debug overlay
     if (input.debugPressed) {
       this.debugOverlay.toggle();
     }
 
-    // If paused, only render and update UI, skip game logic
+    // If NOT paused and pause is pressed, enter pause mode
+    if (input.pausePressed && !this.isPaused) {
+      this.togglePause();
+    }
+
+    // If paused, handle menu input and render only
     if (this.isPaused) {
       // Update debris count display
       this.debrisCountElement.textContent = this.buildingDamage.getDebrisCount().toString();
+      // Handle menu navigation (including pause button to close or go back)
+      this.handleMenuInput(input);
       // Still render the scene (frozen)
       this.sceneContext.scene.render();
       return;

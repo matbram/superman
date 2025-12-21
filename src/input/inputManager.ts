@@ -177,6 +177,27 @@ export class InputManager {
     const pauseHeld = pauseButton?.pressed ?? false;
     this.currentState.pausePressed = pauseHeld && !wasPausePressed;
 
+    // Menu navigation (D-pad and face buttons)
+    const dpadUpButton = gamepad.buttons[GamepadBindings.dpadUp];
+    const dpadDownButton = gamepad.buttons[GamepadBindings.dpadDown];
+    const selectButton = gamepad.buttons[GamepadBindings.select];
+    const backButton = gamepad.buttons[GamepadBindings.back];
+
+    const wasDpadUpPressed = this.previousGamepadButtons[GamepadBindings.dpadUp] ?? false;
+    const wasDpadDownPressed = this.previousGamepadButtons[GamepadBindings.dpadDown] ?? false;
+    const wasSelectPressed = this.previousGamepadButtons[GamepadBindings.select] ?? false;
+    const wasBackPressed = this.previousGamepadButtons[GamepadBindings.back] ?? false;
+
+    const dpadUpHeld = dpadUpButton?.pressed ?? false;
+    const dpadDownHeld = dpadDownButton?.pressed ?? false;
+    const selectHeld = selectButton?.pressed ?? false;
+    const backHeld = backButton?.pressed ?? false;
+
+    this.currentState.menuUp = dpadUpHeld && !wasDpadUpPressed;
+    this.currentState.menuDown = dpadDownHeld && !wasDpadDownPressed;
+    this.currentState.menuSelect = selectHeld && !wasSelectPressed;
+    this.currentState.menuBack = backHeld && !wasBackPressed;
+
     // Store button states for next frame
     this.previousGamepadButtons = gamepad.buttons.map((b) => b.pressed);
   }
@@ -245,6 +266,20 @@ export class InputManager {
     // Pause toggle (Escape)
     if (!this.currentState.pausePressed) {
       this.currentState.pausePressed = this.isKeyPressed(KeyboardBindings.pause);
+    }
+
+    // Menu navigation (keyboard)
+    if (!this.currentState.menuUp) {
+      this.currentState.menuUp = this.isKeyPressed(KeyboardBindings.menuUp);
+    }
+    if (!this.currentState.menuDown) {
+      this.currentState.menuDown = this.isKeyPressed(KeyboardBindings.menuDown);
+    }
+    if (!this.currentState.menuSelect) {
+      this.currentState.menuSelect = this.isKeyPressed(KeyboardBindings.menuSelect);
+    }
+    if (!this.currentState.menuBack) {
+      this.currentState.menuBack = this.isKeyPressed(KeyboardBindings.menuBack);
     }
   }
 

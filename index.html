@@ -168,6 +168,142 @@
         margin-top: 10px;
       }
 
+      /* Pause Menu */
+      #pauseMenu {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.92);
+        color: #fff;
+        font-family: 'Segoe UI', Arial, sans-serif;
+        padding: 30px 40px;
+        border-radius: 12px;
+        z-index: 200;
+        display: none;
+        min-width: 400px;
+        border: 2px solid #ff4444;
+        text-align: center;
+      }
+
+      #pauseMenu.visible {
+        display: block;
+      }
+
+      #pauseMenu h2 {
+        color: #ff4444;
+        font-size: 28px;
+        margin: 0 0 25px 0;
+      }
+
+      #pauseMenu .menu-item {
+        padding: 15px 30px;
+        margin: 10px 0;
+        background: rgba(255, 255, 255, 0.1);
+        border: 2px solid transparent;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 18px;
+        transition: all 0.15s;
+      }
+
+      #pauseMenu .menu-item:hover,
+      #pauseMenu .menu-item.selected {
+        background: rgba(255, 68, 68, 0.3);
+        border-color: #ff4444;
+      }
+
+      #pauseMenu .menu-hint {
+        color: #888;
+        font-size: 12px;
+        margin-top: 20px;
+      }
+
+      /* Settings Submenu */
+      #settingsSubmenu {
+        display: none;
+      }
+
+      #settingsSubmenu.visible {
+        display: block;
+      }
+
+      #settingsSubmenu h3 {
+        color: #ff8844;
+        font-size: 20px;
+        margin-bottom: 20px;
+      }
+
+      #settingsSubmenu .setting-group {
+        text-align: left;
+        margin: 15px 0;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 6px;
+      }
+
+      #settingsSubmenu .setting-label {
+        color: #fff;
+        font-size: 14px;
+        font-weight: bold;
+        margin-bottom: 4px;
+      }
+
+      #settingsSubmenu .setting-desc {
+        color: #aaa;
+        font-size: 11px;
+        margin-bottom: 8px;
+      }
+
+      #settingsSubmenu .setting-control {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      #settingsSubmenu input[type="range"] {
+        flex: 1;
+        height: 6px;
+      }
+
+      #settingsSubmenu .setting-value {
+        color: #88ff88;
+        font-family: monospace;
+        font-size: 14px;
+        min-width: 40px;
+        text-align: right;
+      }
+
+      #settingsSubmenu .toggle-setting {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      #settingsSubmenu .back-btn {
+        margin-top: 20px;
+        padding: 12px 30px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 2px solid #888;
+        border-radius: 8px;
+        color: #fff;
+        cursor: pointer;
+        font-size: 14px;
+      }
+
+      #settingsSubmenu .back-btn:hover {
+        border-color: #ff4444;
+        background: rgba(255, 68, 68, 0.2);
+      }
+
+      #settingsSubmenu .debris-info {
+        margin-top: 15px;
+        padding-top: 15px;
+        border-top: 1px solid #444;
+        color: #88ff88;
+        font-family: monospace;
+      }
+
       #instructions {
         position: fixed;
         top: 50%;
@@ -270,55 +406,88 @@
 
     <div id="crosshair"></div>
 
-    <div id="settingsPanel">
-      <h3>⏸️ PAUSED - Settings</h3>
+    <!-- Pause Menu -->
+    <div id="pauseMenu">
+      <h2>⏸️ PAUSED</h2>
 
-      <div class="setting-row">
-        <label>Max Debris</label>
-        <input type="range" id="settingMaxDebris" min="5" max="100" value="20">
-        <span class="value-display" id="valueMaxDebris">20</span>
+      <!-- Main Menu -->
+      <div id="mainMenu">
+        <div class="menu-item selected" data-action="resume">▶️ Resume Game</div>
+        <div class="menu-item" data-action="settings">⚙️ Destruction Settings</div>
+        <div class="menu-item" data-action="restart">🔄 Restart Game</div>
       </div>
 
-      <div class="setting-row">
-        <label>Per Building</label>
-        <input type="range" id="settingPerBuilding" min="1" max="20" value="4">
-        <span class="value-display" id="valuePerBuilding">4</span>
+      <!-- Settings Submenu -->
+      <div id="settingsSubmenu">
+        <h3>💥 Destruction Settings</h3>
+
+        <div class="setting-group">
+          <div class="setting-label">Rubble Limit</div>
+          <div class="setting-desc">Maximum pieces of debris on screen. Lower = better performance.</div>
+          <div class="setting-control">
+            <input type="range" id="settingMaxDebris" min="5" max="100" value="20">
+            <span class="setting-value" id="valueMaxDebris">20</span>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Debris Per Hit</div>
+          <div class="setting-desc">How many chunks fly off when you smash into a building.</div>
+          <div class="setting-control">
+            <input type="range" id="settingPerBuilding" min="1" max="20" value="4">
+            <span class="setting-value" id="valuePerBuilding">4</span>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Chunk Size</div>
+          <div class="setting-desc">How big the flying debris pieces are (min to max).</div>
+          <div class="setting-control">
+            <input type="range" id="settingMinSize" min="1" max="10" step="0.5" value="3">
+            <span class="setting-value" id="valueMinSize">3</span>
+            <span style="color:#888">to</span>
+            <input type="range" id="settingMaxSize" min="2" max="20" step="0.5" value="8">
+            <span class="setting-value" id="valueMaxSize">8</span>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Cleanup Distance</div>
+          <div class="setting-desc">How far away debris must be before it disappears (in meters).</div>
+          <div class="setting-control">
+            <input type="range" id="settingCleanupDist" min="50" max="300" step="10" value="120">
+            <span class="setting-value" id="valueCleanupDist">120</span>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Debris Lifetime</div>
+          <div class="setting-desc">How many seconds debris stays on the ground before vanishing.</div>
+          <div class="setting-control">
+            <input type="range" id="settingSettleTime" min="1" max="30" value="5">
+            <span class="setting-value" id="valueSettleTime">5</span><span style="color:#888">s</span>
+          </div>
+        </div>
+
+        <div class="setting-group toggle-setting">
+          <div>
+            <div class="setting-label">🔥 Fiery Explosions</div>
+            <div class="setting-desc">Michael Bay-style fire and smoke effects.</div>
+          </div>
+          <input type="checkbox" id="settingExplosions" checked style="width:24px;height:24px;">
+        </div>
+
+        <div class="debris-info">
+          Currently Active: <span id="debrisCount">0</span> pieces
+        </div>
+
+        <div class="back-btn" data-action="back">← Back to Menu</div>
       </div>
 
-      <div class="setting-row">
-        <label>Min Size</label>
-        <input type="range" id="settingMinSize" min="1" max="10" step="0.5" value="3">
-        <span class="value-display" id="valueMinSize">3</span>
+      <div class="menu-hint">
+        <span id="menuHintKb">↑↓ Navigate • Enter Select • ESC Close</span>
+        <span id="menuHintPad" style="display:none">D-Pad Navigate • A Select • B Back</span>
       </div>
-
-      <div class="setting-row">
-        <label>Max Size</label>
-        <input type="range" id="settingMaxSize" min="2" max="20" step="0.5" value="8">
-        <span class="value-display" id="valueMaxSize">8</span>
-      </div>
-
-      <div class="setting-row">
-        <label>Cleanup Dist</label>
-        <input type="range" id="settingCleanupDist" min="50" max="300" step="10" value="120">
-        <span class="value-display" id="valueCleanupDist">120</span>
-      </div>
-
-      <div class="setting-row">
-        <label>Settle Time (s)</label>
-        <input type="range" id="settingSettleTime" min="1" max="30" value="5">
-        <span class="value-display" id="valueSettleTime">5</span>
-      </div>
-
-      <div class="toggle-row">
-        <label>Explosions</label>
-        <input type="checkbox" id="settingExplosions" checked>
-      </div>
-
-      <div class="debris-count">
-        Active Debris: <span id="debrisCount">0</span>
-      </div>
-
-      <div class="hint">ESC / Start to resume</div>
     </div>
 
     <div id="instructions">

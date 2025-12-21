@@ -32,6 +32,12 @@ export interface InputState {
   lockOnPressed: boolean; // Tab/Y - toggle lock-on to enemy
   debugPressed: boolean;  // Backtick - toggle debug
   pausePressed: boolean;  // Escape/Start - toggle pause menu
+
+  // Menu navigation (only used when paused)
+  menuUp: boolean;        // D-pad up / Arrow up
+  menuDown: boolean;      // D-pad down / Arrow down
+  menuSelect: boolean;    // A button / Enter
+  menuBack: boolean;      // B button / Escape (when in submenu)
 }
 
 /**
@@ -52,6 +58,10 @@ export function createEmptyInputState(): InputState {
     lockOnPressed: false,
     debugPressed: false,
     pausePressed: false,
+    menuUp: false,
+    menuDown: false,
+    menuSelect: false,
+    menuBack: false,
   };
 }
 
@@ -71,6 +81,12 @@ export const KeyboardBindings = {
   lockOn: ['Tab'],  // Tab to lock-on to enemy
   toggleDebug: ['Backquote'],
   pause: ['Escape'],  // Escape to pause/open settings
+
+  // Menu navigation
+  menuUp: ['ArrowUp'],
+  menuDown: ['ArrowDown'],
+  menuSelect: ['Enter', 'Space'],
+  menuBack: ['Backspace'],
 } as const;
 
 /**
@@ -96,6 +112,14 @@ export const GamepadBindings = {
 
   // Menu buttons
   pause: 9,             // Start/Menu (Xbox) / Options (PlayStation)
+
+  // D-pad for menu navigation
+  dpadUp: 12,
+  dpadDown: 13,
+
+  // Menu actions
+  select: 0,            // A button - select menu item
+  back: 1,              // B button - go back
 } as const;
 
 /**
