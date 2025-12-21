@@ -16,12 +16,12 @@ import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 
 // Enemy constants
 const ENEMY_MAX_HEALTH = 500;
-const ENEMY_FLIGHT_SPEED = 60;
-const ENEMY_ATTACK_RANGE = 80;
-const ENEMY_ATTACK_COOLDOWN = 2000;  // ms between attacks
-const ENEMY_PATROL_RADIUS = 150;  // Stay closer to player
-const ENEMY_HEIGHT_MIN = 15;  // Lower minimum height
-const ENEMY_HEIGHT_MAX = 80;
+const ENEMY_FLIGHT_SPEED = 80;  // Faster to keep up with player
+const ENEMY_ATTACK_RANGE = 100;  // Wider attack range
+const ENEMY_ATTACK_COOLDOWN = 1500;  // Attack more frequently
+const ENEMY_PATROL_RADIUS = 100;  // Stay closer to player
+const ENEMY_HEIGHT_MIN = 20;  // Above buildings
+const ENEMY_HEIGHT_MAX = 60;
 
 // AI behavior states
 enum EnemyState {
@@ -41,6 +41,7 @@ export class Enemy {
   private position: Vector3 = new Vector3(0, 60, 100);
   private velocity: Vector3 = Vector3.Zero();
   private targetPosition: Vector3 = Vector3.Zero();
+  private lastKnownPlayerPosition: Vector3 = Vector3.Zero();
 
   // Stats
   private health: number = ENEMY_MAX_HEALTH;
@@ -266,16 +267,17 @@ export class Enemy {
   }
 
   /**
-   * Sets a new random patrol target
+   * Sets a new random patrol target AROUND THE PLAYER (not origin)
    */
   private setNewPatrolTarget(): void {
     const angle = Math.random() * Math.PI * 2;
-    const radius = ENEMY_PATROL_RADIUS * (0.5 + Math.random() * 0.5);
+    const radius = ENEMY_PATROL_RADIUS * (0.3 + Math.random() * 0.7);
 
+    // Patrol around player position, not origin
     this.targetPosition = new Vector3(
-      Math.cos(angle) * radius,
+      this.lastKnownPlayerPosition.x + Math.cos(angle) * radius,
       ENEMY_HEIGHT_MIN + Math.random() * (ENEMY_HEIGHT_MAX - ENEMY_HEIGHT_MIN),
-      Math.sin(angle) * radius
+      this.lastKnownPlayerPosition.z + Math.sin(angle) * radius
     );
   }
 
@@ -341,6 +343,9 @@ export class Enemy {
    * Updates the enemy each frame
    */
   public update(deltaTime: number, playerPosition: Vector3, buildings: Mesh[]): void {
+    // Always track player position for patrol behavior
+    this.lastKnownPlayerPosition = playerPosition.clone();
+
     if (this.state === EnemyState.Dead) {
       // Fall when dead
       this.velocity.y += -20 * deltaTime;
@@ -428,19 +433,21 @@ export class Enemy {
    * Updates attack behavior
    */
   private updateAttack(deltaTime: number, buildings: Mesh[], now: number): void {
-    // Find nearest building
+    // Find nearest building in a very wide search area
     let nearestBuilding: Mesh | null = null;
     let nearestDist = Infinity;
+    const searchRange = 500;  // Search far for buildings
 
     for (const building of buildings) {
       const dist = Vector3.Distance(this.position, building.position);
-      if (dist < nearestDist && dist < ENEMY_ATTACK_RANGE * 2) {
+      if (dist < nearestDist && dist < searchRange) {
         nearestDist = dist;
         nearestBuilding = building;
       }
     }
 
     if (!nearestBuilding) {
+      // No buildings found, patrol around player
       this.state = EnemyState.Patrol;
       this.hideHeatVision();
       return;
@@ -452,11 +459,13 @@ export class Enemy {
     const horizDist = toBuilding.length();
 
     if (horizDist > ENEMY_ATTACK_RANGE) {
-      // Fly toward building
+      // Fly toward building at full speed
       const direction = toBuilding.normalize();
-      const targetVelocity = direction.scale(ENEMY_FLIGHT_SPEED * 0.8);
-      targetVelocity.y = (ENEMY_HEIGHT_MIN + 30 - this.position.y) * 2;
-      this.velocity = Vector3.Lerp(this.velocity, targetVelocity, 2 * deltaTime);
+      const targetVelocity = direction.scale(ENEMY_FLIGHT_SPEED);
+      // Fly at a good height for attacking
+      const targetHeight = Math.max(nearestBuilding.position.y + 20, ENEMY_HEIGHT_MIN);
+      targetVelocity.y = (targetHeight - this.position.y) * 3;
+      this.velocity = Vector3.Lerp(this.velocity, targetVelocity, 3 * deltaTime);
       this.hideHeatVision();
     } else {
       // In range - hover and attack
