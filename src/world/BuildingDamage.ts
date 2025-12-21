@@ -145,65 +145,53 @@ export class BuildingDamage {
    * Creates procedural textures for particle effects
    */
   private createParticleTextures(): void {
-    // Create fire/explosion texture - soft radial gradient
-    const fireSize = 128;
-    const fireTex = new DynamicTexture('fireTexture', fireSize, this.scene, true);  // generateMipMaps = true
+    // Create fire/explosion texture - simple white circle that gets colored by particle system
+    const fireSize = 64;
+    const fireTex = new DynamicTexture('fireTexture', fireSize, this.scene, false);
     fireTex.hasAlpha = true;
     const fireCtx = fireTex.getContext();
 
-    // Radial gradient from white center to transparent edge
-    const fireGradient = fireCtx.createRadialGradient(
-      fireSize / 2, fireSize / 2, 0,
-      fireSize / 2, fireSize / 2, fireSize / 2
-    );
-    fireGradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-    fireGradient.addColorStop(0.2, 'rgba(255, 200, 50, 1)');
-    fireGradient.addColorStop(0.5, 'rgba(255, 100, 20, 0.8)');
-    fireGradient.addColorStop(0.8, 'rgba(200, 50, 10, 0.3)');
-    fireGradient.addColorStop(1, 'rgba(100, 20, 5, 0)');
+    // Clear with transparent
+    fireCtx.clearRect(0, 0, fireSize, fireSize);
 
-    fireCtx.fillStyle = fireGradient;
-    fireCtx.fillRect(0, 0, fireSize, fireSize);
+    // Draw a simple radial gradient circle
+    const centerX = fireSize / 2;
+    const centerY = fireSize / 2;
+    const radius = fireSize / 2;
+
+    // Draw concentric circles with decreasing opacity for soft edge
+    for (let r = radius; r > 0; r -= 1) {
+      const alpha = (r / radius);  // Fade from center
+      const brightness = Math.min(255, 255 * (r / radius) + 100);
+      fireCtx.beginPath();
+      fireCtx.arc(centerX, centerY, r, 0, Math.PI * 2);
+      fireCtx.fillStyle = `rgba(${brightness}, ${brightness}, ${brightness}, ${alpha})`;
+      fireCtx.fill();
+    }
+
     fireTex.update();
     this.fireTexture = fireTex;
 
-    // Create smoke texture - soft gray blob
-    const smokeSize = 128;
-    const smokeTex = new DynamicTexture('smokeTexture', smokeSize, this.scene, true);
-    smokeTex.hasAlpha = true;
-    const smokeCtx = smokeTex.getContext();
+    // Smoke uses same texture
+    this.smokeTexture = fireTex;
 
-    const smokeGradient = smokeCtx.createRadialGradient(
-      smokeSize / 2, smokeSize / 2, 0,
-      smokeSize / 2, smokeSize / 2, smokeSize / 2
-    );
-    smokeGradient.addColorStop(0, 'rgba(80, 80, 80, 0.8)');
-    smokeGradient.addColorStop(0.4, 'rgba(60, 60, 60, 0.5)');
-    smokeGradient.addColorStop(0.7, 'rgba(40, 40, 40, 0.2)');
-    smokeGradient.addColorStop(1, 'rgba(20, 20, 20, 0)');
-
-    smokeCtx.fillStyle = smokeGradient;
-    smokeCtx.fillRect(0, 0, smokeSize, smokeSize);
-    smokeTex.update();
-    this.smokeTexture = smokeTex;
-
-    // Create spark texture - bright point
+    // Spark texture - smaller, brighter
     const sparkSize = 32;
-    const sparkTex = new DynamicTexture('sparkTexture', sparkSize, this.scene, true);
+    const sparkTex = new DynamicTexture('sparkTexture', sparkSize, this.scene, false);
     sparkTex.hasAlpha = true;
     const sparkCtx = sparkTex.getContext();
 
-    const sparkGradient = sparkCtx.createRadialGradient(
-      sparkSize / 2, sparkSize / 2, 0,
-      sparkSize / 2, sparkSize / 2, sparkSize / 2
-    );
-    sparkGradient.addColorStop(0, 'rgba(255, 255, 200, 1)');
-    sparkGradient.addColorStop(0.3, 'rgba(255, 200, 100, 0.8)');
-    sparkGradient.addColorStop(0.6, 'rgba(255, 150, 50, 0.3)');
-    sparkGradient.addColorStop(1, 'rgba(255, 100, 0, 0)');
+    sparkCtx.clearRect(0, 0, sparkSize, sparkSize);
 
-    sparkCtx.fillStyle = sparkGradient;
-    sparkCtx.fillRect(0, 0, sparkSize, sparkSize);
+    // Bright center point
+    for (let r = sparkSize / 2; r > 0; r -= 1) {
+      const alpha = (r / (sparkSize / 2));
+      sparkCtx.beginPath();
+      sparkCtx.arc(sparkSize / 2, sparkSize / 2, r, 0, Math.PI * 2);
+      sparkCtx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+      sparkCtx.fill();
+    }
+
     sparkTex.update();
     this.sparkTexture = sparkTex;
 
