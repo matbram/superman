@@ -13,10 +13,11 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 
-// Debris constants - optimized for performance
-const MAX_DEBRIS_PIECES = 50;  // Low cap for better framerate
-const DEBRIS_CLEANUP_DISTANCE = 150;  // Cleanup sooner
-const DEBRIS_SETTLE_CLEANUP_TIME = 10000;  // Remove settled debris after 10 seconds
+// Debris constants - optimized for performance (FEWER, BIGGER pieces)
+const MAX_DEBRIS_PIECES = 80;  // Hard cap on total debris (reduced from 100)
+const MAX_DEBRIS_PER_BUILDING = 5;  // Max debris spawned per building hit (reduced from 8)
+const DEBRIS_CLEANUP_DISTANCE = 120;  // Cleanup sooner
+const DEBRIS_SETTLE_CLEANUP_TIME = 6000;  // Remove settled debris after 6 seconds
 const GRAVITY = -30;  // Normal gravity for performance
 
 // Wake damage constants
@@ -355,7 +356,7 @@ export class BuildingDamage {
       chunksCreated++;
     }
 
-    this.spawnImpactDebris(impactPosition, speed, 5 + chunksCreated * 2);
+    this.spawnImpactDebris(impactPosition, speed, 3 + chunksCreated);  // Reduced debris count
 
     // Explosion for medium impacts
     if (chunksCreated >= 2) {
@@ -380,7 +381,7 @@ export class BuildingDamage {
       broken++;
     }
 
-    this.spawnImpactDebris(impactPosition, speed, 15);
+    this.spawnImpactDebris(impactPosition, speed, 6);  // Reduced from 15
 
     // Explosion for heavy damage
     this.spawnExplosion(impactPosition, 1.5, 1.2);
@@ -400,8 +401,8 @@ export class BuildingDamage {
       }
     }
 
-    // Lots of debris
-    this.spawnImpactDebris(impactPosition, speed, 20);
+    // Debris - big pieces, fewer of them
+    this.spawnImpactDebris(impactPosition, speed, 8);  // Reduced from 20
 
     // Calculate fall direction (away from impact)
     const fallDir = structure.originalPosition.subtract(impactPosition);
@@ -929,36 +930,38 @@ export class BuildingDamage {
       }
     }
 
-    const actualCount = Math.min(count, MAX_DEBRIS_PIECES - this.debris.length);
+    // Limit debris per spawn and total
+    const actualCount = Math.min(count, MAX_DEBRIS_PER_BUILDING, MAX_DEBRIS_PIECES - this.debris.length);
     if (actualCount <= 0) return;
 
     for (let i = 0; i < actualCount; i++) {
-      const size = 0.3 + Math.random() * 1.2;
+      // MASSIVE debris pieces - very visible, fewer needed
+      const size = 3 + Math.random() * 5;  // 3-8 units (even bigger)
       const debris = MeshBuilder.CreateBox(
         `debris_${Date.now()}_${i}`,
         {
-          width: size * (0.4 + Math.random() * 0.6),
-          height: size * (0.4 + Math.random() * 0.6),
-          depth: size * (0.4 + Math.random() * 0.6),
+          width: size * (0.6 + Math.random() * 0.4),
+          height: size * (0.4 + Math.random() * 0.4),
+          depth: size * (0.6 + Math.random() * 0.4),
         },
         this.scene
       );
 
-      // Spawn near impact
+      // Spawn near impact - wider spread for bigger debris
       debris.position = impactPosition.add(new Vector3(
-        (Math.random() - 0.5) * 4,
-        (Math.random() - 0.5) * 4,
-        (Math.random() - 0.5) * 4
+        (Math.random() - 0.5) * 10,
+        (Math.random() - 0.5) * 8,
+        (Math.random() - 0.5) * 10
       ));
 
       debris.material = this.debrisMaterials[Math.floor(Math.random() * this.debrisMaterials.length)];
       debris.isPickable = false;
 
-      // Random outward velocity
+      // Random outward velocity - slower for bigger pieces
       const velocity = new Vector3(
-        (Math.random() - 0.5) * speed * 0.3,
-        Math.random() * speed * 0.2 + 5,
-        (Math.random() - 0.5) * speed * 0.3
+        (Math.random() - 0.5) * speed * 0.2,
+        Math.random() * speed * 0.15 + 3,
+        (Math.random() - 0.5) * speed * 0.2
       );
 
       debris.rotation = new Vector3(
@@ -1097,14 +1100,14 @@ export class BuildingDamage {
         ));
         this.spawnDustCloud(dustPos, 3, 1);
 
-        // Spawn fewer debris during collapse
-        if (collapse.debrisSpawned < 8) {
+        // Spawn fewer debris during collapse - very limited for performance
+        if (collapse.debrisSpawned < 4) {  // Reduced from 8
           const debrisPos = collapse.mesh.position.add(new Vector3(
             (Math.random() - 0.5) * 12,
             collapse.height * Math.random(),
             (Math.random() - 0.5) * 12
           ));
-          this.spawnImpactDebris(debrisPos, 15, 2);
+          this.spawnImpactDebris(debrisPos, 15, 1);  // Just 1 piece at a time
           collapse.debrisSpawned++;
         }
       }
@@ -1123,8 +1126,8 @@ export class BuildingDamage {
             (Math.random() - 0.5) * collapse.height * 0.3
           );
           this.spawnDustCloud(collapse.mesh.position.add(offset), 8, 3);
-          // Final debris burst - reduced
-          this.spawnImpactDebris(collapse.mesh.position, 30, 12);
+          // Final debris burst - limited to maintain performance
+          this.spawnImpactDebris(collapse.mesh.position, 30, 5);  // Reduced from 12
 
           // MASSIVE EXPLOSION when building hits the ground - BAYHEM!
           this.spawnExplosion(collapse.mesh.position, 2, 1.8);
@@ -1225,8 +1228,8 @@ export class BuildingDamage {
       piece.mesh.rotation.y += piece.angularVelocity.y * deltaTime;
       piece.mesh.rotation.z += piece.angularVelocity.z * deltaTime;
 
-      // Ground collision
-      const groundLevel = piece.isChunk ? 1 : 0.3;
+      // Ground collision - higher ground level for bigger debris pieces
+      const groundLevel = piece.isChunk ? 2 : 1.5;
       if (piece.mesh.position.y < groundLevel) {
         const impactSpeed = Math.abs(piece.velocity.y);
 
