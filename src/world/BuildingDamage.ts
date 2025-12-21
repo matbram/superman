@@ -217,56 +217,52 @@ export class BuildingDamage {
   }
 
   /**
-   * Generates structural breakpoints for a building
+   * Generates structural breakpoints for a building - LIMITED for performance
    */
   private generateBreakPoints(building: Mesh): BreakPoint[] {
     const bounds = building.getBoundingInfo().boundingBox;
     const size = bounds.maximumWorld.subtract(bounds.minimumWorld);
     const breakPoints: BreakPoint[] = [];
 
-    // Vertical sections (floors)
-    const numFloors = Math.max(2, Math.floor(size.y / 15));
+    // Only 2 vertical sections for performance
+    const numFloors = 2;
 
-    // Horizontal sections (corners and sides)
+    // Only 4 corners - no sides for performance
     const sections = [
       { x: -0.35, z: -0.35 },  // Corner 1
       { x: 0.35, z: -0.35 },   // Corner 2
       { x: -0.35, z: 0.35 },   // Corner 3
       { x: 0.35, z: 0.35 },    // Corner 4
-      { x: 0, z: -0.4 },       // Side 1
-      { x: 0, z: 0.4 },        // Side 2
-      { x: -0.4, z: 0 },       // Side 3
-      { x: 0.4, z: 0 },        // Side 4
     ];
 
-    // Create breakpoints for each floor level at each section
+    // Create breakpoints for each floor level at each corner (4 corners * 2 floors = 8 max)
     for (let floor = 0; floor < numFloors; floor++) {
       const floorY = (floor + 0.5) / numFloors;
 
       for (const section of sections) {
-        // Chunk size varies based on position
-        const chunkWidth = size.x * (0.25 + Math.random() * 0.15);
-        const chunkHeight = size.y / numFloors * (0.7 + Math.random() * 0.3);
-        const chunkDepth = size.z * (0.25 + Math.random() * 0.15);
+        // BIGGER chunk sizes - fewer but more impactful
+        const chunkWidth = size.x * (0.35 + Math.random() * 0.15);
+        const chunkHeight = size.y / numFloors * (0.6 + Math.random() * 0.3);
+        const chunkDepth = size.z * (0.35 + Math.random() * 0.15);
 
         breakPoints.push({
           relativePosition: new Vector3(section.x, floorY, section.z),
           size: new Vector3(chunkWidth, chunkHeight, chunkDepth),
           broken: false,
-          threshold: 0.3 + Math.random() * 0.5,  // Random break threshold
+          threshold: 0.3 + Math.random() * 0.5,
         });
       }
     }
 
-    // Add top section breakpoints (rooftop chunks)
+    // One top section breakpoint
     breakPoints.push({
       relativePosition: new Vector3(0, 0.9, 0),
-      size: new Vector3(size.x * 0.5, size.y * 0.15, size.z * 0.5),
+      size: new Vector3(size.x * 0.6, size.y * 0.2, size.z * 0.6),
       broken: false,
       threshold: 0.2,
     });
 
-    return breakPoints;
+    return breakPoints;  // Max 9 breakpoints per building now
   }
 
   /**
@@ -524,6 +520,12 @@ export class BuildingDamage {
     impactPosition: Vector3,
     speed: number
   ): void {
+    // Check debris cap BEFORE creating chunk
+    if (this.debris.length >= MAX_DEBRIS_PIECES) {
+      breakPoint.broken = true;  // Mark as broken but don't create mesh
+      return;
+    }
+
     breakPoint.broken = true;
 
     const bounds = structure.bounds;
