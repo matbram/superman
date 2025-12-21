@@ -875,32 +875,33 @@ export class Enemy {
     // Calculate force direction - FROM enemy TO target (push away from beam source)
     const forceDirection = toTarget.normalizeToNew();
 
-    // MASSIVE DAMAGE with FORCE - destroys buildings and blows debris away
+    // DEVASTATING FORCE FIELD - blows everything across the level
     if (this.onAttackBuilding) {
-      // Main impact with powerful force
-      this.onAttackBuilding(target.position, 200, forceDirection.scale(80));
+      // Main impact with MASSIVE force - like a force field explosion
+      this.onAttackBuilding(target.position, 250, forceDirection.scale(300));
 
-      // Also damage nearby buildings in splash radius with radial force
-      const splashRadius = 30;
-      const splashDamage = 80;
-      const angles = [0, Math.PI / 2, Math.PI, Math.PI * 1.5];
-      for (const angle of angles) {
+      // Radial blast wave that pushes everything outward
+      const splashRadius = 60;
+      const splashDamage = 120;
+      const numAngles = 8;  // More splash points for bigger effect
+      for (let i = 0; i < numAngles; i++) {
+        const angle = (i / numAngles) * Math.PI * 2;
         const splashPos = target.position.clone();
         splashPos.x += Math.cos(angle) * splashRadius * 0.5;
         splashPos.z += Math.sin(angle) * splashRadius * 0.5;
-        // Radial force from impact center
+        // Powerful radial force - launches debris across the level
         const radialForce = new Vector3(
-          Math.cos(angle) * 40,
-          15,  // Some upward force
-          Math.sin(angle) * 40
+          Math.cos(angle) * 200,
+          80,  // Strong upward force - debris goes flying
+          Math.sin(angle) * 200
         );
         this.onAttackBuilding(splashPos, splashDamage, radialForce);
       }
     }
 
-    // Camera shake from heat vision impact
+    // HARD camera shake from heat vision impact
     if (this.onCameraShake) {
-      this.onCameraShake(3);
+      this.onCameraShake(5);
     }
 
     // Fade beams after attack
