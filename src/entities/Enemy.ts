@@ -13,6 +13,7 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
+import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator';
 
 // Enemy constants
 const ENEMY_MAX_HEALTH = 500;
@@ -36,6 +37,7 @@ enum EnemyState {
  */
 export class Enemy {
   private scene: Scene;
+  private shadowGenerator: ShadowGenerator | null = null;
   private root: TransformNode;
   private bodyMeshes: Mesh[] = [];
   private position: Vector3 = new Vector3(0, 60, 100);
@@ -60,8 +62,9 @@ export class Enemy {
   private targetIndicator: Mesh | null = null;
   private isTargeted: boolean = false;
 
-  constructor(scene: Scene, spawnPosition?: Vector3) {
+  constructor(scene: Scene, spawnPosition?: Vector3, shadowGenerator?: ShadowGenerator) {
     this.scene = scene;
+    this.shadowGenerator = shadowGenerator || null;
     this.root = new TransformNode('enemy', scene);
 
     if (spawnPosition) {
@@ -180,6 +183,14 @@ export class Enemy {
     cape.material = capeMat;
     cape.parent = this.root;
     this.bodyMeshes.push(cape);
+
+    // Add all body meshes to shadow system
+    if (this.shadowGenerator) {
+      for (const mesh of this.bodyMeshes) {
+        this.shadowGenerator.addShadowCaster(mesh);
+        mesh.receiveShadows = true;
+      }
+    }
   }
 
   /**

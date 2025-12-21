@@ -53,11 +53,18 @@ export function createScene(engine: Engine): SceneContext {
   sunLight.intensity = 0.7;
   sunLight.position = new Vector3(100, 200, 100);
 
-  // Create shadow generator
-  const shadowGenerator = new ShadowGenerator(1024, sunLight);
+  // Create shadow generator with high quality settings
+  const shadowGenerator = new ShadowGenerator(2048, sunLight);
   shadowGenerator.useBlurExponentialShadowMap = true;
-  shadowGenerator.blurKernel = 16;
-  shadowGenerator.setDarkness(0.4);
+  shadowGenerator.blurKernel = 32;
+  shadowGenerator.blurScale = 2;
+  shadowGenerator.setDarkness(0.3);  // Darker shadows for more contrast
+  shadowGenerator.bias = 0.001;  // Reduce shadow acne
+  shadowGenerator.normalBias = 0.02;
+
+  // Set up shadow frustum to follow player (updated in main loop)
+  sunLight.shadowMinZ = 1;
+  sunLight.shadowMaxZ = 500;
 
   // Create main camera (will be controlled by CameraController)
   const camera = new FreeCamera('mainCamera', new Vector3(0, 10, -20), scene);

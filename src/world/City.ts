@@ -452,8 +452,9 @@ export class City {
         );
 
         for (const mesh of buildingMeshes) {
-          // Add to shadow caster (limit shadows for performance)
-          if (buildingCount < 3 && mesh.name.includes('main')) {
+          // Add more buildings as shadow casters for realism
+          // Limit to first 8 buildings per chunk for performance
+          if (buildingCount < 8) {
             this.shadowGenerator.addShadowCaster(mesh);
           }
           // Start buildings invisible - they will fade in

@@ -11,6 +11,7 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
+import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator';
 import { STREET_WIDTH, CITY_CHUNK_SIZE } from './City';
 
 // Traffic constants
@@ -53,12 +54,14 @@ interface Vehicle {
  */
 export class Traffic {
   private scene: Scene;
+  private shadowGenerator: ShadowGenerator | null = null;
   private vehicles: Vehicle[] = [];
   private vehicleMaterials: Map<string, StandardMaterial> = new Map();
   private onVehicleDestroyed: ((position: Vector3) => void) | null = null;
 
-  constructor(scene: Scene) {
+  constructor(scene: Scene, shadowGenerator?: ShadowGenerator) {
     this.scene = scene;
+    this.shadowGenerator = shadowGenerator || null;
     this.createMaterials();
   }
 
@@ -470,6 +473,9 @@ export class Traffic {
     vehicle.position = new Vector3(x, STREET_Y, z);
     vehicle.root.position = vehicle.position;
 
+    // Add shadows to vehicle meshes
+    this.addVehicleShadows(vehicle);
+
     // Direction based on street orientation and lane
     // Lanes 0-1 go positive direction, lanes 2-3 go negative direction
     const goingPositive = lane < LANES_PER_DIRECTION;
@@ -484,6 +490,23 @@ export class Traffic {
     vehicle.root.rotation.y = Math.atan2(vehicle.direction.x, vehicle.direction.z);
 
     this.vehicles.push(vehicle);
+  }
+
+  /**
+   * Adds shadow casting and receiving to a vehicle's meshes
+   */
+  private addVehicleShadows(vehicle: Vehicle): void {
+    if (!this.shadowGenerator) return;
+
+    for (const mesh of vehicle.meshes) {
+      // Main body parts cast shadows
+      if (mesh.name.includes('Body') || mesh.name.includes('Cabin') ||
+          mesh.name.includes('cargo') || mesh.name.includes('cab')) {
+        this.shadowGenerator.addShadowCaster(mesh);
+      }
+      // All parts receive shadows
+      mesh.receiveShadows = true;
+    }
   }
 
   /**

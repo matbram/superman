@@ -104,13 +104,14 @@ class Game {
     // Initialize birds
     this.birds = new Birds(this.sceneContext.scene);
 
-    // Initialize traffic system
-    this.traffic = new Traffic(this.sceneContext.scene);
+    // Initialize traffic system with shadow support
+    this.traffic = new Traffic(this.sceneContext.scene, this.sceneContext.shadowGenerator);
 
     // Initialize enemy AI - spawn in front of player at visible height
     this.enemy = new Enemy(
       this.sceneContext.scene,
-      new Vector3(30, 25, 30)  // Spawn nearby and elevated so player can see them
+      new Vector3(30, 25, 30),  // Spawn nearby and elevated so player can see them
+      this.sceneContext.shadowGenerator
     );
 
     // Connect enemy attacks to building damage
