@@ -660,7 +660,7 @@ export class Enemy {
   /**
    * Updates character rotation with banking effect
    */
-  private updateCharacterRotation(deltaTime: number): void {
+  private updateCharacterRotation(_deltaTime: number): void {
     // Apply rotation to the root node
     this.root.rotation.y = this.yaw;
     this.root.rotation.x = this.pitch;
@@ -670,7 +670,7 @@ export class Enemy {
   /**
    * Updates flight visual effects based on speed
    */
-  private updateFlightEffects(deltaTime: number): void {
+  private updateFlightEffects(_deltaTime: number): void {
     // Update thruster intensity based on speed
     if (this.thrusterParticles) {
       const speedFactor = this.currentSpeed / ENEMY_MAX_SPEED;
@@ -730,7 +730,7 @@ export class Enemy {
   /**
    * Updates patrol behavior
    */
-  private updatePatrol(deltaTime: number): void {
+  private updatePatrol(_deltaTime: number): void {
     const toTarget = this.targetPosition.subtract(this.position);
     const dist = toTarget.length();
 
@@ -746,7 +746,7 @@ export class Enemy {
   /**
    * Updates attack behavior
    */
-  private updateAttack(deltaTime: number, buildings: Mesh[], now: number): void {
+  private updateAttack(_deltaTime: number, buildings: Mesh[], now: number): void {
     // Find nearest building in a very wide search area
     let nearestBuilding: Mesh | null = null;
     let nearestDist = Infinity;
@@ -794,7 +794,7 @@ export class Enemy {
   /**
    * Updates flee behavior
    */
-  private updateFlee(deltaTime: number, playerPosition: Vector3): void {
+  private updateFlee(_deltaTime: number, playerPosition: Vector3): void {
     const awayFromPlayer = this.position.subtract(playerPosition);
     awayFromPlayer.y = 0;
     if (awayFromPlayer.length() > 0.1) {
