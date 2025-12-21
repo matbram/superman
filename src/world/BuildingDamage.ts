@@ -13,11 +13,28 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 
-// Debris constants - optimized for performance (FEWER, BIGGER pieces)
-const MAX_DEBRIS_PIECES = 20;  // Hard cap on total debris
-const MAX_DEBRIS_PER_BUILDING = 4;  // Max debris spawned per building hit
-const DEBRIS_CLEANUP_DISTANCE = 120;  // Cleanup sooner
-const DEBRIS_SETTLE_CLEANUP_TIME = 5000;  // Remove settled debris after 5 seconds
+// Debris settings - can be adjusted at runtime
+export interface DebrisSettings {
+  maxDebrisPieces: number;
+  maxDebrisPerBuilding: number;
+  debrisCleanupDistance: number;
+  debrisSettleCleanupTime: number;
+  debrisMinSize: number;
+  debrisMaxSize: number;
+  explosionsEnabled: boolean;
+}
+
+// Default debris settings
+const DEFAULT_SETTINGS: DebrisSettings = {
+  maxDebrisPieces: 20,
+  maxDebrisPerBuilding: 4,
+  debrisCleanupDistance: 120,
+  debrisSettleCleanupTime: 5000,
+  debrisMinSize: 3,
+  debrisMaxSize: 8,
+  explosionsEnabled: true,
+};
+
 const GRAVITY = -30;  // Normal gravity for performance
 
 // Wake damage constants
@@ -118,6 +135,9 @@ export class BuildingDamage {
   private dustClouds: DustCloud[] = [];
   private explosions: Explosion[] = [];
 
+  // Runtime configurable settings
+  private settings: DebrisSettings = { ...DEFAULT_SETTINGS };
+
   // Particle textures for effects
   private fireTexture: Texture | null = null;
   private smokeTexture: Texture | null = null;
@@ -139,6 +159,28 @@ export class BuildingDamage {
     this.scene = scene;
     this.createDebrisMaterials();
     this.createParticleTextures();
+  }
+
+  /**
+   * Gets current debris settings
+   */
+  public getSettings(): DebrisSettings {
+    return { ...this.settings };
+  }
+
+  /**
+   * Updates debris settings in real-time
+   */
+  public updateSettings(newSettings: Partial<DebrisSettings>): void {
+    this.settings = { ...this.settings, ...newSettings };
+    console.log('[BuildingDamage] Settings updated:', this.settings);
+  }
+
+  /**
+   * Gets current debris count for display
+   */
+  public getDebrisCount(): number {
+    return this.debris.length;
   }
 
   /**
@@ -521,7 +563,7 @@ export class BuildingDamage {
     speed: number
   ): void {
     // Check debris cap BEFORE creating chunk
-    if (this.debris.length >= MAX_DEBRIS_PIECES) {
+    if (this.debris.length >= this.settings.maxDebrisPieces) {
       breakPoint.broken = true;  // Mark as broken but don't create mesh
       return;
     }
@@ -708,6 +750,9 @@ export class BuildingDamage {
    * @param intensity How dramatic (0.5 = subtle, 1 = normal, 2 = MAXIMUM BAYHEM)
    */
   private spawnExplosion(position: Vector3, size: number = 1, intensity: number = 1): void {
+    // Check if explosions are enabled
+    if (!this.settings.explosionsEnabled) return;
+
     console.log('[EXPLOSION] Spawning at', position.toString(), 'size:', size, 'intensity:', intensity);
 
     // Cap explosions for performance
@@ -933,12 +978,17 @@ export class BuildingDamage {
     }
 
     // Limit debris per spawn and total
-    const actualCount = Math.min(count, MAX_DEBRIS_PER_BUILDING, MAX_DEBRIS_PIECES - this.debris.length);
+    const actualCount = Math.min(
+      count,
+      this.settings.maxDebrisPerBuilding,
+      this.settings.maxDebrisPieces - this.debris.length
+    );
     if (actualCount <= 0) return;
 
     for (let i = 0; i < actualCount; i++) {
-      // MASSIVE debris pieces - very visible, fewer needed
-      const size = 3 + Math.random() * 5;  // 3-8 units (even bigger)
+      // Debris size from settings
+      const sizeRange = this.settings.debrisMaxSize - this.settings.debrisMinSize;
+      const size = this.settings.debrisMinSize + Math.random() * sizeRange;
       const debris = MeshBuilder.CreateBox(
         `debris_${Date.now()}_${i}`,
         {
@@ -1195,8 +1245,8 @@ export class BuildingDamage {
 
       // If settled, check for time-based and distance-based cleanup
       if (piece.settled) {
-        // Time-based cleanup - remove after 10 seconds regardless of distance
-        if (now - piece.settleTime > DEBRIS_SETTLE_CLEANUP_TIME) {
+        // Time-based cleanup - remove after settle time
+        if (now - piece.settleTime > this.settings.debrisSettleCleanupTime) {
           piece.mesh.dispose();
           this.debris.splice(i, 1);
           continue;
@@ -1206,7 +1256,7 @@ export class BuildingDamage {
           const dx = piece.mesh.position.x - playerPosition.x;
           const dz = piece.mesh.position.z - playerPosition.z;
           const dist = Math.sqrt(dx * dx + dz * dz);
-          if (dist > DEBRIS_CLEANUP_DISTANCE) {
+          if (dist > this.settings.debrisCleanupDistance) {
             piece.mesh.dispose();
             this.debris.splice(i, 1);
           }

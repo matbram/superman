@@ -10,7 +10,7 @@ import { PhysicsManager } from './physics/physics';
 import { Player } from './player/Player';
 import { City } from './world/City';
 import { Atmosphere } from './world/Atmosphere';
-import { BuildingDamage } from './world/BuildingDamage';
+import { BuildingDamage, DebrisSettings } from './world/BuildingDamage';
 import { Birds } from './world/Birds';
 import { Traffic } from './world/Traffic';
 import { Enemy } from './entities/Enemy';
@@ -47,6 +47,11 @@ class Game {
   private isRunning: boolean = false;
   private instructionsElement: HTMLElement;
   private startButton: HTMLElement;
+
+  // Settings panel
+  private settingsPanel: HTMLElement;
+  private settingsPanelVisible: boolean = false;
+  private debrisCountElement: HTMLElement;
 
   // Performance tracking
   private lastPerfLogTime: number = 0;
@@ -185,6 +190,11 @@ class Game {
     this.hud = new Hud();
     this.debugOverlay = new DebugOverlay();
 
+    // Initialize settings panel
+    this.settingsPanel = document.getElementById('settingsPanel')!;
+    this.debrisCountElement = document.getElementById('debrisCount')!;
+    this.setupSettingsPanel();
+
     // Set up start button
     this.setupStartButton();
 
@@ -203,6 +213,72 @@ class Game {
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !this.isRunning) {
         this.start();
+      }
+    });
+  }
+
+  /**
+   * Sets up the settings panel with real-time controls
+   */
+  private setupSettingsPanel(): void {
+    // Get all input elements
+    const maxDebrisInput = document.getElementById('settingMaxDebris') as HTMLInputElement;
+    const perBuildingInput = document.getElementById('settingPerBuilding') as HTMLInputElement;
+    const minSizeInput = document.getElementById('settingMinSize') as HTMLInputElement;
+    const maxSizeInput = document.getElementById('settingMaxSize') as HTMLInputElement;
+    const cleanupDistInput = document.getElementById('settingCleanupDist') as HTMLInputElement;
+    const settleTimeInput = document.getElementById('settingSettleTime') as HTMLInputElement;
+    const explosionsInput = document.getElementById('settingExplosions') as HTMLInputElement;
+
+    // Get value display elements
+    const valueMaxDebris = document.getElementById('valueMaxDebris')!;
+    const valuePerBuilding = document.getElementById('valuePerBuilding')!;
+    const valueMinSize = document.getElementById('valueMinSize')!;
+    const valueMaxSize = document.getElementById('valueMaxSize')!;
+    const valueCleanupDist = document.getElementById('valueCleanupDist')!;
+    const valueSettleTime = document.getElementById('valueSettleTime')!;
+
+    // Helper to update settings
+    const updateSettings = () => {
+      const newSettings: Partial<DebrisSettings> = {
+        maxDebrisPieces: parseInt(maxDebrisInput.value),
+        maxDebrisPerBuilding: parseInt(perBuildingInput.value),
+        debrisMinSize: parseFloat(minSizeInput.value),
+        debrisMaxSize: parseFloat(maxSizeInput.value),
+        debrisCleanupDistance: parseInt(cleanupDistInput.value),
+        debrisSettleCleanupTime: parseInt(settleTimeInput.value) * 1000,
+        explosionsEnabled: explosionsInput.checked,
+      };
+      this.buildingDamage.updateSettings(newSettings);
+
+      // Update value displays
+      valueMaxDebris.textContent = maxDebrisInput.value;
+      valuePerBuilding.textContent = perBuildingInput.value;
+      valueMinSize.textContent = minSizeInput.value;
+      valueMaxSize.textContent = maxSizeInput.value;
+      valueCleanupDist.textContent = cleanupDistInput.value;
+      valueSettleTime.textContent = settleTimeInput.value;
+    };
+
+    // Wire up all inputs
+    maxDebrisInput.addEventListener('input', updateSettings);
+    perBuildingInput.addEventListener('input', updateSettings);
+    minSizeInput.addEventListener('input', updateSettings);
+    maxSizeInput.addEventListener('input', updateSettings);
+    cleanupDistInput.addEventListener('input', updateSettings);
+    settleTimeInput.addEventListener('input', updateSettings);
+    explosionsInput.addEventListener('change', updateSettings);
+
+    // Toggle panel with Tab key
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab' && this.isRunning) {
+        e.preventDefault();
+        this.settingsPanelVisible = !this.settingsPanelVisible;
+        if (this.settingsPanelVisible) {
+          this.settingsPanel.classList.add('visible');
+        } else {
+          this.settingsPanel.classList.remove('visible');
+        }
       }
     });
   }
@@ -365,6 +441,11 @@ class Game {
         this.player.getVelocity(),
         inputInfo
       );
+    }
+
+    // Update settings panel debris count
+    if (this.settingsPanelVisible) {
+      this.debrisCountElement.textContent = this.buildingDamage.getDebrisCount().toString();
     }
 
     // Render scene
