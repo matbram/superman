@@ -69,8 +69,9 @@ export class Enemy {
   private speedParticles: ParticleSystem | null = null;
 
   // Callbacks
-  private onAttackBuilding: ((position: Vector3, damage: number) => void) | null = null;
+  private onAttackBuilding: ((position: Vector3, damage: number, forceDirection?: Vector3) => void) | null = null;
   private onDeath: (() => void) | null = null;
+  private onCameraShake: ((intensity: number) => void) | null = null;
 
   // Target indicator
   private targetIndicator: Mesh | null = null;
@@ -309,14 +310,20 @@ export class Enemy {
    */
   private spawnShockwave(): void {
     // Create multiple rings for dramatic effect
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 3; i++) {
       const ring = this.createShockwaveRing();
       ring.position.copyFrom(this.position);
       ring.rotation.x = Math.PI / 2;
       ring.rotation.y = this.yaw;
       ring.scaling = new Vector3(1 + i * 0.5, 1 + i * 0.5, 1 + i * 0.5);
-      ring.visibility = 1 - i * 0.2;
+      ring.visibility = 1 - i * 0.15;
       this.shockwaveRings.push(ring);
+    }
+
+    // HARD camera shake when sonic boom happens
+    if (this.onCameraShake) {
+      const shakeIntensity = 4 + (this.currentSpeed / ENEMY_MAX_SPEED) * 3;
+      this.onCameraShake(shakeIntensity);
     }
   }
 
@@ -500,8 +507,15 @@ export class Enemy {
   /**
    * Sets callback for when enemy attacks a building
    */
-  public setOnAttackBuilding(callback: (position: Vector3, damage: number) => void): void {
+  public setOnAttackBuilding(callback: (position: Vector3, damage: number, forceDirection?: Vector3) => void): void {
     this.onAttackBuilding = callback;
+  }
+
+  /**
+   * Sets callback for camera shake effects
+   */
+  public setOnCameraShake(callback: (intensity: number) => void): void {
+    this.onCameraShake = callback;
   }
 
   /**
@@ -858,11 +872,15 @@ export class Enemy {
       this.heatVisionParticles.emitRate = 150;
     }
 
-    // MASSIVE DAMAGE - destroys buildings fast
-    if (this.onAttackBuilding) {
-      this.onAttackBuilding(target.position, 200);  // 5x more damage
+    // Calculate force direction - FROM enemy TO target (push away from beam source)
+    const forceDirection = toTarget.normalizeToNew();
 
-      // Also damage nearby buildings in splash radius
+    // MASSIVE DAMAGE with FORCE - destroys buildings and blows debris away
+    if (this.onAttackBuilding) {
+      // Main impact with powerful force
+      this.onAttackBuilding(target.position, 200, forceDirection.scale(80));
+
+      // Also damage nearby buildings in splash radius with radial force
       const splashRadius = 30;
       const splashDamage = 80;
       const angles = [0, Math.PI / 2, Math.PI, Math.PI * 1.5];
@@ -870,8 +888,19 @@ export class Enemy {
         const splashPos = target.position.clone();
         splashPos.x += Math.cos(angle) * splashRadius * 0.5;
         splashPos.z += Math.sin(angle) * splashRadius * 0.5;
-        this.onAttackBuilding(splashPos, splashDamage);
+        // Radial force from impact center
+        const radialForce = new Vector3(
+          Math.cos(angle) * 40,
+          15,  // Some upward force
+          Math.sin(angle) * 40
+        );
+        this.onAttackBuilding(splashPos, splashDamage, radialForce);
       }
+    }
+
+    // Camera shake from heat vision impact
+    if (this.onCameraShake) {
+      this.onCameraShake(3);
     }
 
     // Fade beams after attack

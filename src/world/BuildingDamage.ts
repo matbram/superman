@@ -752,6 +752,46 @@ export class BuildingDamage {
   }
 
   /**
+   * Applies a force impulse to debris in a radius - used for heat vision blast effect
+   * Force pushes debris away from the impact point with the given direction
+   */
+  public applyForceToDebris(position: Vector3, force: Vector3, radius: number = 40): void {
+    for (const piece of this.debris) {
+      if (piece.settled) {
+        // Unsettle debris if force is strong enough
+        const dx = piece.mesh.position.x - position.x;
+        const dy = piece.mesh.position.y - position.y;
+        const dz = piece.mesh.position.z - position.z;
+        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+        if (distance < radius && force.length() > 30) {
+          piece.settled = false;
+          // Apply force with falloff
+          const falloff = 1 - (distance / radius);
+          piece.velocity.addInPlace(force.scale(falloff * 0.5));
+          piece.velocity.y += 5 * falloff;  // Pop up a bit
+          piece.angularVelocity = new Vector3(
+            (Math.random() - 0.5) * 3,
+            (Math.random() - 0.5) * 2,
+            (Math.random() - 0.5) * 3
+          );
+        }
+      } else {
+        // Apply force to moving debris
+        const dx = piece.mesh.position.x - position.x;
+        const dy = piece.mesh.position.y - position.y;
+        const dz = piece.mesh.position.z - position.z;
+        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+        if (distance < radius) {
+          const falloff = 1 - (distance / radius);
+          piece.velocity.addInPlace(force.scale(falloff * 0.3));
+        }
+      }
+    }
+  }
+
+  /**
    * Updates debris physics, building collapse, dust clouds, and shake effects
    * Only cleans up debris when player is far away
    */

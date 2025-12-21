@@ -114,8 +114,8 @@ class Game {
       this.sceneContext.shadowGenerator
     );
 
-    // Connect enemy attacks to building damage
-    this.enemy.setOnAttackBuilding((position, damage) => {
+    // Connect enemy attacks to building damage with force effects
+    this.enemy.setOnAttackBuilding((position, damage, forceDirection) => {
       // Find nearest building to attack position and damage it
       const buildings = this.city.getBuildings();
       let nearestBuilding = null;
@@ -129,7 +129,17 @@ class Game {
       }
       if (nearestBuilding && nearestDist < 100) {
         this.buildingDamage.applyImpactDamage(nearestBuilding, position, damage);
+
+        // Apply force to debris if force direction provided (heat vision blast effect)
+        if (forceDirection) {
+          this.buildingDamage.applyForceToDebris(position, forceDirection, 50);
+        }
       }
+    });
+
+    // Connect enemy sonic boom to camera shake
+    this.enemy.setOnCameraShake((intensity) => {
+      this.player.addCameraShake(intensity);
     });
 
     // Initialize player
