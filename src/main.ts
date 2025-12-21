@@ -475,6 +475,7 @@ class Game {
 
     // If NOT paused and pause is pressed, enter pause mode
     if (input.pausePressed && !this.isPaused) {
+      console.log('[Game] Pause triggered!');
       this.togglePause();
     }
 

@@ -89,13 +89,18 @@ export class InputManager {
     });
   }
 
+  // Debug: track if we've logged button layout
+  private hasLoggedButtons: boolean = false;
+
   private setupGamepadListeners(): void {
     window.addEventListener('gamepadconnected', (e) => {
       console.log(`Gamepad connected: ${e.gamepad.id}`);
+      console.log(`Gamepad has ${e.gamepad.buttons.length} buttons and ${e.gamepad.axes.length} axes`);
     });
 
     window.addEventListener('gamepaddisconnected', () => {
       console.log('Gamepad disconnected');
+      this.hasLoggedButtons = false;
     });
   }
 
@@ -174,8 +179,26 @@ export class InputManager {
     const lockOnHeld = lockOnButton?.pressed ?? false;
     this.currentState.lockOnPressed = lockOnHeld && !wasLockOnPressed;
 
-    const pauseHeld = pauseButton?.pressed ?? false;
-    this.currentState.pausePressed = pauseHeld && !wasPausePressed;
+    // Support both button 8 (Share/Create) and button 9 (Options) for pause
+    // Some controllers have different mappings
+    const pauseButton8 = gamepad.buttons[8];
+    const pauseHeld = (pauseButton?.pressed ?? false) || (pauseButton8?.pressed ?? false);
+    const wasPausePressed8 = this.previousGamepadButtons[8] ?? false;
+    this.currentState.pausePressed = pauseHeld && !wasPausePressed && !wasPausePressed8;
+
+    // Debug: log any button presses to help diagnose controller issues
+    if (!this.hasLoggedButtons) {
+      const pressedButtons: number[] = [];
+      gamepad.buttons.forEach((btn, idx) => {
+        if (btn.pressed) pressedButtons.push(idx);
+      });
+      if (pressedButtons.length > 0) {
+        console.log('[Gamepad] Buttons pressed:', pressedButtons);
+        this.hasLoggedButtons = true;
+        // Reset after 1 second to allow more logging
+        setTimeout(() => { this.hasLoggedButtons = false; }, 1000);
+      }
+    }
 
     // Menu navigation (D-pad and face buttons)
     const dpadUpButton = gamepad.buttons[GamepadBindings.dpadUp];
