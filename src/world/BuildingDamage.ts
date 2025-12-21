@@ -1,7 +1,7 @@
 /**
  * Building Damage System - Handles building destruction with structural breakpoints
  * Buildings break apart at defined structural points, creating realistic destruction
- * Features realistic falling/collapse physics and dust/smoke effects
+ * Features realistic falling/collapse physics, dust/smoke effects, and MICHAEL BAY EXPLOSIONS
  */
 
 import { Scene } from '@babylonjs/core/scene';
@@ -28,6 +28,9 @@ const COLLAPSE_FALL_SPEED = 0.6;   // Moderate fall speed
 
 // Debris spawn cooldown - prevents chain spawning from continuous damage (heat vision)
 const DEBRIS_SPAWN_COOLDOWN = 500;  // ms between debris spawns per building
+
+// Explosion constants - MICHAEL BAY MODE
+const MAX_EXPLOSIONS = 20;  // Cap active explosion systems
 
 // Performance logging
 const ENABLE_PERF_LOGGING = true;
@@ -91,6 +94,17 @@ interface DustCloud {
 }
 
 /**
+ * Explosion effect - multiple particle systems for layered effect
+ */
+interface Explosion {
+  coreFire: ParticleSystem;      // Bright center
+  outerFlames: ParticleSystem;   // Orange/red flames
+  smoke: ParticleSystem;         // Dark smoke rising
+  sparks: ParticleSystem;        // Flying embers
+  lifetime: number;
+}
+
+/**
  * Building damage system with structural breakpoints
  */
 export class BuildingDamage {
@@ -100,6 +114,7 @@ export class BuildingDamage {
   private debrisMaterials: StandardMaterial[] = [];
   private collapsingBuildings: CollapsingBuilding[] = [];
   private dustClouds: DustCloud[] = [];
+  private explosions: Explosion[] = [];
 
   // Debris spawn cooldown tracking - prevents chain spawning
   private lastDebrisSpawnTime: Map<string, number> = new Map();
@@ -315,6 +330,11 @@ export class BuildingDamage {
     }
 
     this.spawnImpactDebris(impactPosition, speed, 5 + chunksCreated * 2);
+
+    // Explosion for medium impacts
+    if (chunksCreated >= 2) {
+      this.spawnExplosion(impactPosition, 0.8, 0.7);
+    }
   }
 
   /**
@@ -335,6 +355,9 @@ export class BuildingDamage {
     }
 
     this.spawnImpactDebris(impactPosition, speed, 15);
+
+    // Explosion for heavy damage
+    this.spawnExplosion(impactPosition, 1.5, 1.2);
 
     // Camera shake for heavy damage - moderate intensity
     this.triggerCameraShake(0.6, impactPosition);
@@ -382,6 +405,9 @@ export class BuildingDamage {
     // Initial dust cloud at impact - bigger and longer lasting
     this.spawnDustCloud(impactPosition, 8, 2);
     this.spawnDustCloud(impactPosition.add(new Vector3(0, height * 0.3, 0)), 6, 1.5);
+
+    // MICHAEL BAY EXPLOSION - massive fireball for full destruction
+    this.spawnMassiveExplosion(impactPosition, height);
 
     // Strong camera shake for full building destruction
     this.triggerCameraShake(0.85, impactPosition);
@@ -535,6 +561,11 @@ export class BuildingDamage {
 
     // Spawn small dust puff at break point
     this.spawnDustCloud(chunkPos, 3, 0.5);
+
+    // Small explosion at break point - 30% chance for variety
+    if (Math.random() < 0.3) {
+      this.spawnExplosion(chunkPos, 0.6, 0.6);
+    }
   }
 
   /**
@@ -639,6 +670,200 @@ export class BuildingDamage {
       particles,
       lifetime: 8,
     });
+  }
+
+  /**
+   * MICHAEL BAY EXPLOSION - Spawns a dramatic multi-layered fire explosion
+   * @param position Center of the explosion
+   * @param size Scale of the explosion (1 = normal, 2 = large building, 3 = massive)
+   * @param intensity How dramatic (0.5 = subtle, 1 = normal, 2 = MAXIMUM BAYHEM)
+   */
+  private spawnExplosion(position: Vector3, size: number = 1, intensity: number = 1): void {
+    // Cap explosions for performance
+    if (this.explosions.length >= MAX_EXPLOSIONS) {
+      const oldest = this.explosions.shift();
+      if (oldest) {
+        oldest.coreFire.dispose();
+        oldest.outerFlames.dispose();
+        oldest.smoke.dispose();
+        oldest.sparks.dispose();
+      }
+    }
+
+    const baseSize = size * 3;
+    const particleCount = Math.floor(80 * intensity);
+
+    // === CORE FIREBALL - Bright white/yellow center ===
+    const coreFire = new ParticleSystem(`explosion_core_${Date.now()}`, particleCount, this.scene);
+    coreFire.createSphereEmitter(baseSize * 0.3);
+
+    // Blazing hot core colors - white to yellow
+    coreFire.color1 = new Color4(1, 1, 0.9, 1);
+    coreFire.color2 = new Color4(1, 0.95, 0.6, 1);
+    coreFire.colorDead = new Color4(1, 0.6, 0.1, 0);
+
+    coreFire.minSize = baseSize * 1.5;
+    coreFire.maxSize = baseSize * 3;
+    coreFire.minLifeTime = 0.1;
+    coreFire.maxLifeTime = 0.3;
+
+    coreFire.direction1 = new Vector3(-baseSize, baseSize * 0.5, -baseSize);
+    coreFire.direction2 = new Vector3(baseSize, baseSize * 2, baseSize);
+    coreFire.minEmitPower = 5 * intensity;
+    coreFire.maxEmitPower = 15 * intensity;
+
+    coreFire.emitter = position.clone();
+    coreFire.emitRate = 500 * intensity;
+
+    // Rapid expansion then fade
+    coreFire.addSizeGradient(0, 0.2);
+    coreFire.addSizeGradient(0.1, 1);
+    coreFire.addSizeGradient(0.5, 1.2);
+    coreFire.addSizeGradient(1, 0);
+
+    coreFire.blendMode = ParticleSystem.BLENDMODE_ADD;  // Additive for glow
+    coreFire.gravity = new Vector3(0, 2, 0);
+
+    // === OUTER FLAMES - Orange/red billowing fire ===
+    const outerFlames = new ParticleSystem(`explosion_flames_${Date.now()}`, particleCount * 1.5, this.scene);
+    outerFlames.createSphereEmitter(baseSize * 0.8);
+
+    // Classic fire colors
+    outerFlames.color1 = new Color4(1, 0.6, 0.1, 0.9);
+    outerFlames.color2 = new Color4(1, 0.3, 0.05, 0.8);
+    outerFlames.colorDead = new Color4(0.5, 0.1, 0.05, 0);
+
+    outerFlames.minSize = baseSize * 2;
+    outerFlames.maxSize = baseSize * 5;
+    outerFlames.minLifeTime = 0.2;
+    outerFlames.maxLifeTime = 0.6;
+
+    outerFlames.direction1 = new Vector3(-baseSize * 1.5, baseSize, -baseSize * 1.5);
+    outerFlames.direction2 = new Vector3(baseSize * 1.5, baseSize * 3, baseSize * 1.5);
+    outerFlames.minEmitPower = 8 * intensity;
+    outerFlames.maxEmitPower = 25 * intensity;
+
+    outerFlames.emitter = position.clone();
+    outerFlames.emitRate = 400 * intensity;
+
+    outerFlames.addSizeGradient(0, 0.3);
+    outerFlames.addSizeGradient(0.2, 1);
+    outerFlames.addSizeGradient(0.7, 0.8);
+    outerFlames.addSizeGradient(1, 0);
+
+    outerFlames.blendMode = ParticleSystem.BLENDMODE_ADD;
+    outerFlames.gravity = new Vector3(0, 8, 0);  // Fire rises
+
+    // === DARK SMOKE - Rising black/gray plume ===
+    const smoke = new ParticleSystem(`explosion_smoke_${Date.now()}`, particleCount, this.scene);
+    smoke.createSphereEmitter(baseSize);
+
+    // Dark smoke colors
+    smoke.color1 = new Color4(0.15, 0.12, 0.1, 0.7);
+    smoke.color2 = new Color4(0.25, 0.2, 0.18, 0.5);
+    smoke.colorDead = new Color4(0.3, 0.28, 0.25, 0);
+
+    smoke.minSize = baseSize * 3;
+    smoke.maxSize = baseSize * 8;
+    smoke.minLifeTime = 1;
+    smoke.maxLifeTime = 3;
+
+    smoke.direction1 = new Vector3(-baseSize * 0.5, baseSize * 2, -baseSize * 0.5);
+    smoke.direction2 = new Vector3(baseSize * 0.5, baseSize * 5, baseSize * 0.5);
+    smoke.minEmitPower = 3;
+    smoke.maxEmitPower = 10;
+
+    smoke.emitter = position.add(new Vector3(0, baseSize * 0.5, 0));
+    smoke.emitRate = 100 * intensity;
+
+    smoke.addSizeGradient(0, 0.5);
+    smoke.addSizeGradient(0.3, 1);
+    smoke.addSizeGradient(1, 1.5);
+
+    smoke.blendMode = ParticleSystem.BLENDMODE_STANDARD;
+    smoke.gravity = new Vector3(0, 3, 0);  // Smoke rises slower
+
+    // === SPARKS & EMBERS - Flying hot particles ===
+    const sparks = new ParticleSystem(`explosion_sparks_${Date.now()}`, particleCount * 0.5, this.scene);
+    sparks.createSphereEmitter(baseSize * 0.5);
+
+    // Hot ember colors
+    sparks.color1 = new Color4(1, 0.8, 0.3, 1);
+    sparks.color2 = new Color4(1, 0.5, 0.1, 1);
+    sparks.colorDead = new Color4(0.5, 0.2, 0.1, 0);
+
+    sparks.minSize = 0.2;
+    sparks.maxSize = 0.8;
+    sparks.minLifeTime = 0.5;
+    sparks.maxLifeTime = 2;
+
+    // Sparks fly outward in all directions
+    sparks.direction1 = new Vector3(-baseSize * 3, baseSize, -baseSize * 3);
+    sparks.direction2 = new Vector3(baseSize * 3, baseSize * 4, baseSize * 3);
+    sparks.minEmitPower = 20 * intensity;
+    sparks.maxEmitPower = 50 * intensity;
+
+    sparks.emitter = position.clone();
+    sparks.emitRate = 300 * intensity;
+
+    sparks.blendMode = ParticleSystem.BLENDMODE_ADD;
+    sparks.gravity = new Vector3(0, -15, 0);  // Sparks arc down
+
+    // Start all systems
+    coreFire.start();
+    outerFlames.start();
+    smoke.start();
+    sparks.start();
+
+    // Stop emitting after initial burst (but particles continue)
+    const burstDuration = 100 + 100 * intensity;
+    setTimeout(() => {
+      coreFire.emitRate = 0;
+      outerFlames.emitRate = 0;
+      sparks.emitRate = 0;
+    }, burstDuration);
+
+    // Smoke lingers longer
+    setTimeout(() => {
+      smoke.emitRate = 0;
+    }, burstDuration * 3);
+
+    this.explosions.push({
+      coreFire,
+      outerFlames,
+      smoke,
+      sparks,
+      lifetime: 4,  // Total cleanup time
+    });
+  }
+
+  /**
+   * Spawns a MASSIVE explosion for building destruction - full Michael Bay
+   */
+  private spawnMassiveExplosion(position: Vector3, buildingHeight: number): void {
+    // Main explosion at impact
+    this.spawnExplosion(position, 2.5, 2);
+
+    // Secondary explosions at different heights - staggered for drama
+    setTimeout(() => {
+      this.spawnExplosion(position.add(new Vector3(0, buildingHeight * 0.3, 0)), 1.5, 1.5);
+    }, 50);
+
+    setTimeout(() => {
+      this.spawnExplosion(position.add(new Vector3(
+        (Math.random() - 0.5) * 10,
+        buildingHeight * 0.5,
+        (Math.random() - 0.5) * 10
+      )), 1.2, 1.2);
+    }, 150);
+
+    setTimeout(() => {
+      this.spawnExplosion(position.add(new Vector3(
+        (Math.random() - 0.5) * 15,
+        buildingHeight * 0.2,
+        (Math.random() - 0.5) * 15
+      )), 1, 1);
+    }, 250);
   }
 
   /**
@@ -868,6 +1093,25 @@ export class BuildingDamage {
           this.spawnDustCloud(collapse.mesh.position.add(offset), 8, 3);
           // Final debris burst - reduced
           this.spawnImpactDebris(collapse.mesh.position, 30, 12);
+
+          // MASSIVE EXPLOSION when building hits the ground - BAYHEM!
+          this.spawnExplosion(collapse.mesh.position, 2, 1.8);
+          // Secondary explosions along the fallen building
+          setTimeout(() => {
+            this.spawnExplosion(collapse.mesh.position.add(new Vector3(
+              collapse.fallDirection.x * collapse.height * 0.3,
+              2,
+              collapse.fallDirection.z * collapse.height * 0.3
+            )), 1.5, 1.2);
+          }, 100);
+          setTimeout(() => {
+            this.spawnExplosion(collapse.mesh.position.add(new Vector3(
+              collapse.fallDirection.x * collapse.height * 0.6,
+              2,
+              collapse.fallDirection.z * collapse.height * 0.6
+            )), 1.2, 1);
+          }, 200);
+
           collapse.dustSpawned = true;
 
           // Big camera shake when building hits the ground!
@@ -891,6 +1135,20 @@ export class BuildingDamage {
       if (dust.lifetime <= 0) {
         dust.particles.dispose();
         this.dustClouds.splice(i, 1);
+      }
+    }
+
+    // Update explosions
+    for (let i = this.explosions.length - 1; i >= 0; i--) {
+      const explosion = this.explosions[i];
+      explosion.lifetime -= deltaTime;
+
+      if (explosion.lifetime <= 0) {
+        explosion.coreFire.dispose();
+        explosion.outerFlames.dispose();
+        explosion.smoke.dispose();
+        explosion.sparks.dispose();
+        this.explosions.splice(i, 1);
       }
     }
 
@@ -946,9 +1204,13 @@ export class BuildingDamage {
         piece.velocity.z *= 0.6;
         piece.angularVelocity.scaleInPlace(0.4);
 
-        // Spawn dust on ground impact (only for large chunks)
+        // Spawn dust and explosions on ground impact (only for large chunks)
         if (impactSpeed > 15 && piece.isChunk) {
           this.spawnDustCloud(piece.mesh.position, 3, 0.5);
+          // Explosion on hard impact - 40% chance
+          if (impactSpeed > 25 && Math.random() < 0.4) {
+            this.spawnExplosion(piece.mesh.position, 0.5, 0.5);
+          }
         }
 
         // Check if settled (very slow)
@@ -994,6 +1256,7 @@ export class BuildingDamage {
           debris: this.debris.length,
           settledDebris: this.debris.filter(d => d.settled).length,
           dustClouds: this.dustClouds.length,
+          explosions: this.explosions.length,
           collapsingBuildings: this.collapsingBuildings.length,
           trackedBuildings: this.buildingStructures.size,
           cooldownEntries: this.lastDebrisSpawnTime.size,
@@ -1018,6 +1281,14 @@ export class BuildingDamage {
       dust.particles.dispose();
     }
     this.dustClouds = [];
+
+    for (const explosion of this.explosions) {
+      explosion.coreFire.dispose();
+      explosion.outerFlames.dispose();
+      explosion.smoke.dispose();
+      explosion.sparks.dispose();
+    }
+    this.explosions = [];
 
     this.collapsingBuildings = [];
     this.buildingStructures.clear();
