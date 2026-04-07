@@ -60,7 +60,6 @@ export class FlightState extends BasePlayerState {
 
     // Check if we entered Flight with a super dive request (from Hover double-tap LT)
     if (player.consumeSuperDiveFlag()) {
-      console.log('[SuperDive] Flight entered with dive flag! Activating super dive immediately');
       this.superDiving = true;
       this.currentSpeed = Math.max(this.currentSpeed, MAX_SPEED * 0.6);
     }
@@ -95,7 +94,6 @@ export class FlightState extends BasePlayerState {
     if (this.superDiving) {
       const height = player.getHeightAboveGround();
       if (height < 15) {
-        console.log(`[SuperDive] LANDING TRIGGERED! height=${height.toFixed(1)} speed=${this.currentSpeed.toFixed(0)}`);
         this.superDiving = false;
         return PlayerStateType.Landing;
       }
@@ -190,21 +188,15 @@ export class FlightState extends BasePlayerState {
       if (this.descendWasReleased) {
         const timeSinceLastPress = now - this.lastDescendPressTime;
         if (timeSinceLastPress < 400 && this.lastDescendPressTime > 0) {
-          // DOUBLE TAP confirmed!
-          console.log(`[SuperDive] DOUBLE TAP DETECTED! timeBetween=${timeSinceLastPress.toFixed(0)}ms speed=${this.currentSpeed.toFixed(0)}`);
           this.superDiving = true;
           this.lastDescendPressTime = 0;
           this.currentSpeed = Math.max(this.currentSpeed, MAX_SPEED * 0.6);
         } else {
-          console.log(`[SuperDive] First tap registered. trigger=${input.descendTrigger.toFixed(2)} wasReleased=${this.descendWasReleased}`);
           this.lastDescendPressTime = now;
         }
         this.descendWasReleased = false;
       }
     } else if (input.descendTrigger < 0.15) {
-      if (!this.descendWasReleased && this.lastDescendPressTime > 0) {
-        console.log(`[SuperDive] Released. trigger=${input.descendTrigger.toFixed(2)} timeSincePress=${(now - this.lastDescendPressTime).toFixed(0)}ms`);
-      }
       this.descendWasReleased = true;
     }
 
@@ -214,13 +206,9 @@ export class FlightState extends BasePlayerState {
       player.setPitch(Math.PI * 0.45);
 
       const vel = player.getVelocity();
-      const height = player.getHeightAboveGround();
-      console.log(`[SuperDive] ACTIVE speed=${this.currentSpeed.toFixed(0)} height=${height.toFixed(1)} vel.y=${vel.y.toFixed(1)} pitch=${player.getPitch().toFixed(2)}`);
-
       if (vel.y > 0) {
         vel.y = -Math.abs(vel.y);
         player.setVelocity(vel);
-        console.log(`[SuperDive] Reversed upward velocity to ${vel.y.toFixed(1)}`);
       }
 
       player.setCurrentSpeed(this.currentSpeed);

@@ -576,7 +576,6 @@ export class Player {
     // Use the higher of current speed or stored dive speed for maximum impact
     if (previousStateType === PlayerStateType.Landing && newStateType === PlayerStateType.Grounded) {
       const landingSpeed = Math.max(previousSpeed, this.superDiveSpeed, 50);
-      console.log(`[SuperDive] SUPERHERO LANDING! prevSpeed=${previousSpeed.toFixed(0)} diveSpeed=${this.superDiveSpeed.toFixed(0)} landingSpeed=${landingSpeed.toFixed(0)}`);
       this.triggerSuperheroLanding(landingSpeed);
       this.superDiveSpeed = 0;
     }
@@ -584,7 +583,6 @@ export class Player {
     // Store dive speed when entering Landing from Flight
     if (previousStateType === PlayerStateType.Flight && newStateType === PlayerStateType.Landing) {
       this.superDiveSpeed = previousSpeed;
-      console.log(`[SuperDive] Flight→Landing transition, stored diveSpeed=${previousSpeed.toFixed(0)}`);
     }
   }
 

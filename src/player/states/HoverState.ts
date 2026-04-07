@@ -65,7 +65,7 @@ export class HoverState extends BasePlayerState {
       if (this.descendWasReleased) {
         if (now - this.lastDescendPressTime < 400 && this.lastDescendPressTime > 0) {
           // DOUBLE TAP! Transition to Flight with dive flag
-          console.log('[SuperDive] DOUBLE TAP from HOVER! Transitioning to Flight with dive');
+          // Double tap confirmed - transition to flight with dive
           player.setSuperDiveFlag(true);
           return PlayerStateType.Flight;
         }
