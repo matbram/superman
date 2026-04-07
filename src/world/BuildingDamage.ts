@@ -111,6 +111,21 @@ interface DebrisPiece {
 }
 
 /**
+ * Pancaking floor section - upper portion of building falling after floor collapse
+ * Uses a single box mesh for the entire falling section (performant)
+ */
+interface PancakeSection {
+  sectionMesh: Mesh;       // Single box representing upper building portion
+  buildingMesh: Mesh;      // Reference to original building
+  currentY: number;        // Current world Y position
+  targetY: number;         // Where it will land (top of floor below, or ground)
+  fallVelocity: number;    // Accelerating under gravity
+  floorsAbove: number;     // How many floors this section contains
+  structure: BuildingStructure | null; // Reference for cascading damage
+  hasImpacted: boolean;
+}
+
+/**
  * Collapsing building - building that is falling over
  */
 interface CollapsingBuilding {
@@ -142,6 +157,7 @@ export class BuildingDamage {
   private buildingStructures: Map<Mesh, BuildingStructure> = new Map();
   private debrisMaterials: StandardMaterial[] = [];
   private collapsingBuildings: CollapsingBuilding[] = [];
+  private pancakeSections: PancakeSection[] = [];
   private dustClouds: DustCloud[] = [];
 
   // Debris spawn cooldown tracking - prevents chain spawning
@@ -436,8 +452,8 @@ export class BuildingDamage {
   }
 
   /**
-   * Collapses a single floor - upper floors pancake down onto it
-   * This can cascade: pancaking damage can break the floor below
+   * Collapses a single floor - creates a visual pancake section that falls
+   * Upper floors drop as a single mesh onto the floor below, causing cascade
    */
   private collapseFloor(structure: BuildingStructure, floorIndex: number, damageOrigin: Vector3): void {
     const floor = structure.floors[floorIndex];
@@ -445,6 +461,7 @@ export class BuildingDamage {
 
     const bounds = structure.bounds;
     const buildingSize = bounds.max.subtract(bounds.min);
+    const floorWorldY = bounds.min.y + floor.floorY * buildingSize.y;
 
     // Break ALL remaining breakpoints on this floor
     for (const bp of structure.breakPoints) {
@@ -454,27 +471,65 @@ export class BuildingDamage {
     }
 
     // Dust cloud at floor level
-    this._impactPos.set(
-      structure.originalPosition.x,
-      bounds.min.y + floor.floorY * buildingSize.y,
-      structure.originalPosition.z
-    );
+    this._impactPos.set(structure.originalPosition.x, floorWorldY, structure.originalPosition.z);
     this.spawnDustCloud(this._impactPos, 6, 1.5);
 
-    // Cascading damage: upper floors pancake down
-    // Each collapsed floor damages the one below it
-    if (floorIndex > 0) {
-      const floorBelow = structure.floors[floorIndex - 1];
-      if (!floorBelow.collapsed) {
-        // Pancake damage - break some breakpoints on the floor below
-        const cascadeDamage = Math.floor(floorBelow.totalPoints * 0.4 * PANCAKE_DAMAGE_MULT);
-        let damaged = 0;
-        for (const bp of structure.breakPoints) {
-          if (bp.floor === floorIndex - 1 && !bp.broken && damaged < cascadeDamage) {
-            this.breakChunkWithType(structure, bp, damageOrigin, 25);
-            damaged++;
-          }
+    // Count how many floors above this one are still intact
+    let floorsAbove = 0;
+    for (let i = floorIndex + 1; i < structure.floors.length; i++) {
+      if (!structure.floors[i].collapsed) floorsAbove++;
+    }
+
+    // Create a visible pancake section - the upper building portion falls
+    if (floorsAbove > 0) {
+      const upperHeight = buildingSize.y * (floorsAbove / structure.floors.length);
+      const sectionStartY = floorWorldY + buildingSize.y / structure.floors.length;
+
+      // Find where it should land (top of next intact floor below, or ground)
+      let landingY = bounds.min.y; // Ground level
+      for (let i = floorIndex - 1; i >= 0; i--) {
+        if (!structure.floors[i].collapsed) {
+          landingY = bounds.min.y + structure.floors[i].floorY * buildingSize.y
+            + buildingSize.y / structure.floors.length;
+          break;
         }
+      }
+
+      // Create a single box mesh for the falling section
+      const sectionMesh = MeshBuilder.CreateBox(
+        `pancake_${this.pancakeSections.length}`,
+        { width: buildingSize.x * 0.95, height: upperHeight, depth: buildingSize.z * 0.95 },
+        this.scene
+      );
+      sectionMesh.position.set(
+        structure.originalPosition.x,
+        sectionStartY + upperHeight * 0.5,
+        structure.originalPosition.z
+      );
+      sectionMesh.material = structure.mesh.material;
+      sectionMesh.isPickable = false;
+
+      this.pancakeSections.push({
+        sectionMesh,
+        buildingMesh: structure.mesh,
+        currentY: sectionMesh.position.y,
+        targetY: landingY + upperHeight * 0.5,
+        fallVelocity: 0,
+        floorsAbove,
+        structure,
+        hasImpacted: false,
+      });
+
+      // Shrink the original building to represent only the lower surviving portion
+      const survivingFraction = floorIndex / structure.floors.length;
+      if (survivingFraction > 0.05) {
+        structure.mesh.scaling.y = survivingFraction;
+        structure.mesh.position.y = bounds.min.y + (buildingSize.y * survivingFraction) * 0.5;
+      }
+
+      // Mark upper floors as collapsed too (they're now part of the pancake section)
+      for (let i = floorIndex + 1; i < structure.floors.length; i++) {
+        structure.floors[i].collapsed = true;
       }
     }
 
@@ -1136,6 +1191,63 @@ export class BuildingDamage {
           collapse.mesh.position.y = 2;
           this.collapsingBuildings.splice(i, 1);
         }
+      }
+    }
+
+    // Update pancake sections - upper building portions falling after floor collapse
+    for (let i = this.pancakeSections.length - 1; i >= 0; i--) {
+      const section = this.pancakeSections[i];
+
+      if (!section.hasImpacted) {
+        // Accelerate under gravity
+        section.fallVelocity += GRAVITY * deltaTime;
+        section.currentY += section.fallVelocity * deltaTime;
+        section.sectionMesh.position.y = section.currentY;
+
+        // Check if reached landing point
+        if (section.currentY <= section.targetY) {
+          section.currentY = section.targetY;
+          section.sectionMesh.position.y = section.targetY;
+          section.hasImpacted = true;
+
+          // Impact effects - dust ring and debris
+          const impactPos = section.sectionMesh.position;
+          this.spawnCollapseDust(impactPos, section.floorsAbove * 5);
+          this.spawnImpactDebris(impactPos, Math.abs(section.fallVelocity) * 0.5, 6, true);
+
+          // Cascading damage - the impact breaks the floor below
+          if (section.structure && section.structure.floors) {
+            // Find the floor we landed on and damage it
+            for (let f = section.structure.floors.length - 1; f >= 0; f--) {
+              const fl = section.structure.floors[f];
+              if (!fl.collapsed) {
+                // Impact from above breaks breakpoints on this floor
+                const cascadeDamage = Math.floor(fl.totalPoints * 0.35 * PANCAKE_DAMAGE_MULT);
+                let damaged = 0;
+                for (const bp of section.structure.breakPoints) {
+                  if (bp.floor === f && !bp.broken && damaged < cascadeDamage) {
+                    bp.broken = true;
+                    fl.brokenPoints++;
+                    damaged++;
+                  }
+                }
+                // Re-check structural integrity after cascade damage
+                this.checkStructuralIntegrity(section.structure, impactPos);
+                break;
+              }
+            }
+          }
+
+          // Clean up section mesh after a delay (let dust settle)
+          setTimeout(() => {
+            section.sectionMesh.dispose();
+          }, 3000);
+        }
+      }
+
+      // Remove completed sections
+      if (section.hasImpacted && section.currentY <= section.targetY) {
+        this.pancakeSections.splice(i, 1);
       }
     }
 
