@@ -15,7 +15,7 @@ const SUN_DISTANCE = 800;
 const CLOUD_HEIGHT_MIN = 120;
 const CLOUD_HEIGHT_MAX = 350;
 const CLOUD_RENDER_DISTANCE = 600;
-const NUM_CLOUD_CLUSTERS = 18; // Reduced for performance
+const NUM_CLOUD_CLUSTERS = 35; // More clouds for a fuller sky
 
 // Cloud dispersion constants
 const CLOUD_DISPERSE_RADIUS = 35;
@@ -205,7 +205,16 @@ export class Atmosphere {
    * Generates initial cloud clusters around origin
    */
   private generateInitialClouds(): void {
-    // Old sphere clouds disabled - replaced by VoxelClouds system
+    for (let i = 0; i < NUM_CLOUD_CLUSTERS; i++) {
+      const angle = (i / NUM_CLOUD_CLUSTERS) * Math.PI * 2;
+      const radius = 80 + Math.random() * (CLOUD_RENDER_DISTANCE - 80);
+
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+      const y = CLOUD_HEIGHT_MIN + Math.random() * (CLOUD_HEIGHT_MAX - CLOUD_HEIGHT_MIN);
+
+      this.createCloudCluster(new Vector3(x, y, z));
+    }
   }
 
   /**
