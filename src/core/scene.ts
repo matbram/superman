@@ -26,6 +26,8 @@ export interface SceneContext {
  */
 export function createScene(engine: Engine): SceneContext {
   const scene = new Scene(engine);
+  scene.autoClear = false;
+  scene.autoAnimate = false;
 
   // Set background color (sky blue gradient effect)
   scene.clearColor = new Color4(0.4, 0.6, 0.9, 1.0);
@@ -84,7 +86,7 @@ export function createScene(engine: Engine): SceneContext {
 function createSkyGradient(scene: Scene): void {
   const skybox = MeshBuilder.CreateSphere(
     'skyDome',
-    { diameter: 3000, segments: 16 },
+    { diameter: 3000, segments: 8 },
     scene
   );
   skybox.infiniteDistance = true;

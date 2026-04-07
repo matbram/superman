@@ -396,24 +396,30 @@ export class City {
     createCollisionBox(sidewalk, this.physicsManager);
     collisionMeshes.push(sidewalk);
 
-    // Generate buildings with varied styles
+    // Generate buildings on a proper city grid layout
+    // Streets run in a grid pattern with buildings filling the blocks
+    const STREET_WIDTH = 16;  // Width of streets between building rows
+    const BLOCK_DEPTH = 55;   // Depth of each city block (row of buildings)
     let buildingCount = 0;
-    let currentX = worldX + BUILDING_SPACING + 8;
-    const endX = worldX + CHUNK_SIZE - BUILDING_SPACING - 8;
-    const endZ = worldZ + CHUNK_SIZE - BUILDING_SPACING - 8;
+
+    // Iterate over city blocks (rows separated by streets)
+    let currentX = worldX + STREET_WIDTH * 0.5;
+    const endX = worldX + CHUNK_SIZE - STREET_WIDTH * 0.5;
 
     while (currentX < endX && buildingCount < BUILDINGS_PER_CHUNK) {
-      let currentZ = worldZ + BUILDING_SPACING + 8;
+      // Each block row has buildings packed along Z
+      let currentZ = worldZ + STREET_WIDTH * 0.5;
+      const endZ = worldZ + CHUNK_SIZE - STREET_WIDTH * 0.5;
+      const rowWidth = random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH);
 
       while (currentZ < endZ && buildingCount < BUILDINGS_PER_CHUNK) {
-        const bWidth = random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH);
+        const bWidth = rowWidth + random.range(-4, 4);
         const bDepth = random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH);
         const bHeight = random.range(MIN_BUILDING_HEIGHT, MAX_BUILDING_HEIGHT);
 
         const bx = currentX + bWidth / 2;
         const bz = currentZ + bDepth / 2;
 
-        // Choose building style based on seed
         const style = random.intRange(0, 4) as BuildingStyle;
         const buildingMeshes = this.createBuilding(
           key, buildingCount, style,
@@ -422,25 +428,20 @@ export class City {
         );
 
         for (const mesh of buildingMeshes) {
-          // Add to shadow caster (limit shadows for performance - only first building)
           if (buildingCount < 1 && mesh.name.includes('main')) {
             this.shadowGenerator.addShadowCaster(mesh);
           }
-          // Start buildings invisible - they will fade in
           mesh.visibility = 0;
-
-          // LOD: Hide mesh at distance - fog hides the transition
-          mesh.addLODLevel(1500, null);
-
           createCollisionBox(mesh, this.physicsManager);
           collisionMeshes.push(mesh);
         }
 
         buildingCount++;
-        currentZ += bDepth + BUILDING_SPACING + random.range(2, 8);
+        currentZ += bDepth + BUILDING_SPACING;
       }
 
-      currentX += random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH) + BUILDING_SPACING + random.range(2, 8);
+      // Next row: building width + street
+      currentX += rowWidth + STREET_WIDTH;
     }
 
     this.chunks.set(key, {

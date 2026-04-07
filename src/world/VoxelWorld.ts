@@ -22,9 +22,9 @@ import { Diag } from '../core/DiagnosticLog';
 import type { GravityZone } from './AlienShip';
 
 // ── Constants ──────────────────────────────────────────────────────────
-const MAX_DEBRIS = 200;
-const DEBRIS_SETTLE_TIME = 12000;
-const DEBRIS_CLEANUP_DIST = 120;
+const MAX_DEBRIS = 150;
+const DEBRIS_SETTLE_TIME = 4000;   // 4 seconds, not 12
+const DEBRIS_CLEANUP_DIST = 100;
 const VOXEL_CLEANUP_DIST = 350;
 const AUTO_DESTROY_THRESHOLD = 0.08;
 const DAMAGE_COOLDOWN = 60;
@@ -258,7 +258,7 @@ export class VoxelWorld {
       // Blocks EXPLODE outward from impact point with force
       const maxBlocks = Math.min(removed.length, MAX_DEBRIS - this.debris.length, 15);
       const step = removed.length > maxBlocks ? Math.floor(removed.length / maxBlocks) : 1;
-      const explosionForce = 8 + power * 0.05;
+      const explosionForce = 15 + power * 0.1;
 
       for (let i = 0; i < removed.length && this.debris.length < MAX_DEBRIS; i += step) {
         const pos = removed[i];
@@ -281,14 +281,14 @@ export class VoxelWorld {
         this.debris.push({
           mesh: m,
           velocity: new Vector3(
-            (dx / dist) * force + (Math.random() - 0.5) * 5,
-            (dy / dist) * force + Math.random() * force * 0.5 + 5,
-            (dz / dist) * force + (Math.random() - 0.5) * 5
+            (dx / dist) * force + (Math.random() - 0.5) * 8,
+            (dy / dist) * force * 0.5 + Math.random() * force * 0.8 + 10,
+            (dz / dist) * force + (Math.random() - 0.5) * 8
           ),
           angularVelocity: new Vector3(
-            (Math.random() - 0.5) * 10,
-            (Math.random() - 0.5) * 8,
-            (Math.random() - 0.5) * 10
+            (Math.random() - 0.5) * 14,
+            (Math.random() - 0.5) * 12,
+            (Math.random() - 0.5) * 14
           ),
           isChunk: true,
           settled: false,
@@ -688,7 +688,7 @@ export class VoxelWorld {
       // Building starts leaning
       this.leaningBuildings.set(vb, {
         angle: 0,
-        speed: 0.05 + lean.intensity * 0.2,
+        speed: 0.01 + lean.intensity * 0.05, // Starts very slow - cinematic
         dirX: lean.direction.x,
         dirZ: lean.direction.z,
       });
@@ -699,7 +699,8 @@ export class VoxelWorld {
   private updateLeaningBuildings(deltaTime: number): void {
     for (const [vb, lean] of this.leaningBuildings) {
       // Accelerate the lean
-      lean.speed += deltaTime * 0.8;
+      // Slow cinematic acceleration - building groans and tilts slowly
+      lean.speed += deltaTime * 0.25;
       lean.angle += lean.speed * deltaTime;
 
       // Apply visual lean to the voxel mesh
