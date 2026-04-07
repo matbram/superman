@@ -137,10 +137,8 @@ export class DayNightCycle {
   }
 
   public update(deltaTime: number): void {
-    // Time progresses slowly - 1 full day in ~8 minutes
-    // This lets you watch the lighting change and find the look you want
-    this.timeOfDay += this.timeSpeed * deltaTime;
-    if (this.timeOfDay >= 24) this.timeOfDay -= 24;
+    // Frozen at hour 8.5 - bright mid-morning daylight
+    this.timeOfDay = 8.5;
 
     const t = this.timeOfDay;
 
