@@ -216,7 +216,7 @@ export class InputManager {
       this.currentState.heatVisionHeld = this.isKeyHeld(KeyboardBindings.heatVision);
     }
     if (!this.currentState.superBreathHeld) {
-      this.currentState.superBreathHeld = this.isKeyHeld('KeyF');
+      this.currentState.superBreathHeld = this.isKeyHeld(KeyboardBindings.superBreath);
     }
 
     // Fly trigger from keyboard (Shift = full fly)

@@ -66,6 +66,7 @@ export const KeyboardBindings = {
   descend: ['ControlLeft', 'ControlRight'],  // Ctrl to descend (like LT)
   boost: ['KeyQ'],  // Q for boost
   heatVision: ['KeyE'],  // E for heat vision (laser eyes)
+  superBreath: ['KeyF'],  // F for super breath
   toggleDebug: ['Backquote'],
 } as const;
 
