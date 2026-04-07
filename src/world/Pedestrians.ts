@@ -138,25 +138,19 @@ export class PedestrianSystem {
     const rawX = playerPos.x + Math.cos(angle) * dist;
     const rawZ = playerPos.z + Math.sin(angle) * dist;
 
-    // Snap to sidewalk edge (next to avenue)
+    // Snap to SIDEWALK (not road!) next to nearest avenue
     const avenueSpacing = BLOCK_WIDTH + AVENUE_WIDTH;
     const nearestAvenue = Math.round(rawX / avenueSpacing) * avenueSpacing;
 
-    // Walk along Z on the sidewalk (left or right side of avenue)
+    // Walk on the sidewalk: 4-7 units from road edge (inside 8-unit sidewalk)
     const side = Math.random() > 0.5 ? -1 : 1;
-    const x = nearestAvenue + side * (AVENUE_WIDTH * 0.5 - 2);
+    const sidewalkOffset = AVENUE_WIDTH * 0.5 + 3 + Math.random() * 3; // Past the road edge, on sidewalk
+    const x = nearestAvenue + side * sidewalkOffset;
     const z = rawZ;
 
-    // Walk direction (along the sidewalk)
-    const walkAlongAvenue = Math.random() > 0.3; // 70% walk along avenue
-    let dirX: number, dirZ: number;
-    if (walkAlongAvenue) {
-      dirX = 0;
-      dirZ = Math.random() > 0.5 ? 1 : -1;
-    } else {
-      dirX = Math.random() > 0.5 ? 1 : -1;
-      dirZ = 0;
-    }
+    // Pedestrians always walk ALONG sidewalks (parallel to avenue), never across streets
+    const dirX = 0;
+    const dirZ = Math.random() > 0.5 ? 1 : -1;
 
     this.pedestrians.push({
       x, z,
@@ -207,6 +201,22 @@ export class PedestrianSystem {
     buffer[offset + 4] = 0; buffer[offset + 5] = 1; buffer[offset + 6] = 0; buffer[offset + 7] = 0;
     buffer[offset + 8] = 0; buffer[offset + 9] = 0; buffer[offset + 10] = 1; buffer[offset + 11] = 0;
     buffer[offset + 12] = x; buffer[offset + 13] = y; buffer[offset + 14] = z; buffer[offset + 15] = 1;
+  }
+
+  /**
+   * Kill pedestrians near a point (heat vision, explosions, etc.)
+   */
+  public killNear(position: Vector3, radius: number): number {
+    let killed = 0;
+    for (let i = this.pedestrians.length - 1; i >= 0; i--) {
+      const p = this.pedestrians[i];
+      const dx = p.x - position.x, dz = p.z - position.z;
+      if (dx * dx + dz * dz < radius * radius) {
+        this.pedestrians.splice(i, 1);
+        killed++;
+      }
+    }
+    return killed;
   }
 
   public dispose(): void {

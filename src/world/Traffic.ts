@@ -253,6 +253,29 @@ export class TrafficSystem {
     });
   }
 
+  /**
+   * Destroy vehicles near a point (heat vision, explosions)
+   */
+  public destroyNear(position: Vector3, radius: number): number {
+    let destroyed = 0;
+    for (let i = this.vehicles.length - 1; i >= 0; i--) {
+      const v = this.vehicles[i];
+      const dx = v.x - position.x, dz = v.z - position.z;
+      if (dx * dx + dz * dz < radius * radius) {
+        // Launch the vehicle into the air before removing
+        if (!v.knocked) {
+          v.knocked = true;
+          v.knockVelY = 15 + Math.random() * 10;
+          v.dirX = (dx / (Math.sqrt(dx * dx + dz * dz) || 1)) * 20;
+          v.dirZ = (dz / (Math.sqrt(dx * dx + dz * dz) || 1)) * 20;
+          v.speed = 25;
+        }
+        destroyed++;
+      }
+    }
+    return destroyed;
+  }
+
   public dispose(): void {
     for (const v of this.vehicles) {
       for (const m of v.meshes) m.dispose();

@@ -109,9 +109,9 @@ export class StreetLife {
     const avenueSpacing = BLOCK_WIDTH + AVENUE_WIDTH;
 
     for (let ax = worldX + AVENUE_WIDTH * 0.5; ax < worldX + CHUNK_SIZE; ax += avenueSpacing) {
-      // Trees on left side of avenue
+      // Trees on left sidewalk (5 units from block edge = middle of 8-unit sidewalk)
       for (let z = worldZ + 8; z < worldZ + CHUNK_SIZE - 8; z += TREE_SPACING + rand() * 5) {
-        const tx = ax - AVENUE_WIDTH * 0.5 + 2; // On the sidewalk edge
+        const tx = ax - AVENUE_WIDTH * 0.5 + 5;
         const treeH = 3 + rand() * 2;
         const canopySize = 0.8 + rand() * 0.4;
 
@@ -123,9 +123,9 @@ export class StreetLife {
         this.setScaleTranslation(canopyMatrices, canopySize, tx, treeH + 2 * canopySize, z);
       }
 
-      // Trees on right side
+      // Trees on right sidewalk
       for (let z = worldZ + 12; z < worldZ + CHUNK_SIZE - 8; z += TREE_SPACING + rand() * 5) {
-        const tx = ax + AVENUE_WIDTH * 0.5 - 2;
+        const tx = ax + AVENUE_WIDTH * 0.5 - 5;
         const treeH = 3 + rand() * 2;
         const canopySize = 0.8 + rand() * 0.4;
 
@@ -136,7 +136,7 @@ export class StreetLife {
 
       // Hydrants along avenue (left side only)
       for (let z = worldZ + 20; z < worldZ + CHUNK_SIZE - 20; z += HYDRANT_SPACING) {
-        const hx = ax - AVENUE_WIDTH * 0.5 + 1;
+        const hx = ax - AVENUE_WIDTH * 0.5 + 3; // On the sidewalk
         Matrix.TranslationToRef(hx, 0.75, z, StreetLife._tmpMat);
         hydMatrices.push(...this.matrixToArray(StreetLife._tmpMat));
       }

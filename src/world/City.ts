@@ -410,11 +410,15 @@ export class City {
         const inStreetZ = (z - worldZ) % (BLOCK_DEPTH_MIN + STREET_WIDTH) < STREET_WIDTH;
         if (!inStreetX && !inStreetZ) continue;
 
+        // Place pole on the sidewalk (offset 6 units from avenue center toward building)
+        const lampX = inStreetX ? x + (AVENUE_WIDTH * 0.5 - 3) * (Math.random() > 0.5 ? 1 : -1) : x;
+        const lampZ = inStreetZ ? z + (STREET_WIDTH * 0.5 - 3) * (Math.random() > 0.5 ? 1 : -1) : z;
+
         // Pole
         const pole = MeshBuilder.CreateCylinder('lamp_pole', {
           diameter: 0.5, height: POLE_HEIGHT, tessellation: 4
         }, this.scene);
-        pole.position = new Vector3(x, POLE_HEIGHT / 2 + SIDEWALK_HEIGHT, z);
+        pole.position = new Vector3(lampX, POLE_HEIGHT / 2 + SIDEWALK_HEIGHT, lampZ);
         pole.material = this.lampPoleMat;
         pole.isPickable = false;
         pole.freezeWorldMatrix();
@@ -424,7 +428,7 @@ export class City {
         const globe = MeshBuilder.CreateSphere('lamp_light', {
           diameter: 2.5, segments: 4
         }, this.scene);
-        globe.position = new Vector3(x, POLE_HEIGHT + 1.5 + SIDEWALK_HEIGHT, z);
+        globe.position = new Vector3(lampX, POLE_HEIGHT + 1.5 + SIDEWALK_HEIGHT, lampZ);
         globe.material = this.streetLightMat;
         globe.isPickable = false;
         globe.freezeWorldMatrix();
@@ -701,7 +705,7 @@ export class City {
 
         // ── SIDEWALK for this city block ──
         // Raised concrete platform under the buildings, with 4-unit sidewalk overhang
-        const SW_OVERHANG = 4; // Sidewalk extends 4 units past building edges
+        const SW_OVERHANG = 8; // Wide sidewalks: room for trees, lamps, pedestrians
         const swX = avenueX - SW_OVERHANG;
         const swZ = streetZ - SW_OVERHANG;
         const swW = actualBlockW + SW_OVERHANG * 2;

@@ -935,6 +935,11 @@ export class Player {
     this.heatVision.voxelWorld = voxelWorld;
   }
 
+  public setHeatVisionTargetSystems(pedestrians: any, traffic: any): void {
+    this.heatVision.pedestrianSystem = pedestrians;
+    this.heatVision.trafficSystem = traffic;
+  }
+
   /**
    * Updates heat vision based on input
    * When active, left stick controls beam direction instead of movement

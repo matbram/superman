@@ -42,8 +42,10 @@ export class HeatVision {
   // Callbacks
   private onBuildingDamage: ((building: AbstractMesh, position: Vector3, damage: number) => void) | null = null;
 
-  // VoxelWorld for DDA raycast (set externally for accurate block-level targeting)
-  public voxelWorld: any = null; // import type would create circular dep
+  // External systems (set from main.ts)
+  public voxelWorld: any = null;
+  public pedestrianSystem: any = null;
+  public trafficSystem: any = null;
 
   constructor(scene: Scene, physicsManager: PhysicsManager) {
     this.scene = scene;
@@ -232,6 +234,13 @@ export class HeatVision {
 
     if (!hitBuilding) {
       Diag.count('HeatVision', 'miss');
+    }
+
+    // Heat vision kills pedestrians and destroys vehicles along the beam path
+    if (hitPoint) {
+      const killRadius = 5;
+      if (this.pedestrianSystem) this.pedestrianSystem.killNear(hitPoint, killRadius);
+      if (this.trafficSystem) this.trafficSystem.destroyNear(hitPoint, killRadius);
     }
 
     // Position and orient beams from eyes
