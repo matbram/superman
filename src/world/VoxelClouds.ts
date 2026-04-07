@@ -16,10 +16,11 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import '@babylonjs/core/Meshes/thinInstanceMesh';
 
 const CLOUD_HEIGHT_MIN = 280;
-const CLOUD_HEIGHT_MAX = 420;
-const NUM_CLOUDS = 25;
-const VOXELS_PER_CLOUD = 150;   // Lots of voxels packed tight = solid mass
-const VOXEL_SIZE = 6;           // Bigger cubes that overlap = solid look
+const CLOUD_HEIGHT_MAX = 400;
+const NUM_CLOUDS = 20;
+const BLOBS_PER_CLOUD = 5;     // Each cloud is made of overlapping blob clusters
+const VOXELS_PER_BLOB = 25;    // Tightly packed spheres per blob
+const VOXEL_SIZE = 12;         // BIG spheres that heavily overlap = solid puffy mass
 const DISPERSE_RADIUS = 50;
 const DISPERSE_FORCE = 120;
 const RECOVER_SPEED = 4;       // Slow recovery = floaty feel
@@ -51,9 +52,10 @@ export class VoxelClouds {
   constructor(scene: Scene) {
     this.scene = scene;
 
-    // Source mesh: single white cube, all clouds are thin instances
-    this.cloudMesh = MeshBuilder.CreateBox('cloudVoxelSrc', {
-      size: VOXEL_SIZE,
+    // Source mesh: SPHERE - spheres overlap into puffy billowy shapes
+    this.cloudMesh = MeshBuilder.CreateSphere('cloudVoxelSrc', {
+      diameter: VOXEL_SIZE,
+      segments: 6,  // Low poly for performance
     }, scene);
 
     const mat = new StandardMaterial('cloudVoxelMat', scene);
@@ -72,30 +74,35 @@ export class VoxelClouds {
       const cy = CLOUD_HEIGHT_MIN + Math.random() * (CLOUD_HEIGHT_MAX - CLOUD_HEIGHT_MIN);
       const cz = (Math.random() - 0.5) * CLOUD_SPREAD * 2;
 
-      // Cloud dimensions - wide and flat like real cumulus
-      const cloudWidth = 60 + Math.random() * 80;
-      const cloudDepth = 50 + Math.random() * 70;
-      const cloudHeight = 10 + Math.random() * 15;
+      // Each cloud is made of overlapping BLOBS (puffy lumps)
+      // Blobs are spread horizontally, each one is a tight cluster of spheres
+      for (let b = 0; b < BLOBS_PER_CLOUD; b++) {
+        // Blob center offset from cloud center (spread horizontally)
+        const blobX = cx + (Math.random() - 0.5) * 60;
+        const blobY = cy + (Math.random() - 0.5) * 8;  // Very flat vertically
+        const blobZ = cz + (Math.random() - 0.5) * 50;
+        const blobRadius = 8 + Math.random() * 12; // Each blob is a tight sphere cluster
 
-      for (let v = 0; v < VOXELS_PER_CLOUD; v++) {
-        // GAUSSIAN distribution: most voxels near center, fewer at edges
-        // This creates a dense solid core with wispy edges
-        const gx = (Math.random() + Math.random() + Math.random()) / 3 - 0.5; // Bell curve -0.5 to 0.5
-        const gy = (Math.random() + Math.random() + Math.random()) / 3 - 0.5;
-        const gz = (Math.random() + Math.random() + Math.random()) / 3 - 0.5;
+        for (let v = 0; v < VOXELS_PER_BLOB; v++) {
+          // Pack spheres TIGHTLY within the blob radius
+          // Gaussian keeps most near center for solid puffy core
+          const rx = (Math.random() + Math.random()) / 2 - 0.5;
+          const ry = (Math.random() + Math.random()) / 2 - 0.5;
+          const rz = (Math.random() + Math.random()) / 2 - 0.5;
 
-        // Distance from center determines scale - bigger at core, smaller at edges
-        const distFromCenter = Math.sqrt(gx * gx + gy * gy + gz * gz) * 2;
-        const coreScale = Math.max(0.4, 1.5 - distFromCenter); // Bigger near center
+          // Scale: bigger at center, smaller at edges for puffy falloff
+          const dist = Math.sqrt(rx * rx + ry * ry + rz * rz) * 2;
+          const scale = Math.max(0.5, 1.3 - dist * 0.8);
 
-        this.voxels.push({
-          homeX: cx + gx * cloudWidth,
-          homeY: cy + gy * cloudHeight,
-          homeZ: cz + gz * cloudDepth,
-          offsetX: 0, offsetY: 0, offsetZ: 0,
-          velX: 0, velY: 0, velZ: 0,
-          scale: coreScale * (0.8 + Math.random() * 0.4),
-        });
+          this.voxels.push({
+            homeX: blobX + rx * blobRadius * 2,
+            homeY: blobY + ry * blobRadius * 0.6, // Squash vertically = flat puffy
+            homeZ: blobZ + rz * blobRadius * 2,
+            offsetX: 0, offsetY: 0, offsetZ: 0,
+            velX: 0, velY: 0, velZ: 0,
+            scale: scale * (0.8 + Math.random() * 0.4),
+          });
+        }
       }
     }
 
