@@ -660,8 +660,17 @@ export class AlienShip {
 
         const hit = this.voxelWorld.fullCollideRay(this.shipPosition, direction, 500, this.physicsManager);
         if (hit.hit && hit.building) {
-          // Same destruction as Superman - direct grid damage at exact block
-          this.voxelWorld.applyDamageAtGrid(hit.building, hit.gridX, hit.gridY, hit.gridZ, 440);
+          // Massive laser damage - bigger radius than normal
+          this.voxelWorld.applyDamageAtGrid(hit.building, hit.gridX, hit.gridY, hit.gridZ, 600);
+          // Hit adjacent blocks too for wider destruction
+          for (let dx = -1; dx <= 1; dx++) {
+            for (let dz = -1; dz <= 1; dz++) {
+              if (dx === 0 && dz === 0) continue;
+              this.voxelWorld.applyDamageAtGrid(
+                hit.building, hit.gridX + dx * 2, hit.gridY, hit.gridZ + dz * 2, 400
+              );
+            }
+          }
         }
 
         // Kill NPCs at laser impact

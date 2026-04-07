@@ -187,6 +187,37 @@ export class TrafficSystem {
         this.vehicles.splice(i, 1);
       }
     }
+
+    // ── Vehicle-to-vehicle collision ──
+    // Vehicles that are close and heading toward each other slow down
+    const COLLISION_DIST = 12; // Vehicle length + buffer
+    const COLLISION_DIST_SQ = COLLISION_DIST * COLLISION_DIST;
+    for (let i = 0; i < this.vehicles.length; i++) {
+      const a = this.vehicles[i];
+      if (a.knocked) continue;
+      for (let j = i + 1; j < this.vehicles.length; j++) {
+        const b = this.vehicles[j];
+        if (b.knocked) continue;
+        const cdx = a.x - b.x, cdz = a.z - b.z;
+        if (cdx * cdx + cdz * cdz < COLLISION_DIST_SQ) {
+          // Both vehicles going same direction on same road - rear one stops
+          if (a.dirX === b.dirX && a.dirZ === b.dirZ) {
+            // Vehicle further "behind" (opposite to dir) slows down
+            const aDot = a.x * a.dirX + a.z * a.dirZ;
+            const bDot = b.x * b.dirX + b.z * b.dirZ;
+            if (aDot < bDot) {
+              a.speed = Math.max(0, a.speed - 20 * deltaTime);
+            } else {
+              b.speed = Math.max(0, b.speed - 20 * deltaTime);
+            }
+          } else {
+            // Different directions = intersection collision, both slow
+            a.speed = Math.max(2, a.speed * 0.95);
+            b.speed = Math.max(2, b.speed * 0.95);
+          }
+        }
+      }
+    }
   }
 
   private trySpawnVehicle(playerPos: Vector3): void {
@@ -204,33 +235,33 @@ export class TrafficSystem {
     let x: number, z: number, dirX: number, dirZ: number;
 
     if (driveOnAvenue) {
-      // Snap to avenue center (avenues repeat every BLOCK_WIDTH + AVENUE_WIDTH = 110)
+      // Snap to nearest avenue center line
+      // Avenues start at AVENUE_WIDTH/2 within each chunk, repeat every (BLOCK_WIDTH + AVENUE_WIDTH)
       const avenueSpacing = BLOCK_WIDTH + AVENUE_WIDTH;
       const chunkOriginX = Math.floor(rawX / CHUNK_SIZE) * CHUNK_SIZE;
       const localX = rawX - chunkOriginX;
-      // Find nearest avenue center within the chunk
       const avenueIndex = Math.round((localX - AVENUE_WIDTH * 0.5) / avenueSpacing);
       x = chunkOriginX + AVENUE_WIDTH * 0.5 + avenueIndex * avenueSpacing;
 
-      // Lane offset: stay within the road surface (not on sidewalks)
-      // Road is AVENUE_WIDTH wide, sidewalks are 12 units on each side
-      // So driveable area is center ± (AVENUE_WIDTH/2 - 12) = ±8
-      const laneOffset = (Math.random() > 0.5 ? 1 : -1) * (3 + Math.random() * 5);
+      // TIGHT lane offset: only ±3-6 units from center
+      // Avenue is 40 wide, sidewalk is 12 on each side = road is ±8 from center
+      // Keep vehicles well within that to account for grid alignment variance
+      const laneOffset = (Math.random() > 0.5 ? 1 : -1) * (2 + Math.random() * 4);
       x += laneOffset;
 
       z = rawZ;
       dirX = 0;
       dirZ = Math.random() > 0.5 ? 1 : -1;
     } else {
-      // Snap to cross street center
-      const streetSpacing = 160 + STREET_WIDTH; // approximate average block depth + street
+      // Snap to nearest cross street center
+      const streetSpacing = 160 + STREET_WIDTH;
       const chunkOriginZ = Math.floor(rawZ / CHUNK_SIZE) * CHUNK_SIZE;
       const localZ = rawZ - chunkOriginZ;
       const streetIndex = Math.round((localZ - STREET_WIDTH * 0.5) / streetSpacing);
       z = chunkOriginZ + STREET_WIDTH * 0.5 + streetIndex * streetSpacing;
 
-      // Stay within cross street road surface (narrower, ±4 from center)
-      const lane = (Math.random() > 0.5 ? 1 : -1) * (2 + Math.random() * 3);
+      // Tight lane offset for narrower cross streets
+      const lane = (Math.random() > 0.5 ? 1 : -1) * (1.5 + Math.random() * 2.5);
       z += lane;
 
       x = rawX;
