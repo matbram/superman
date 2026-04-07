@@ -23,21 +23,25 @@ export class GroundedState extends BasePlayerState {
   private flyWasReleased: boolean = true;
 
   enter(player: Player): void {
-    // Reset flight-specific state when landing
-    player.setRoll(0);
-    player.setPitch(0);
-    // Reset movement velocity to prevent carrying over flight momentum
+    // DON'T snap pitch/roll to 0 instantly - causes camera whip on superhero landing
+    // Instead, gradually level out during the grace period
     this.moveVelocity = Vector3.Zero();
-    // Completely zero all velocity to prevent any sliding
     player.setVelocity(new Vector3(0, 0, 0));
-    // Small grace period where controls are slightly damped for smooth landing
-    this.landingGracePeriod = 0.15;
+    this.landingGracePeriod = 0.3; // Longer grace period for smooth camera transition
   }
 
   update(player: Player, input: InputState, deltaTime: number): PlayerStateType | null {
     // Update landing grace period
+    // Update landing grace period
     if (this.landingGracePeriod > 0) {
       this.landingGracePeriod -= deltaTime;
+
+      // Smoothly level pitch and roll during grace period (prevents camera whip)
+      const currentPitch = player.getPitch();
+      const currentRoll = player.getRoll();
+      const levelRate = 8 * deltaTime; // Fast but smooth
+      player.setPitch(currentPitch * Math.max(0, 1 - levelRate));
+      player.setRoll(currentRoll * Math.max(0, 1 - levelRate));
     }
 
     // ── DOUBLE-TAP FLY → INSTANT MAX SPEED TAKEOFF ──
