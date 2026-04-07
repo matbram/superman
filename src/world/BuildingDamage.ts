@@ -60,6 +60,8 @@ const enum DebrisType {
 
 /**
  * Structural breakpoint - defines where a building can break
+ * When fragmented, each breakpoint has a corresponding segment mesh
+ * that IS the visible piece of the building. Breaking it detaches the mesh.
  */
 interface BreakPoint {
   relativePosition: Vector3;  // Position relative to building center (0-1 range)
@@ -68,6 +70,7 @@ interface BreakPoint {
   threshold: number;          // Damage threshold to break this point (0-1)
   floor: number;              // Which floor this breakpoint belongs to
   isLoadBearing: boolean;     // Center columns are load-bearing
+  segmentMesh: Mesh | null;   // The visible building segment (created on first damage)
 }
 
 /**
@@ -95,6 +98,7 @@ interface BuildingStructure {
   leanDirection: Vector3;     // Direction building is leaning
   isLeaning: boolean;         // Whether structural weakness detected
   weakestFloor: number;       // Index of most damaged floor
+  fragmented: boolean;        // Whether the building has been split into segment meshes
 }
 
 /**
@@ -262,6 +266,7 @@ export class BuildingDamage {
             threshold,
             floor,
             isLoadBearing: isCenter,
+            segmentMesh: null,
           });
           pointsOnFloor++;
         }
@@ -283,6 +288,7 @@ export class BuildingDamage {
       threshold: 0.1,
       floor: numFloors - 1,
       isLoadBearing: false,
+      segmentMesh: null,
     });
     breakPoints.push({
       relativePosition: new Vector3(-0.25, 0.95, 0.25),
@@ -291,6 +297,7 @@ export class BuildingDamage {
       threshold: 0.1,
       floor: numFloors - 1,
       isLoadBearing: false,
+      segmentMesh: null,
     });
 
     return { breakPoints, floors };
@@ -320,11 +327,55 @@ export class BuildingDamage {
         leanDirection: Vector3.Zero(),
         isLeaning: false,
         weakestFloor: -1,
+        fragmented: false,
       };
       this.buildingStructures.set(building, structure);
     }
 
     return structure;
+  }
+
+  /**
+   * Fragments a building on first damage - replaces the single mesh with
+   * a grid of smaller segment meshes. Each segment corresponds to a breakpoint.
+   * When a breakpoint breaks, its segment is detached and becomes debris.
+   * This makes the building visually show holes where pieces were knocked out.
+   *
+   * Only called once per building, and only when damage first occurs.
+   */
+  private fragmentBuilding(structure: BuildingStructure): void {
+    if (structure.fragmented) return;
+    structure.fragmented = true;
+
+    const bounds = structure.bounds;
+    const buildingSize = bounds.max.subtract(bounds.min);
+    const material = structure.mesh.material;
+
+    // Hide the original building mesh
+    structure.mesh.isVisible = false;
+
+    // Create a segment mesh for each non-broken breakpoint
+    for (const bp of structure.breakPoints) {
+      if (bp.broken) continue;
+
+      const seg = MeshBuilder.CreateBox(
+        `seg_${structure.mesh.name}_${bp.floor}`,
+        { width: bp.size.x, height: bp.size.y, depth: bp.size.z },
+        this.scene
+      );
+
+      seg.position.set(
+        structure.originalPosition.x + bp.relativePosition.x * buildingSize.x,
+        bounds.min.y + bp.relativePosition.y * buildingSize.y,
+        structure.originalPosition.z + bp.relativePosition.z * buildingSize.z
+      );
+
+      seg.material = material;
+      seg.isPickable = false;
+      seg.freezeWorldMatrix();
+
+      bp.segmentMesh = seg;
+    }
   }
 
   /**
@@ -587,6 +638,14 @@ export class BuildingDamage {
     this._impactPos.set(damageOrigin.x, damageOrigin.y + height * 0.3, damageOrigin.z);
     this.spawnDustCloud(this._impactPos, 6, 1.5);
 
+    // Clean up any remaining segment meshes
+    for (const bp of structure.breakPoints) {
+      if (bp.segmentMesh) {
+        bp.segmentMesh.dispose();
+        bp.segmentMesh = null;
+      }
+    }
+
     this.buildingStructures.delete(structure.mesh);
   }
 
@@ -750,8 +809,9 @@ export class BuildingDamage {
   }
 
   /**
-   * Enhanced chunk breaking with varied debris types (concrete, steel, glass)
-   * Creates more realistic destruction with different physics per material
+   * Enhanced chunk breaking - detaches the building segment mesh as debris.
+   * The segment IS the visible piece of the building, so removing it leaves a hole.
+   * For glass/steel types, creates a new shaped mesh instead.
    */
   private breakChunkWithType(
     structure: BuildingStructure,
@@ -760,71 +820,90 @@ export class BuildingDamage {
     speed: number
   ): void {
     if (this.debris.length >= MAX_DEBRIS_PIECES) {
+      // Still mark broken and hide segment so building shows the hole
       breakPoint.broken = true;
+      if (breakPoint.segmentMesh) {
+        breakPoint.segmentMesh.dispose();
+        breakPoint.segmentMesh = null;
+      }
       return;
     }
 
     breakPoint.broken = true;
 
+    // Fragment building on first damage - creates segment meshes
+    if (!structure.fragmented) {
+      this.fragmentBuilding(structure);
+    }
+
     const bounds = structure.bounds;
     const buildingSize = bounds.max.subtract(bounds.min);
 
-    const chunkPos = new Vector3(
-      structure.originalPosition.x + breakPoint.relativePosition.x * buildingSize.x,
-      bounds.min.y + breakPoint.relativePosition.y * buildingSize.y,
-      structure.originalPosition.z + breakPoint.relativePosition.z * buildingSize.z
-    );
+    const chunkPosX = structure.originalPosition.x + breakPoint.relativePosition.x * buildingSize.x;
+    const chunkPosY = bounds.min.y + breakPoint.relativePosition.y * buildingSize.y;
+    const chunkPosZ = structure.originalPosition.z + breakPoint.relativePosition.z * buildingSize.z;
 
     // Direction away from impact
-    const dirX = chunkPos.x - impactPosition.x;
-    const dirZ = chunkPos.z - impactPosition.z;
+    const dirX = chunkPosX - impactPosition.x;
+    const dirZ = chunkPosZ - impactPosition.z;
     const dirLen = Math.sqrt(dirX * dirX + dirZ * dirZ) || 1;
     const normDirX = dirX / dirLen;
     const normDirZ = dirZ / dirLen;
 
-    // Choose debris type based on breakpoint characteristics
+    // Choose debris type
     let debrisType: DebrisType;
     if (breakPoint.isLoadBearing) {
-      debrisType = DebrisType.Steel;  // Structural columns = steel
+      debrisType = DebrisType.Steel;
     } else if (Math.abs(breakPoint.relativePosition.x) > 0.3 || Math.abs(breakPoint.relativePosition.z) > 0.3) {
-      debrisType = Math.random() < 0.4 ? DebrisType.Glass : DebrisType.Concrete; // Outer walls = glass/concrete mix
+      debrisType = Math.random() < 0.4 ? DebrisType.Glass : DebrisType.Concrete;
     } else {
-      debrisType = DebrisType.Concrete; // Interior = concrete
+      debrisType = DebrisType.Concrete;
     }
 
-    // Create mesh shape based on debris type
-    let chunk: Mesh;
     const horizontalPush = Math.min(speed * 0.08, 8);
+    let chunk: Mesh;
     let vx: number, vy: number, vz: number;
     let avx: number, avy: number, avz: number;
 
-    switch (debrisType) {
-      case DebrisType.Steel: {
-        // Steel beams - long, thin, tumble slowly
+    // For concrete: reuse the segment mesh directly (it IS the building piece)
+    // For steel/glass: create a new shaped mesh and dispose the segment
+    if (debrisType === DebrisType.Concrete && breakPoint.segmentMesh) {
+      // Detach the segment mesh - it becomes the debris. The building now has a hole.
+      chunk = breakPoint.segmentMesh;
+      chunk.unfreezeWorldMatrix();
+      chunk.material = this.debrisMaterials[Math.floor(Math.random() * this.debrisMaterials.length)];
+      breakPoint.segmentMesh = null;
+
+      vx = normDirX * horizontalPush + (Math.random() - 0.5) * 3;
+      vy = 2 + Math.random() * 3;
+      vz = normDirZ * horizontalPush + (Math.random() - 0.5) * 3;
+      avx = (Math.random() - 0.5) * 2;
+      avy = (Math.random() - 0.5) * 1;
+      avz = (Math.random() - 0.5) * 2;
+    } else {
+      // Dispose the segment (leaves a hole) and create a new shaped mesh
+      if (breakPoint.segmentMesh) {
+        breakPoint.segmentMesh.dispose();
+        breakPoint.segmentMesh = null;
+      }
+
+      if (debrisType === DebrisType.Steel) {
         const beamLength = breakPoint.size.y * (0.8 + Math.random() * 0.4);
         chunk = MeshBuilder.CreateBox(`steel_${this.debris.length}`, {
-          width: breakPoint.size.x * 0.15,
-          height: beamLength,
-          depth: breakPoint.size.z * 0.15,
+          width: breakPoint.size.x * 0.15, height: beamLength, depth: breakPoint.size.z * 0.15,
         }, this.scene);
-        chunk.material = this.debrisMaterials[1]; // Darker material
+        chunk.material = this.debrisMaterials[1];
         vx = normDirX * horizontalPush * 0.5 + (Math.random() - 0.5) * 2;
         vy = 1 + Math.random() * 2;
         vz = normDirZ * horizontalPush * 0.5 + (Math.random() - 0.5) * 2;
         avx = (Math.random() - 0.5) * 1.5;
         avy = (Math.random() - 0.5) * 0.5;
         avz = (Math.random() - 0.5) * 1.5;
-        break;
-      }
-      case DebrisType.Glass: {
-        // Glass shards - small, flat, fast, spin quickly
-        const shardSize = Math.random() * 0.8 + 0.3;
+      } else { // Glass
+        const s = Math.random() * 0.8 + 0.3;
         chunk = MeshBuilder.CreateBox(`glass_${this.debris.length}`, {
-          width: shardSize,
-          height: shardSize * 0.1,
-          depth: shardSize * (0.5 + Math.random() * 0.5),
+          width: s, height: s * 0.1, depth: s * (0.5 + Math.random() * 0.5),
         }, this.scene);
-        // Use a slightly different material for glass
         chunk.material = this.debrisMaterials[3];
         vx = normDirX * horizontalPush * 2 + (Math.random() - 0.5) * 8;
         vy = (Math.random() - 0.5) * 5;
@@ -832,26 +911,10 @@ export class BuildingDamage {
         avx = (Math.random() - 0.5) * 10;
         avy = (Math.random() - 0.5) * 10;
         avz = (Math.random() - 0.5) * 10;
-        break;
       }
-      default: { // Concrete
-        chunk = MeshBuilder.CreateBox(`chunk_${this.debris.length}`, {
-          width: breakPoint.size.x,
-          height: breakPoint.size.y,
-          depth: breakPoint.size.z,
-        }, this.scene);
-        chunk.material = this.debrisMaterials[Math.floor(Math.random() * this.debrisMaterials.length)];
-        vx = normDirX * horizontalPush + (Math.random() - 0.5) * 3;
-        vy = 2 + Math.random() * 3;
-        vz = normDirZ * horizontalPush + (Math.random() - 0.5) * 3;
-        avx = (Math.random() - 0.5) * 2;
-        avy = (Math.random() - 0.5) * 1;
-        avz = (Math.random() - 0.5) * 2;
-        break;
-      }
+      chunk.position.set(chunkPosX, chunkPosY, chunkPosZ);
     }
 
-    chunk.position.copyFrom(chunkPos);
     chunk.isPickable = false;
     chunk.rotation.set(Math.random() * 0.3, Math.random() * Math.PI * 2, Math.random() * 0.3);
 
@@ -859,7 +922,7 @@ export class BuildingDamage {
       mesh: chunk,
       velocity: new Vector3(vx, vy, vz),
       angularVelocity: new Vector3(avx, avy, avz),
-      isChunk: debrisType === DebrisType.Concrete || debrisType === DebrisType.Steel,
+      isChunk: debrisType !== DebrisType.Glass,
       settled: false,
       settleTime: 0,
       debrisType,
