@@ -87,7 +87,7 @@ export class FlightState extends BasePlayerState {
     // SUPER DIVE: force landing at any speed when near ground
     if (this.superDiving) {
       const height = player.getHeightAboveGround();
-      if (height < LANDING_HEIGHT * 3) {
+      if (height < 15) { // Higher threshold for fast dive
         this.superDiving = false;
         return PlayerStateType.Landing;
       }
@@ -127,8 +127,8 @@ export class FlightState extends BasePlayerState {
     // Pitch control - airplane style (SKIP during super dive)
     let targetPitch = player.getPitch();
     if (this.superDiving) {
-      // Super dive overrides pitch - don't auto-level
-      targetPitch = -Math.PI * 0.45;
+      // POSITIVE pitch = nose down in our coordinate system
+      targetPitch = Math.PI * 0.45;
     } else if (!heatVisionActive && Math.abs(input.moveY) > 0.1) {
       targetPitch += input.moveY * PITCH_RATE * deltaTime;
     } else {
@@ -199,7 +199,7 @@ export class FlightState extends BasePlayerState {
     // Super dive mode: pitch straight down, accelerate hard, ignore brakes
     if (this.superDiving) {
       this.currentSpeed = Math.min(MAX_SPEED, this.currentSpeed + 500 * deltaTime);
-      player.setPitch(-Math.PI * 0.45); // Nose down ~80 degrees
+      player.setPitch(Math.PI * 0.45); // POSITIVE pitch = nose down in our coord system
 
       // Force velocity downward - override any upward momentum from boost
       const vel = player.getVelocity();
