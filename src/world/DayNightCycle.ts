@@ -21,27 +21,27 @@ const DAY_DURATION = 480; // Seconds for a full 24-hour cycle (8 minutes)
 const SKY_COLORS: [number, number, number, number][] = [
   [0,   0.02, 0.02, 0.08],  // Midnight - deep dark blue
   [4,   0.05, 0.05, 0.15],  // Pre-dawn - very dark blue
-  [5.5, 0.25, 0.15, 0.25],  // Dawn - purple-pink
-  [6.5, 0.50, 0.35, 0.25],  // Sunrise - orange-pink
-  [8,   0.25, 0.40, 0.70],  // Morning - clear blue
-  [12,  0.30, 0.45, 0.75],  // Noon - rich blue
-  [16,  0.28, 0.42, 0.68],  // Afternoon - blue
-  [18,  0.65, 0.38, 0.20],  // Sunset - golden orange
-  [19.5,0.35, 0.15, 0.25],  // Dusk - deep orange-purple
-  [21,  0.06, 0.04, 0.15],  // Evening - dark purple
+  [5.5, 0.35, 0.20, 0.30],  // Dawn - purple-pink
+  [6.5, 0.70, 0.45, 0.30],  // Sunrise - orange-pink
+  [8,   0.40, 0.60, 0.90],  // Morning - blue
+  [12,  0.45, 0.65, 0.95],  // Noon - bright blue
+  [16,  0.45, 0.60, 0.85],  // Afternoon - blue
+  [18,  0.85, 0.50, 0.25],  // Sunset - golden orange
+  [19.5,0.50, 0.20, 0.30],  // Dusk - deep orange-purple
+  [21,  0.08, 0.05, 0.18],  // Evening - dark purple
   [24,  0.02, 0.02, 0.08],  // Midnight again
 ];
 
 // Fog color keyframes [hour, R, G, B]
 const FOG_COLORS: [number, number, number, number][] = [
   [0,   0.02, 0.02, 0.06],
-  [5.5, 0.20, 0.12, 0.20],
-  [6.5, 0.55, 0.40, 0.28],
-  [8,   0.40, 0.50, 0.65],
-  [12,  0.45, 0.55, 0.70],
-  [18,  0.60, 0.42, 0.28],
-  [19.5,0.30, 0.14, 0.20],
-  [21,  0.04, 0.03, 0.10],
+  [5.5, 0.25, 0.15, 0.25],
+  [6.5, 0.80, 0.55, 0.35],
+  [8,   0.60, 0.70, 0.85],
+  [12,  0.65, 0.75, 0.90],
+  [18,  0.85, 0.60, 0.35],
+  [19.5,0.40, 0.18, 0.25],
+  [21,  0.05, 0.04, 0.12],
   [24,  0.02, 0.02, 0.06],
 ];
 
@@ -102,7 +102,7 @@ export class DayNightCycle {
     // Find meshes created by scene.ts (NOT creating duplicates)
     this.skyMaterial = (scene.getMeshByName('skyDome')?.material as StandardMaterial) || null!;
     this.sunMesh = scene.getMeshByName('sunDisc') as Mesh;
-    this.sunGlowMesh = scene.getMeshByName('sunGlow') as Mesh; // May be null - that's fine
+    this.sunGlowMesh = scene.getMeshByName('sunGlow') as Mesh;
 
     // Create moon mesh
     this.moonMesh = MeshBuilder.CreateSphere('moonDisc', {
@@ -181,7 +181,7 @@ export class DayNightCycle {
     if (this.skyMaterial) {
       this.skyMaterial.emissiveColor.set(skyColor[0], skyColor[1], skyColor[2]);
     }
-    // Don't override clearColor - Atmosphere's sky dome handles the sky visual
+    this.scene.clearColor.set(skyColor[0], skyColor[1], skyColor[2], 1.0);
 
     // ── Interpolate fog ──
     const fogColor = this.interpolateKeyframes(FOG_COLORS, t);

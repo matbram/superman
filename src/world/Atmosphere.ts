@@ -124,7 +124,7 @@ export class Atmosphere {
     sunMaterial.freeze();
     this.sunMesh.material = sunMaterial;
 
-    // Hide Atmosphere's sun - scene.ts sunDisc (managed by DayNightCycle) is the only visible sun
+    // Hide Atmosphere's sun - only scene.ts sunDisc is visible (one sun, not two)
     this.sunMesh.setEnabled(false);
 
     this.sunGlow = MeshBuilder.CreateSphere(
@@ -142,7 +142,7 @@ export class Atmosphere {
     glowMaterial.freeze();
     this.sunGlow.material = glowMaterial;
 
-    // Hide Atmosphere's glow too - only scene.ts sun is visible
+    // Hide Atmosphere's glow too
     this.sunGlow.setEnabled(false);
   }
 
