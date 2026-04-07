@@ -62,6 +62,7 @@ export class Player {
   private isFlightMode: boolean = false;
   private isBoostActive: boolean = false;
   private boostTakeoff: boolean = false;
+  private superDiveSpeed: number = 0; // Stores speed at dive start for landing impact
   private currentSpeed: number = 0;
   private speedParticles: ParticleSystem | null = null;
   private takeoffParticles: ParticleSystem | null = null;
@@ -572,8 +573,16 @@ export class Player {
 
     // ── SUPERHERO LANDING ──
     // When transitioning from Landing to Grounded, create dramatic ground impact
+    // Use the higher of current speed or stored dive speed for maximum impact
     if (previousStateType === PlayerStateType.Landing && newStateType === PlayerStateType.Grounded) {
-      this.triggerSuperheroLanding(previousSpeed);
+      const landingSpeed = Math.max(previousSpeed, this.superDiveSpeed, 50); // Minimum 50 for visible effect
+      this.triggerSuperheroLanding(landingSpeed);
+      this.superDiveSpeed = 0;
+    }
+
+    // Store dive speed when entering Landing from Flight
+    if (previousStateType === PlayerStateType.Flight && newStateType === PlayerStateType.Landing) {
+      this.superDiveSpeed = previousSpeed;
     }
   }
 
@@ -880,6 +889,10 @@ export class Player {
 
   public setBoostTakeoff(boost: boolean): void {
     this.boostTakeoff = boost;
+  }
+
+  public setSuperDiveSpeed(speed: number): void {
+    this.superDiveSpeed = speed;
   }
 
   public consumeBoostTakeoff(): boolean {

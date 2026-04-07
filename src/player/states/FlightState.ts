@@ -177,29 +177,30 @@ export class FlightState extends BasePlayerState {
       this.flyWasReleased = true;
     }
 
-    // ── DOUBLE-TAP DESCEND (LT) → SUPER DIVE + SUPERHERO LAND ──
-    // First tap records time but DOESN'T brake. Second tap within window = dive.
-    // If no second tap, brake kicks in after the window expires.
-    if (input.descendTrigger > 0.2) {
+    // ── DOUBLE-TAP LT → SUPER DIVE (instant descent + superhero landing) ──
+    // Single press = normal brake. Double-tap within 400ms = dive.
+    // Brake is delayed during the window so first tap doesn't kill speed.
+    if (input.descendTrigger > 0.3) {
       if (this.descendWasReleased) {
-        if (now - this.lastDescendPressTime < DOUBLE_TAP_WINDOW) {
-          // DOUBLE TAP! Super dive straight down
+        if (now - this.lastDescendPressTime < 400 && this.lastDescendPressTime > 0) {
+          // DOUBLE TAP confirmed! Trigger super dive
           this.superDiving = true;
           this.lastDescendPressTime = 0;
-          this.currentSpeed = Math.max(this.currentSpeed, MAX_SPEED * 0.5);
+          this.currentSpeed = Math.max(this.currentSpeed, MAX_SPEED * 0.6);
         } else {
           this.lastDescendPressTime = now;
         }
         this.descendWasReleased = false;
       }
-    } else if (input.descendTrigger < 0.1) {
+    } else if (input.descendTrigger < 0.15) {
+      // Trigger must go below 0.15 to count as "released" for next tap
       this.descendWasReleased = true;
     }
 
-    // Super dive mode: pitch straight down, accelerate hard, ignore brakes
+    // Super dive: pitch down, accelerate, ignore brakes, cause destruction on landing
     if (this.superDiving) {
       this.currentSpeed = Math.min(MAX_SPEED, this.currentSpeed + 500 * deltaTime);
-      player.setPitch(Math.PI * 0.45); // POSITIVE pitch = nose down in our coord system
+      player.setPitch(Math.PI * 0.45); // POSITIVE pitch = nose down
 
       // Force velocity downward - override any upward momentum from boost
       const vel = player.getVelocity();
@@ -220,10 +221,9 @@ export class FlightState extends BasePlayerState {
       this.targetSpeed = 0;
     }
 
-    // LT (descendTrigger) acts as HARD brake - BUT only after double-tap window expires
-    // This prevents the brake from killing speed before a double-tap can register
-    const withinDoubleTapWindow = (now - this.lastDescendPressTime) < DOUBLE_TAP_WINDOW && this.lastDescendPressTime > 0;
-    if (input.descendTrigger > 0.1 && !this.superDiving && !withinDoubleTapWindow) {
+    // LT as brake - delayed during double-tap window so first tap doesn't kill speed
+    const inDoubleTapWindow = this.lastDescendPressTime > 0 && (now - this.lastDescendPressTime) < 400;
+    if (input.descendTrigger > 0.1 && !this.superDiving && !inDoubleTapWindow) {
       this.currentSpeed -= BRAKE_DECELERATION * input.descendTrigger * deltaTime;
       this.currentSpeed = Math.max(0, this.currentSpeed);
 
