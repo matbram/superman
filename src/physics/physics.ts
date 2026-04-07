@@ -274,31 +274,33 @@ export class PhysicsManager {
     );
 
     if (sweepResult.hit && sweepResult.distance < movement.length()) {
-      const meshName = sweepResult.mesh?.name || '';
-      const isBuilding = meshName.startsWith('building_');
+      // Collision detected - stop at contact point with small buffer
+      const safeDistance = Math.max(0, sweepResult.distance - 0.05);
+      const movementDir = movement.length() > 0.001 ? movement.normalize() : Vector3.Zero();
 
-      if (character.isFlying && isBuilding) {
-        // MOMENTUM-BASED PENETRATION: Superman tears through buildings.
-        // Speed determines how much he slows down, not whether he stops.
-        // Faster = less slowdown (punches clean through).
-        // Slower = more slowdown (building absorbs more energy).
-        const speed = velocity.length();
-        const penetrationCost = Math.min(0.4, 10 / (speed + 1)); // Fast = low cost
-        const newSpeed = Math.max(10, speed * (1 - penetrationCost));
-        const speedRatio = speed > 0.1 ? newSpeed / speed : 1;
+      character.position = character.position.add(movementDir.scale(safeDistance));
 
-        // Superman goes through - full movement applied
-        character.position = targetPosition;
-        character.velocity = velocity.scale(speedRatio);
-      } else if (character.isFlying) {
-        // Non-building collision (ground, sidewalk) - deflect normally
-        const safeDistance = Math.max(0, sweepResult.distance - 0.05);
-        const movementDir = movement.length() > 0.001 ? movement.normalize() : Vector3.Zero();
-        character.position = character.position.add(movementDir.scale(safeDistance));
-
-        const pushForce = sweepResult.normal.scale(2);
-        character.position.addInPlace(pushForce.scale(deltaTime * 10));
-        character.velocity = velocity.scale(0.95);
+      if (character.isFlying) {
+        // In flight mode: Superman hits the surface and is stopped.
+        // The building damage callback will break blocks at the impact point.
+        // Next frame, the broken blocks are gone and Superman pushes through.
+        // Speed is preserved so momentum carries him through the hole.
+        //
+        // Speed reduction based on what was hit:
+        const meshName = sweepResult.mesh?.name || '';
+        const isBuilding = meshName.startsWith('building_') || meshName === 'voxelBlock';
+        if (isBuilding) {
+          // Building collision: preserve most velocity so Superman punches through
+          // The damage system breaks the wall, next frame he continues
+          character.velocity = velocity.scale(0.85);
+          // Small push into the surface so next frame's sweep starts past the broken blocks
+          character.position.addInPlace(movementDir.scale(0.5));
+        } else {
+          // Non-building (ground, sidewalk): deflect away
+          const pushForce = sweepResult.normal.scale(2);
+          character.position.addInPlace(pushForce.scale(deltaTime * 10));
+          character.velocity = velocity.scale(0.95);
+        }
       } else {
         // Ground mode: slide along surface
         const slideVelocity = this.calculateSlideVector(velocity, sweepResult.normal);
