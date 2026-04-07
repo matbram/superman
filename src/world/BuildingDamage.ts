@@ -369,18 +369,15 @@ export class BuildingDamage {
         building.name
       );
 
-      // Hide the original building mesh AND remove its collision
+      // Hide the original mesh visually but KEEP it in the collision system.
+      // Why: thin instances can't be picked by raycasts in Babylon.js.
+      // The original mesh stays as a raycast target for heat vision and other
+      // raycasts. Physics sphere sweep still works because we check mesh name
+      // and push Superman through building collisions.
       Diag.log('Voxelize', `${building.name} ${vb.gridWidth}x${vb.gridHeight}x${vb.gridDepth}`);
       building.isVisible = false;
-      building.checkCollisions = false;
-      building.isPickable = false;
-      if (this.physicsManager) {
-        this.physicsManager.removeCollisionMesh(building);
-        // Add voxel mesh to collision system so heat vision raycasts can hit it
-        const voxelMesh = vb.getMesh();
-        voxelMesh.isPickable = true;
-        this.physicsManager.addCollisionMesh(voxelMesh);
-      }
+      // Keep building.isPickable = true (for raycasts/heat vision)
+      // Keep building in collisionMeshes (for raycasts)
 
       this.voxelBuildings.set(building, vb);
       this.voxelMeshLookup.set(vb.getMesh(), { original: building, vb });
