@@ -115,6 +115,9 @@ export class City {
   private streetLightMat!: StandardMaterial;
   private lampPoleMat!: StandardMaterial;
 
+  // Street life system (trees, crosswalks, hydrants)
+  public streetLife: import('./StreetLife').StreetLife | null = null;
+
   constructor(
     scene: Scene,
     physicsManager: PhysicsManager,
@@ -695,6 +698,11 @@ export class City {
     // Add street light poles at avenue intersections
     this.addStreetLights(worldX, worldZ, collisionMeshes);
 
+    // Populate street life (trees, crosswalks, hydrants) via thin instances
+    if (this.streetLife) {
+      this.streetLife.populateChunk(key, worldX, worldZ, this.hashCoords(chunkX, chunkZ));
+    }
+
     this.chunks.set(key, {
       key,
       chunkX,
@@ -775,9 +783,13 @@ export class City {
     const chunk = this.chunks.get(key);
     if (!chunk) return;
 
-    // Notify external systems (e.g., BuildingDamage) to clean up
+    // Notify external systems to clean up
     if (this.onChunkUnload) {
       this.onChunkUnload(key);
+    }
+    // Remove street life thin instances for this chunk
+    if (this.streetLife) {
+      this.streetLife.removeChunk(key);
     }
 
     // Dispose all meshes (buildings + sidewalk)

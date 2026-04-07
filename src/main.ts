@@ -14,6 +14,8 @@ import { Atmosphere } from './world/Atmosphere';
 import { VoxelWorld } from './world/VoxelWorld';
 import { DayNightCycle } from './world/DayNightCycle';
 import { TrafficSystem } from './world/Traffic';
+import { StreetLife } from './world/StreetLife';
+import { PedestrianSystem } from './world/Pedestrians';
 import { AlienShip } from './world/AlienShip';
 import { Birds } from './world/Birds';
 import { Hud } from './ui/Hud';
@@ -39,6 +41,8 @@ class Game {
   private voxelWorld: VoxelWorld;
   private dayNightCycle: DayNightCycle;
   private traffic: TrafficSystem;
+  private streetLife: StreetLife;
+  private pedestrians: PedestrianSystem;
   private alienShip: AlienShip;
   private birds: Birds;
   private hud: Hud;
@@ -140,6 +144,13 @@ class Game {
 
     // Initialize traffic
     this.traffic = new TrafficSystem(this.sceneContext.scene);
+
+    // Street life (trees, crosswalks, hydrants) - thin instances
+    this.streetLife = new StreetLife(this.sceneContext.scene);
+    this.city.streetLife = this.streetLife;
+
+    // Pedestrians walking on sidewalks
+    this.pedestrians = new PedestrianSystem(this.sceneContext.scene);
 
     // Initialize birds
     this.birds = new Birds(this.sceneContext.scene);
@@ -306,6 +317,7 @@ class Game {
 
     // Update traffic
     this.traffic.update(deltaTime, playerPos);
+    this.pedestrians.update(deltaTime, playerPos);
 
     // Update birds
     t0 = performance.now();

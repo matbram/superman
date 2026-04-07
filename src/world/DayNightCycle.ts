@@ -21,14 +21,14 @@ const DAY_DURATION = 480; // Seconds for a full 24-hour cycle (8 minutes)
 const SKY_COLORS: [number, number, number, number][] = [
   [0,   0.02, 0.02, 0.08],  // Midnight - deep dark blue
   [4,   0.05, 0.05, 0.15],  // Pre-dawn - very dark blue
-  [5.5, 0.35, 0.20, 0.30],  // Dawn - purple-pink
-  [6.5, 0.70, 0.45, 0.30],  // Sunrise - orange-pink
-  [8,   0.40, 0.60, 0.90],  // Morning - blue
-  [12,  0.45, 0.65, 0.95],  // Noon - bright blue
-  [16,  0.45, 0.60, 0.85],  // Afternoon - blue
-  [18,  0.85, 0.50, 0.25],  // Sunset - golden orange
-  [19.5,0.50, 0.20, 0.30],  // Dusk - deep orange-purple
-  [21,  0.08, 0.05, 0.18],  // Evening - dark purple
+  [5.5, 0.25, 0.15, 0.25],  // Dawn - purple-pink
+  [6.5, 0.50, 0.35, 0.25],  // Sunrise - orange-pink
+  [8,   0.25, 0.40, 0.70],  // Morning - clear blue
+  [12,  0.30, 0.45, 0.75],  // Noon - rich blue
+  [16,  0.28, 0.42, 0.68],  // Afternoon - blue
+  [18,  0.65, 0.38, 0.20],  // Sunset - golden orange
+  [19.5,0.35, 0.15, 0.25],  // Dusk - deep orange-purple
+  [21,  0.06, 0.04, 0.15],  // Evening - dark purple
   [24,  0.02, 0.02, 0.08],  // Midnight again
 ];
 

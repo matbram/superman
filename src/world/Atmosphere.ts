@@ -85,8 +85,22 @@ export class Atmosphere {
    * Creates enhanced sky dome with gradient
    */
   private createSkyDome(): void {
-    // Sky dome is created by scene.ts and managed by DayNightCycle.ts
-    // Atmosphere no longer creates its own to avoid duplicate sky rendering
+    // Atmosphere's sky dome provides the nice blue sky backdrop
+    this.skyDome = MeshBuilder.CreateSphere(
+      'atmosphereDome',
+      { diameter: 2800, segments: 8 },
+      this.scene
+    );
+    this.skyDome.infiniteDistance = true;
+    this.skyDome.isPickable = false;
+
+    const skyMaterial = new StandardMaterial('atmosphereMaterial', this.scene);
+    skyMaterial.backFaceCulling = false;
+    skyMaterial.disableLighting = true;
+    skyMaterial.emissiveColor = new Color3(0.35, 0.55, 0.88);
+    skyMaterial.freeze();
+
+    this.skyDome.material = skyMaterial;
   }
 
   /**
