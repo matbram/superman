@@ -124,10 +124,12 @@ export class FlightState extends BasePlayerState {
     const speedFactor = this.currentSpeed / MAX_SPEED;
     const turnRate = this.lerp(BASE_TURN_RATE, HIGH_SPEED_TURN_RATE, speedFactor);
 
-    // Pitch control - airplane style:
-    // Push stick forward (up) = dive down, pull back (down) = climb up
+    // Pitch control - airplane style (SKIP during super dive)
     let targetPitch = player.getPitch();
-    if (!heatVisionActive && Math.abs(input.moveY) > 0.1) {
+    if (this.superDiving) {
+      // Super dive overrides pitch - don't auto-level
+      targetPitch = -Math.PI * 0.45;
+    } else if (!heatVisionActive && Math.abs(input.moveY) > 0.1) {
       targetPitch += input.moveY * PITCH_RATE * deltaTime;
     } else {
       // Auto-level pitch gradually when no input or heat vision active
@@ -197,7 +199,15 @@ export class FlightState extends BasePlayerState {
     // Super dive mode: pitch straight down, accelerate hard, ignore brakes
     if (this.superDiving) {
       this.currentSpeed = Math.min(MAX_SPEED, this.currentSpeed + 500 * deltaTime);
-      player.setPitch(-Math.PI * 0.45);
+      player.setPitch(-Math.PI * 0.45); // Nose down ~80 degrees
+
+      // Force velocity downward - override any upward momentum from boost
+      const vel = player.getVelocity();
+      if (vel.y > 0) {
+        vel.y = -Math.abs(vel.y); // Reverse upward velocity to downward
+        player.setVelocity(vel);
+      }
+
       player.setCurrentSpeed(this.currentSpeed);
       return; // RETURN EARLY - bypass ALL brake logic
     }
