@@ -18,6 +18,7 @@ import { Vector3, Matrix } from '@babylonjs/core/Maths/math';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import '@babylonjs/core/Meshes/thinInstanceMesh';
 
 // Voxel size in world units - small enough to look like building detail,
 // big enough to keep instance count manageable
