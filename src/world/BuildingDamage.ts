@@ -37,7 +37,7 @@ const COLLAPSE_FALL_SPEED = 0.6;   // Moderate fall speed
 const DEBRIS_SPAWN_COOLDOWN = 500;  // ms between debris spawns per building
 
 // Performance logging
-const ENABLE_PERF_LOGGING = true;
+const ENABLE_PERF_LOGGING = false;
 const PERF_LOG_INTERVAL = 2000;  // Log every 2 seconds
 
 /**

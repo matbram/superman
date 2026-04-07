@@ -19,7 +19,7 @@ const UNLOAD_DISTANCE = 5;  // Keep loaded a bit longer
 const CHUNKS_PER_FRAME = 2;  // Generate fewer chunks per frame
 
 // Performance logging
-const ENABLE_CITY_PERF_LOGGING = true;
+const ENABLE_CITY_PERF_LOGGING = false;
 const CITY_PERF_LOG_INTERVAL = 2000;  // Log every 2 seconds
 
 // Building generation - balanced density

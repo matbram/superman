@@ -17,7 +17,7 @@ import { Hud } from './ui/Hud';
 import { DebugOverlay } from './ui/DebugOverlay';
 
 // Performance logging
-const ENABLE_FRAME_PERF_LOGGING = true;
+const ENABLE_FRAME_PERF_LOGGING = false;
 const FRAME_PERF_LOG_INTERVAL = 2000;  // Log every 2 seconds
 
 /**
