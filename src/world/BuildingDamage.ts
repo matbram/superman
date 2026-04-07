@@ -12,11 +12,13 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 
-// Debris constants - optimized for performance
-const MAX_DEBRIS_PIECES = 50;  // Low cap for better framerate
-const DEBRIS_CLEANUP_DISTANCE = 150;  // Cleanup sooner
-const DEBRIS_SETTLE_CLEANUP_TIME = 10000;  // Remove settled debris after 10 seconds
+// Debris constants - balanced for destruction quality and performance
+const MAX_DEBRIS_PIECES = 80;  // Higher cap for more satisfying destruction
+const MAX_SMALL_DEBRIS = 40;   // Sub-cap for small debris (within MAX_DEBRIS_PIECES)
+const DEBRIS_CLEANUP_DISTANCE = 120;  // Cleanup sooner to make room for new debris
+const DEBRIS_SETTLE_CLEANUP_TIME = 8000;  // Remove settled debris after 8 seconds
 const GRAVITY = -30;  // Normal gravity for performance
+const SECONDARY_FRAG_SPEED = 12;  // Min impact speed to trigger secondary fragmentation
 
 // Import gravity zone type
 import type { GravityZone } from './AlienShip';
@@ -157,53 +159,60 @@ export class BuildingDamage {
   }
 
   /**
-   * Generates structural breakpoints for a building
+   * Generates structural breakpoints for a building using a 3D grid
+   * Creates a dense grid of chunks that buildings can fragment into
    */
   private generateBreakPoints(building: Mesh): BreakPoint[] {
     const bounds = building.getBoundingInfo().boundingBox;
     const size = bounds.maximumWorld.subtract(bounds.minimumWorld);
     const breakPoints: BreakPoint[] = [];
 
-    // Vertical sections (floors)
-    const numFloors = Math.max(2, Math.floor(size.y / 15));
+    // Vertical sections (floors) - more floors for taller buildings
+    const numFloors = Math.max(3, Math.floor(size.y / 10));
 
-    // Horizontal sections (corners and sides)
-    const sections = [
-      { x: -0.35, z: -0.35 },  // Corner 1
-      { x: 0.35, z: -0.35 },   // Corner 2
-      { x: -0.35, z: 0.35 },   // Corner 3
-      { x: 0.35, z: 0.35 },    // Corner 4
-      { x: 0, z: -0.4 },       // Side 1
-      { x: 0, z: 0.4 },        // Side 2
-      { x: -0.4, z: 0 },       // Side 3
-      { x: 0.4, z: 0 },        // Side 4
-    ];
+    // 4x4 horizontal grid covers the full building face
+    // Grid positions from -0.4 to 0.4 (leaving edges for structural integrity)
+    const gridX = [-0.38, -0.13, 0.13, 0.38];
+    const gridZ = [-0.38, -0.13, 0.13, 0.38];
 
-    // Create breakpoints for each floor level at each section
+    const floorHeight = size.y / numFloors;
+
     for (let floor = 0; floor < numFloors; floor++) {
       const floorY = (floor + 0.5) / numFloors;
 
-      for (const section of sections) {
-        // Chunk size varies based on position
-        const chunkWidth = size.x * (0.25 + Math.random() * 0.15);
-        const chunkHeight = size.y / numFloors * (0.7 + Math.random() * 0.3);
-        const chunkDepth = size.z * (0.25 + Math.random() * 0.15);
+      for (const gx of gridX) {
+        for (const gz of gridZ) {
+          // Chunk size with slight random variation for natural look
+          const chunkWidth = size.x * (0.22 + Math.random() * 0.08);
+          const chunkHeight = floorHeight * (0.75 + Math.random() * 0.2);
+          const chunkDepth = size.z * (0.22 + Math.random() * 0.08);
 
-        breakPoints.push({
-          relativePosition: new Vector3(section.x, floorY, section.z),
-          size: new Vector3(chunkWidth, chunkHeight, chunkDepth),
-          broken: false,
-          threshold: 0.3 + Math.random() * 0.5,  // Random break threshold
-        });
+          // Edge/corner chunks break easier, center is stronger
+          const isEdge = Math.abs(gx) > 0.3 || Math.abs(gz) > 0.3;
+          const isTop = floor >= numFloors - 1;
+
+          breakPoints.push({
+            relativePosition: new Vector3(gx, floorY, gz),
+            size: new Vector3(chunkWidth, chunkHeight, chunkDepth),
+            broken: false,
+            threshold: isTop ? 0.15 : isEdge ? 0.25 : 0.4 + Math.random() * 0.3,
+          });
+        }
       }
     }
 
-    // Add top section breakpoints (rooftop chunks)
+    // Add rooftop chunks - antenna, water tank, etc.
     breakPoints.push({
-      relativePosition: new Vector3(0, 0.9, 0),
-      size: new Vector3(size.x * 0.5, size.y * 0.15, size.z * 0.5),
+      relativePosition: new Vector3(0, 0.95, 0),
+      size: new Vector3(size.x * 0.4, size.y * 0.08, size.z * 0.4),
       broken: false,
-      threshold: 0.2,
+      threshold: 0.1,
+    });
+    breakPoints.push({
+      relativePosition: new Vector3(-0.25, 0.95, 0.25),
+      size: new Vector3(size.x * 0.2, size.y * 0.06, size.z * 0.2),
+      broken: false,
+      threshold: 0.1,
     });
 
     return breakPoints;
@@ -272,8 +281,8 @@ export class BuildingDamage {
     relativeImpact.y = Math.max(0, Math.min(1, relativeImpact.y));
     relativeImpact.z = Math.max(-0.5, Math.min(0.5, relativeImpact.z));
 
-    // Break multiple chunks
-    const maxChunks = Math.min(6, 2 + Math.floor(damage));
+    // Break multiple chunks - more chunks for a satisfying crumble
+    const maxChunks = Math.min(10, 3 + Math.floor(damage * 1.5));
 
     const allBreakpoints: { bp: BreakPoint; dist: number }[] = [];
     for (const breakPoint of structure.breakPoints) {
@@ -406,7 +415,7 @@ export class BuildingDamage {
           const structure = this.getOrCreateStructure(building);
 
           const proximityFactor = 1 - (horizontalDist / wakeRadius);
-          const chunksToBreak = Math.min(3, Math.floor(proximityFactor * 2) + 1);
+          const chunksToBreak = Math.min(5, Math.floor(proximityFactor * 3) + 2);
 
           let broken = 0;
           for (const bp of structure.breakPoints) {
@@ -805,15 +814,15 @@ export class BuildingDamage {
         ));
         this.spawnDustCloud(dustPos, 3, 1);
 
-        // Spawn fewer debris during collapse
-        if (collapse.debrisSpawned < 8) {
-          const debrisPos = collapse.mesh.position.add(new Vector3(
-            (Math.random() - 0.5) * 12,
+        // Spawn debris during collapse - more chunks for realistic crumble
+        if (collapse.debrisSpawned < 15) {
+          this._impactPos.set(
+            collapse.mesh.position.x + (Math.random() - 0.5) * 12,
             collapse.height * Math.random(),
-            (Math.random() - 0.5) * 12
-          ));
-          this.spawnImpactDebris(debrisPos, 15, 2);
-          collapse.debrisSpawned++;
+            collapse.mesh.position.z + (Math.random() - 0.5) * 12
+          );
+          this.spawnImpactDebris(this._impactPos, 20, 3, true);
+          collapse.debrisSpawned += 2;
         }
       }
 
@@ -853,6 +862,17 @@ export class BuildingDamage {
       if (dust.lifetime <= 0) {
         dust.particles.dispose();
         this.dustClouds.splice(i, 1);
+      }
+    }
+
+    // If near debris cap, aggressively clean up oldest settled small debris first
+    if (this.debris.length > MAX_DEBRIS_PIECES * 0.7) {
+      for (let i = this.debris.length - 1; i >= 0 && this.debris.length > MAX_DEBRIS_PIECES * 0.5; i--) {
+        const p = this.debris[i];
+        if (p.settled && !p.isChunk) {
+          p.mesh.dispose();
+          this.debris.splice(i, 1);
+        }
       }
     }
 
@@ -950,8 +970,55 @@ export class BuildingDamage {
           piece.angularVelocity.scaleInPlace(0.4);
         }
 
-        if (impactSpeed > 15 && piece.isChunk) {
-          this.spawnDustCloud(piece.mesh.position, 3, 0.5);
+        if (piece.isChunk) {
+          if (impactSpeed > 15) {
+            this.spawnDustCloud(piece.mesh.position, 3, 0.5);
+          }
+
+          // Secondary fragmentation - large chunks split into smaller pieces on hard impact
+          if (impactSpeed > SECONDARY_FRAG_SPEED && this.debris.length < MAX_DEBRIS_PIECES) {
+            const fragCount = Math.min(3, MAX_DEBRIS_PIECES - this.debris.length);
+            const bounding = piece.mesh.getBoundingInfo().boundingBox;
+            const chunkSize = bounding.maximumWorld.subtract(bounding.minimumWorld);
+
+            for (let f = 0; f < fragCount; f++) {
+              const fragW = chunkSize.x * (0.3 + Math.random() * 0.3);
+              const fragH = chunkSize.y * (0.3 + Math.random() * 0.3);
+              const fragD = chunkSize.z * (0.3 + Math.random() * 0.3);
+
+              const frag = MeshBuilder.CreateBox(
+                `frag_${this.debris.length}`,
+                { width: fragW, height: fragH, depth: fragD },
+                this.scene
+              );
+
+              frag.position.x = piece.mesh.position.x + (Math.random() - 0.5) * chunkSize.x * 0.5;
+              frag.position.y = groundLevel + fragH * 0.5 + Math.random() * 2;
+              frag.position.z = piece.mesh.position.z + (Math.random() - 0.5) * chunkSize.z * 0.5;
+              frag.material = this.debrisMaterials[Math.floor(Math.random() * this.debrisMaterials.length)];
+              frag.isPickable = false;
+
+              this.debris.push({
+                mesh: frag,
+                velocity: new Vector3(
+                  (Math.random() - 0.5) * impactSpeed * 0.4,
+                  Math.random() * impactSpeed * 0.3 + 3,
+                  (Math.random() - 0.5) * impactSpeed * 0.4
+                ),
+                angularVelocity: new Vector3(
+                  (Math.random() - 0.5) * 4,
+                  (Math.random() - 0.5) * 2,
+                  (Math.random() - 0.5) * 4
+                ),
+                isChunk: false,
+                settled: false,
+                settleTime: 0,
+              });
+            }
+
+            // Original chunk becomes smaller after breaking
+            piece.isChunk = false;
+          }
         }
 
         // Check if settled - use squared length to avoid sqrt
@@ -959,7 +1026,7 @@ export class BuildingDamage {
           const vLenSq = piece.velocity.x * piece.velocity.x
             + piece.velocity.y * piece.velocity.y
             + piece.velocity.z * piece.velocity.z;
-          if (vLenSq < 1) { // 1^2
+          if (vLenSq < 1) {
             piece.settled = true;
             piece.settleTime = now;
             piece.velocity.setAll(0);
