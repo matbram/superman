@@ -85,67 +85,16 @@ export class Atmosphere {
    * Creates enhanced sky dome with gradient
    */
   private createSkyDome(): void {
-    this.skyDome = MeshBuilder.CreateSphere(
-      'atmosphereDome',
-      { diameter: 2800, segments: 8 },
-      this.scene
-    );
-    this.skyDome.infiniteDistance = true;
-    this.skyDome.isPickable = false;
-
-    const skyMaterial = new StandardMaterial('atmosphereMaterial', this.scene);
-    skyMaterial.backFaceCulling = false;
-    skyMaterial.disableLighting = true;
-    skyMaterial.emissiveColor = new Color3(0.45, 0.65, 0.95);
-    skyMaterial.freeze();
-
-    this.skyDome.material = skyMaterial;
+    // Sky dome is created by scene.ts and managed by DayNightCycle.ts
+    // Atmosphere no longer creates its own to avoid duplicate sky rendering
   }
 
   /**
    * Creates the sun with glow effect
    */
   private createSun(): void {
-    this.sunMesh = MeshBuilder.CreateSphere(
-      'sun',
-      { diameter: 60, segments: 16 },
-      this.scene
-    );
-    this.sunMesh.position = new Vector3(
-      SUN_DISTANCE * 0.7,
-      SUN_DISTANCE * 0.8,
-      SUN_DISTANCE * 0.3
-    );
-    this.sunMesh.isPickable = false;
-
-    const sunMaterial = new StandardMaterial('sunMaterial', this.scene);
-    sunMaterial.emissiveColor = new Color3(1.0, 0.95, 0.8);
-    sunMaterial.disableLighting = true;
-    sunMaterial.freeze();
-    this.sunMesh.material = sunMaterial;
-
-    if (this.glowLayer) {
-      this.glowLayer.addIncludedOnlyMesh(this.sunMesh);
-    }
-
-    this.sunGlow = MeshBuilder.CreateSphere(
-      'sunGlow',
-      { diameter: 120, segments: 16 },
-      this.scene
-    );
-    this.sunGlow.position = this.sunMesh.position.clone();
-    this.sunGlow.isPickable = false;
-
-    const glowMaterial = new StandardMaterial('sunGlowMaterial', this.scene);
-    glowMaterial.emissiveColor = new Color3(1.0, 0.9, 0.6);
-    glowMaterial.disableLighting = true;
-    glowMaterial.alpha = 0.3;
-    glowMaterial.freeze();
-    this.sunGlow.material = glowMaterial;
-
-    if (this.glowLayer) {
-      this.glowLayer.addIncludedOnlyMesh(this.sunGlow);
-    }
+    // Sun is created by scene.ts and managed by DayNightCycle.ts
+    // Atmosphere no longer creates its own sun to avoid duplicates
   }
 
   /**
@@ -336,13 +285,7 @@ export class Atmosphere {
   public update(playerPosition: Vector3, deltaTime: number, _playerVelocity?: Vector3, playerSpeed?: number): void {
     this.time += deltaTime;
 
-    // Update sun position relative to player - no allocations
-    if (this.sunMesh && this.sunGlow) {
-      this.sunMesh.position.x = playerPosition.x + Atmosphere.SUN_OFFSET_X;
-      this.sunMesh.position.y = playerPosition.y + Atmosphere.SUN_OFFSET_Y;
-      this.sunMesh.position.z = playerPosition.z + Atmosphere.SUN_OFFSET_Z;
-      this.sunGlow.position.copyFrom(this.sunMesh.position);
-    }
+    // Sun is managed by DayNightCycle.ts (no duplicate sun tracking here)
 
     const speed = playerSpeed ?? 0;
     const canDisperse = speed > 30;
@@ -452,7 +395,7 @@ export class Atmosphere {
     this.cloudClusters = [];
 
     this.sunMesh?.dispose();
-    this.sunGlow?.dispose();
+    // sunGlow and sunMesh are managed by scene.ts/DayNightCycle - don't dispose here
     this.skyDome?.dispose();
     this.glowLayer?.dispose();
     for (const mat of this.cloudMaterials) {
