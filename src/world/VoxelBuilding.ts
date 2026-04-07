@@ -76,7 +76,8 @@ export class VoxelBuilding {
     width: number,
     height: number,
     depth: number,
-    material: StandardMaterial
+    material: StandardMaterial,
+    buildingName: string = 'building_voxel'
   ) {
     this.scene = scene;
     this.worldPosition = position.clone();
@@ -109,9 +110,10 @@ export class VoxelBuilding {
       }
     }
 
-    // Create thin instance mesh - slight overlap to eliminate visible seams
+    // Create thin instance mesh - named with building_ prefix so all systems
+    // (heat vision, collision, damage) recognize it as a building
     this.blockMesh = MeshBuilder.CreateBox(
-      'voxelBlock',
+      buildingName + '_voxels',
       { size: VOXEL_SIZE * 1.01 },
       scene
     );

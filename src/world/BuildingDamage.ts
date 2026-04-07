@@ -166,6 +166,7 @@ export class BuildingDamage {
   private debris: DebrisPiece[] = [];
   private buildingStructures: Map<Mesh, BuildingStructure> = new Map();
   private voxelBuildings: Map<Mesh, VoxelBuilding> = new Map();
+  private voxelMeshLookup: Map<Mesh, { original: Mesh; vb: VoxelBuilding }> = new Map();
   private debrisMaterials: StandardMaterial[] = [];
   private collapsingBuildings: CollapsingBuilding[] = [];
   private pancakeSections: PancakeSection[] = [];
@@ -363,7 +364,8 @@ export class BuildingDamage {
         this.scene,
         new Vector3(building.position.x, bounds.minimumWorld.y, building.position.z),
         size.x, size.y, size.z,
-        material
+        material,
+        building.name
       );
 
       // Hide the original building mesh AND remove its collision
@@ -380,6 +382,7 @@ export class BuildingDamage {
       }
 
       this.voxelBuildings.set(building, vb);
+      this.voxelMeshLookup.set(vb.getMesh(), { original: building, vb });
     }
     return vb;
   }
@@ -435,8 +438,18 @@ export class BuildingDamage {
    * Converts the building to voxels and punches a hole through it.
    */
   public applyImpactDamage(building: Mesh, impactPosition: Vector3, speed: number): void {
-    // Convert to voxel building on first direct player hit
-    const vb = this.getOrCreateVoxelBuilding(building);
+    let vb: VoxelBuilding;
+    let originalMesh: Mesh = building;
+
+    // Check if this is already a voxel block mesh (e.g. heat vision hitting voxelized building)
+    const lookup = this.voxelMeshLookup.get(building);
+    if (lookup) {
+      vb = lookup.vb;
+      originalMesh = lookup.original;
+    } else {
+      // Convert to voxel building on first hit
+      vb = this.getOrCreateVoxelBuilding(building);
+    }
 
     // Punch-through: remove blocks in a sphere at impact point
     const punchRadius = 3 + Math.min(6, speed / 20);
@@ -445,11 +458,8 @@ export class BuildingDamage {
     if (removed.length > 0) {
       this.spawnVoxelDebris(removed, impactPosition, speed);
       this.spawnDustCloud(impactPosition, 5, 1);
-      this.processUnsupportedBlocks(vb, building, impactPosition);
+      this.processUnsupportedBlocks(vb, originalMesh, impactPosition);
     }
-
-    const structure = this.getOrCreateStructure(building);
-    structure.shakeTime = Math.min(2, speed / 20);
   }
 
 

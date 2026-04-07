@@ -288,7 +288,7 @@ export class PhysicsManager {
         //
         // Speed reduction based on what was hit:
         const meshName = sweepResult.mesh?.name || '';
-        const isBuilding = meshName.startsWith('building_') || meshName === 'voxelBlock';
+        const isBuilding = meshName.startsWith('building_');
         if (isBuilding) {
           // Building collision: preserve most velocity so Superman punches through
           // The damage system breaks the wall, next frame he continues
