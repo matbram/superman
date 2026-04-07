@@ -156,16 +156,17 @@ export class VoxelWorld {
   }
 
   private getBuildingPrefix(name: string): string {
-    // building_-1,2_5_main → building_-1,2_5
+    // building_-1,2_5_main → building_-1,2_5_
+    // Trailing underscore prevents index 1 from matching 10, 11, etc.
     const parts = name.split('_');
-    if (parts.length >= 3) return parts.slice(0, 3).join('_');
-    return name;
+    if (parts.length >= 4) return parts.slice(0, 3).join('_') + '_';
+    return name + '_';
   }
 
   private findSiblingMeshes(mesh: Mesh, prefix: string): Mesh[] {
     const siblings: Mesh[] = [];
     for (const m of this.scene.meshes) {
-      if (m.name.startsWith(prefix) && m.name.startsWith('building_') && !m.isDisposed()) {
+      if (m.name.startsWith(prefix) && !m.isDisposed() && !this.meshToBuilding.has(m as Mesh)) {
         siblings.push(m as Mesh);
       }
     }
@@ -244,7 +245,10 @@ export class VoxelWorld {
     }
 
     // Remove blocks at impact
-    const punchRadius = 3 + Math.min(6, speed / 20);
+    // Cap radius to half the thinnest wall so we don't blow through both sides
+    const minDim = Math.min(vb.worldWidth, vb.worldDepth);
+    const maxRadius = minDim * 0.4; // Never remove more than 40% of building width
+    const punchRadius = Math.min(3 + Math.min(6, speed / 20), maxRadius);
     const removed = vb.removeBlocksInRadius(position, punchRadius);
 
     if (removed.length > 0) {
@@ -282,7 +286,9 @@ export class VoxelWorld {
    */
   public applyDamageAtGrid(vb: VoxelBuilding, gridX: number, gridY: number, gridZ: number, speed: number): void {
     const worldPos = vb.gridToWorldPos(gridX, gridY, gridZ);
-    const punchRadius = 3 + Math.min(6, speed / 20);
+    const minDim = Math.min(vb.worldWidth, vb.worldDepth);
+    const maxRadius = minDim * 0.4;
+    const punchRadius = Math.min(3 + Math.min(6, speed / 20), maxRadius);
     const removed = vb.removeBlocksInRadius(worldPos, punchRadius);
 
     if (removed.length > 0) {
