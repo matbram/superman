@@ -8,6 +8,7 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh';
+import { Diag } from '../core/DiagnosticLog';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
@@ -190,7 +191,10 @@ export class HeatVision {
       hitPoint = rayResult.point;
 
       // Check if we hit a building or ground
-      if (rayResult.mesh.name.startsWith('building_') || rayResult.mesh.name.startsWith('ground')) {
+      const meshName = rayResult.mesh.name;
+      const isTarget = meshName.startsWith('building_') || meshName.startsWith('ground');
+      Diag.log('HeatVision', `hit: ${meshName.substring(0, 30)} dist=${rayResult.distance.toFixed(1)} isTarget=${isTarget}`);
+      if (isTarget) {
         // Accumulate damage - continuous stream
         this.damageAccumulator += DAMAGE_PER_SECOND * deltaTime;
 
@@ -203,6 +207,8 @@ export class HeatVision {
           this.damageAccumulator = 0;
         }
       }
+    } else {
+      Diag.count('HeatVision', 'miss');
     }
 
     // Position and orient beams from eyes
