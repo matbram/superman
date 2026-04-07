@@ -130,6 +130,9 @@ export class City {
     // Create ground
     this.createGround();
 
+    // Create landmark buildings (Daily Planet, monuments)
+    this.createLandmarks();
+
     // Generate initial chunks immediately (not throttled) for spawn area
     this.generateInitialChunks();
   }
@@ -262,6 +265,105 @@ export class City {
     this.groundMesh.isPickable = true;
     this.groundMesh.freezeWorldMatrix();
     createCollisionBox(this.groundMesh, this.physicsManager);
+  }
+
+  /**
+   * Creates iconic landmark buildings that are always present near the city center.
+   */
+  private createLandmarks(): void {
+    // ── THE DAILY PLANET ──
+    // Iconic building with a globe on top, near the spawn point
+    const dpX = 50, dpZ = 80;
+    const dpHeight = 180;
+    const dpWidth = 35, dpDepth = 35;
+
+    // Main building - Art Deco style (warm concrete)
+    const dpMain = MeshBuilder.CreateBox('building_landmark_0_main', {
+      width: dpWidth, height: dpHeight, depth: dpDepth
+    }, this.scene);
+    dpMain.position = new Vector3(dpX, dpHeight / 2 + SIDEWALK_HEIGHT, dpZ);
+    dpMain.material = this.buildingMaterials[9]; // Warm concrete
+    dpMain.receiveShadows = true;
+    createCollisionBox(dpMain, this.physicsManager);
+    this.shadowGenerator.addShadowCaster(dpMain);
+
+    // Globe on top of the Daily Planet
+    const globe = MeshBuilder.CreateSphere('dailyPlanetGlobe', {
+      diameter: 18, segments: 16
+    }, this.scene);
+    globe.position = new Vector3(dpX, dpHeight + 12 + SIDEWALK_HEIGHT, dpZ);
+    const globeMat = new StandardMaterial('globeMat', this.scene);
+    globeMat.diffuseColor = new Color3(0.85, 0.75, 0.3);   // Gold
+    globeMat.specularColor = new Color3(1.0, 0.9, 0.5);
+    globeMat.emissiveColor = new Color3(0.15, 0.12, 0.02);  // Slight glow
+    globeMat.freeze();
+    globe.material = globeMat;
+    globe.isPickable = false;
+
+    // Globe ring (Saturn-like ring around the globe)
+    const ring = MeshBuilder.CreateTorus('dailyPlanetRing', {
+      diameter: 24, thickness: 1.5, tessellation: 24
+    }, this.scene);
+    ring.position = new Vector3(dpX, dpHeight + 12 + SIDEWALK_HEIGHT, dpZ);
+    ring.rotation.x = Math.PI / 6; // Tilted
+    ring.material = globeMat;
+    ring.isPickable = false;
+
+    // ── CITY HALL / GOVERNMENT BUILDING ──
+    // Wide classical building with columns (represented as a wide low building)
+    const chX = -60, chZ = 50;
+    const chHeight = 40, chWidth = 60, chDepth = 40;
+    const cityHall = MeshBuilder.CreateBox('building_landmark_1_main', {
+      width: chWidth, height: chHeight, depth: chDepth
+    }, this.scene);
+    cityHall.position = new Vector3(chX, chHeight / 2 + SIDEWALK_HEIGHT, chZ);
+    cityHall.material = this.buildingMaterials[11]; // White modern
+    cityHall.receiveShadows = true;
+    createCollisionBox(cityHall, this.physicsManager);
+
+    // Dome on top of city hall
+    const dome = MeshBuilder.CreateSphere('cityHallDome', {
+      diameter: 20, segments: 12, slice: 0.5
+    }, this.scene);
+    dome.position = new Vector3(chX, chHeight + SIDEWALK_HEIGHT, chZ);
+    dome.material = this.buildingMaterials[11];
+    dome.isPickable = false;
+
+    // ── METROPOLIS TOWER ──
+    // Tallest building in the city, a massive glass skyscraper
+    const mtX = 120, mtZ = 30;
+    const mtHeight = 350;
+    const mtWidth = 40, mtDepth = 40;
+    const metroTower = MeshBuilder.CreateBox('building_landmark_2_main', {
+      width: mtWidth, height: mtHeight, depth: mtDepth
+    }, this.scene);
+    metroTower.position = new Vector3(mtX, mtHeight / 2 + SIDEWALK_HEIGHT, mtZ);
+    metroTower.material = this.buildingMaterials[8]; // Glass
+    metroTower.receiveShadows = true;
+    createCollisionBox(metroTower, this.physicsManager);
+    this.shadowGenerator.addShadowCaster(metroTower);
+
+    // Antenna/spire on top
+    const spire = MeshBuilder.CreateCylinder('metroSpire', {
+      diameter: 3, height: 40, tessellation: 8
+    }, this.scene);
+    spire.position = new Vector3(mtX, mtHeight + 20 + SIDEWALK_HEIGHT, mtZ);
+    spire.material = this.rooftopMaterial;
+    spire.isPickable = false;
+
+    // ── CENTRAL PARK / PLAZA ──
+    // A green area near center (just a colored ground patch)
+    const parkGround = MeshBuilder.CreateGround('centralPark', {
+      width: 100, height: 80
+    }, this.scene);
+    parkGround.position = new Vector3(0, SIDEWALK_HEIGHT + 0.05, 150);
+    const parkMat = new StandardMaterial('parkMat', this.scene);
+    parkMat.diffuseColor = new Color3(0.2, 0.45, 0.15); // Green
+    parkMat.specularColor = new Color3(0.02, 0.02, 0.02);
+    parkMat.freeze();
+    parkGround.material = parkMat;
+    parkGround.receiveShadows = true;
+    parkGround.freezeWorldMatrix();
   }
 
   /**
