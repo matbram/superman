@@ -22,17 +22,18 @@ const CHUNKS_PER_FRAME = 2;
 const ENABLE_CITY_PERF_LOGGING = false;
 const CITY_PERF_LOG_INTERVAL = 2000;
 
-// NYC-inspired street grid
-const AVENUE_WIDTH = 18;        // Wide avenues (N-S direction)
-const STREET_WIDTH = 10;        // Narrower cross streets (E-W direction)
+// NYC-scale street grid (1 unit ≈ 1 meter)
+// Real NYC: avenues are ~30m wide, cross streets ~18m wide
+const AVENUE_WIDTH = 30;        // Wide avenues like 5th Ave, Broadway
+const STREET_WIDTH = 18;        // Cross streets
 const SIDEWALK_HEIGHT = 0.15;
 const BUILDING_GAP = 2;
 
-// Manhattan-style blocks: LONG rectangles, not squares
-// Real Manhattan blocks are ~80m x 270m. We use ~60 x 160
-const BLOCK_WIDTH = 60;         // Short axis (between avenues)
-const BLOCK_DEPTH_MIN = 100;    // Long axis minimum (between streets)
-const BLOCK_DEPTH_MAX = 160;    // Long axis maximum
+// Manhattan-style blocks: LONG rectangles
+// Real Manhattan blocks are ~80m x 270m
+const BLOCK_WIDTH = 70;         // Short axis (between avenues)
+const BLOCK_DEPTH_MIN = 120;    // Long axis minimum (between streets)
+const BLOCK_DEPTH_MAX = 200;    // Long axis maximum
 
 // Building sizes
 const MIN_BUILDING_WIDTH = 15;
@@ -208,12 +209,11 @@ export class City {
     this.windowMaterial.emissiveColor = new Color3(0.03, 0.06, 0.1);
     this.windowMaterial.freeze();
 
-    // Glass tower material (blue-green reflective)
+    // Glass tower material (dark reflective steel-blue, NO alpha - causes render artifacts)
     const glassMat = new StandardMaterial('glassMat', this.scene);
-    glassMat.diffuseColor = new Color3(0.18, 0.25, 0.35);
-    glassMat.specularColor = new Color3(0.6, 0.6, 0.7);
-    glassMat.emissiveColor = new Color3(0.05, 0.08, 0.12);
-    glassMat.alpha = 0.95;
+    glassMat.diffuseColor = new Color3(0.22, 0.28, 0.38);
+    glassMat.specularColor = new Color3(0.5, 0.5, 0.6);
+    glassMat.emissiveColor = new Color3(0.04, 0.06, 0.1);
     glassMat.freeze();
     this.buildingMaterials.push(glassMat);
 
@@ -437,22 +437,22 @@ export class City {
     const isDowntown = distFromCenter < 800;
     const isMidtown = distFromCenter < 1800;
 
-    // Height distribution modeled on Manhattan:
-    // Downtown: mix of very tall (60-200) and medium (30-80)
-    // Midtown: mostly medium (30-100) with occasional tall
-    // Outer: shorter (20-60)
+    // Height distribution - everything is taller than you'd think.
+    // Superman is ~4 units tall. A 20-story building = 80 units = 20x Superman.
+    // Even "short" buildings should tower over Superman.
     const heightForDistrict = (): number => {
       if (isDowntown) {
-        // 30% chance of very tall skyscraper, rest are medium-tall
-        return random.next() < 0.3
-          ? random.range(120, 200)
-          : random.range(40, 100);
+        // Manhattan Financial District / Midtown: 30-80+ stories
+        return random.next() < 0.35
+          ? random.range(200, 350)   // Skyscrapers (50-85 stories)
+          : random.range(60, 160);   // Medium towers (15-40 stories)
       } else if (isMidtown) {
-        return random.next() < 0.15
-          ? random.range(80, 140)
-          : random.range(30, 70);
+        return random.next() < 0.2
+          ? random.range(120, 220)   // Occasional tall building
+          : random.range(40, 100);   // 10-25 story buildings
       } else {
-        return random.range(20, 50);
+        // Even outer areas have 5-15 story buildings, not houses
+        return random.range(25, 70);
       }
     };
 
