@@ -22,18 +22,21 @@ const CHUNKS_PER_FRAME = 2;
 const ENABLE_CITY_PERF_LOGGING = false;
 const CITY_PERF_LOG_INTERVAL = 2000;
 
-// Street grid - wide enough to fly through, narrow enough to feel urban
-const STREET_WIDTH = 12;
-const BLOCK_MIN = 40;           // Bigger blocks = fewer, larger buildings
-const BLOCK_MAX = 80;
+// NYC-inspired street grid
+const AVENUE_WIDTH = 18;        // Wide avenues (N-S direction)
+const STREET_WIDTH = 10;        // Narrower cross streets (E-W direction)
 const SIDEWALK_HEIGHT = 0.15;
 const BUILDING_GAP = 2;
 
-// Building sizes - wide footprints, proportional heights
-const MIN_BUILDING_HEIGHT = 20;
-const MAX_BUILDING_HEIGHT = 150;
+// Manhattan-style blocks: LONG rectangles, not squares
+// Real Manhattan blocks are ~80m x 270m. We use ~60 x 160
+const BLOCK_WIDTH = 60;         // Short axis (between avenues)
+const BLOCK_DEPTH_MIN = 100;    // Long axis minimum (between streets)
+const BLOCK_DEPTH_MAX = 160;    // Long axis maximum
+
+// Building sizes
 const MIN_BUILDING_WIDTH = 15;
-const MAX_BUILDING_WIDTH = 60;
+const MAX_BUILDING_WIDTH = 55;
 
 // Building styles now chosen automatically based on lot size, height, and district
 
@@ -422,93 +425,85 @@ export class City {
     createCollisionBox(sidewalk, this.physicsManager);
     collisionMeshes.push(sidewalk);
 
-    // ── STREET GRID + LOT-BASED BUILDING PLACEMENT ──
-    // Generate a grid of streets, then fill each lot between streets with buildings.
-    // Buildings fill their lots edge-to-edge like a real city.
+    // ── NYC-STYLE STREET GRID ──
+    // Avenues run N-S (along Z), streets run E-W (along X).
+    // Blocks are LONG rectangles between avenues, divided by cross streets.
+    // Downtown has skyscrapers, midtown is mixed, outer areas are shorter.
 
-    // Distance from world center determines district type
     const distFromCenter = Math.sqrt(
       (worldX + CHUNK_SIZE / 2) ** 2 + (worldZ + CHUNK_SIZE / 2) ** 2
     );
-    const isDowntown = distFromCenter < 500;
-    const isMidtown = distFromCenter < 1200;
+    // More generous district zones - downtown feels big
+    const isDowntown = distFromCenter < 800;
+    const isMidtown = distFromCenter < 1800;
 
-    // Height range based on district
-    const districtMinH = isDowntown ? 50 : isMidtown ? 25 : 15;
-    const districtMaxH = isDowntown ? 160 : isMidtown ? 90 : 50;
+    // Height distribution modeled on Manhattan:
+    // Downtown: mix of very tall (60-200) and medium (30-80)
+    // Midtown: mostly medium (30-100) with occasional tall
+    // Outer: shorter (20-60)
+    const heightForDistrict = (): number => {
+      if (isDowntown) {
+        // 30% chance of very tall skyscraper, rest are medium-tall
+        return random.next() < 0.3
+          ? random.range(120, 200)
+          : random.range(40, 100);
+      } else if (isMidtown) {
+        return random.next() < 0.15
+          ? random.range(80, 140)
+          : random.range(30, 70);
+      } else {
+        return random.range(20, 50);
+      }
+    };
 
     let buildingCount = 0;
 
-    // Generate street grid positions for this chunk
-    // Streets run at regular intervals, offset by chunk position
-    const streetSpacingX = random.range(BLOCK_MIN + STREET_WIDTH, BLOCK_MAX + STREET_WIDTH);
-    const streetSpacingZ = random.range(BLOCK_MIN + STREET_WIDTH, BLOCK_MAX + STREET_WIDTH);
-    const offsetX = worldX + STREET_WIDTH * 0.5;
-    const offsetZ = worldZ + STREET_WIDTH * 0.5;
+    // Lay out avenues (N-S, spaced by BLOCK_WIDTH + AVENUE_WIDTH)
+    let avenueX = worldX + AVENUE_WIDTH * 0.5;
 
-    // Iterate over lots (areas between streets)
-    let lotStartX = offsetX;
-    while (lotStartX < worldX + CHUNK_SIZE - STREET_WIDTH - MIN_BUILDING_WIDTH) {
-      const lotWidth = random.range(BLOCK_MIN, BLOCK_MAX);
-      const lotEndX = Math.min(lotStartX + lotWidth, worldX + CHUNK_SIZE - STREET_WIDTH);
+    while (avenueX < worldX + CHUNK_SIZE - AVENUE_WIDTH - MIN_BUILDING_WIDTH) {
+      const blockW = BLOCK_WIDTH + random.range(-10, 10); // Slight variation
+      const blockEndX = Math.min(avenueX + blockW, worldX + CHUNK_SIZE - AVENUE_WIDTH);
+      const actualBlockW = blockEndX - avenueX;
 
-      let lotStartZ = offsetZ;
-      while (lotStartZ < worldZ + CHUNK_SIZE - STREET_WIDTH - MIN_BUILDING_WIDTH) {
-        const lotDepth = random.range(BLOCK_MIN, BLOCK_MAX);
-        const lotEndZ = Math.min(lotStartZ + lotDepth, worldZ + CHUNK_SIZE - STREET_WIDTH);
+      if (actualBlockW < MIN_BUILDING_WIDTH) {
+        avenueX = blockEndX + AVENUE_WIDTH;
+        continue;
+      }
 
-        const actualLotW = lotEndX - lotStartX;
-        const actualLotD = lotEndZ - lotStartZ;
+      // Within this avenue-to-avenue strip, lay out cross streets
+      let streetZ = worldZ + STREET_WIDTH * 0.5;
 
-        if (actualLotW >= MIN_BUILDING_WIDTH && actualLotD >= MIN_BUILDING_WIDTH) {
-          // Decide how to fill this lot: 1 big building or 2-4 smaller ones
-          const lotArea = actualLotW * actualLotD;
-          // Prefer fewer larger buildings. Only split very large lots.
-          const splitCount = lotArea > 3000 ? random.intRange(2, 3) :
-                            lotArea > 2000 ? random.intRange(1, 2) : 1;
+      while (streetZ < worldZ + CHUNK_SIZE - STREET_WIDTH - MIN_BUILDING_WIDTH) {
+        const blockD = random.range(BLOCK_DEPTH_MIN, BLOCK_DEPTH_MAX);
+        const blockEndZ = Math.min(streetZ + blockD, worldZ + CHUNK_SIZE - STREET_WIDTH);
+        const actualBlockD = blockEndZ - streetZ;
 
-          if (splitCount === 1) {
-            // Single building fills the lot
-            const bHeight = random.range(districtMinH, districtMaxH);
-            buildingCount = this.placeBuildingOnLot(
-              key, buildingCount, lotStartX, lotStartZ, actualLotW, actualLotD,
-              bHeight, random, chunkX, chunkZ, collisionMeshes, isDowntown
-            );
-          } else {
-            // Split lot into sub-lots along the longer axis
-            if (actualLotW > actualLotD) {
-              // Split along X
-              let subX = lotStartX;
-              for (let s = 0; s < splitCount && subX < lotEndX - MIN_BUILDING_WIDTH; s++) {
-                const subW = (lotEndX - subX) / (splitCount - s) + random.range(-4, 4);
-                const clampedW = Math.max(MIN_BUILDING_WIDTH, Math.min(subW, lotEndX - subX));
-                const bHeight = random.range(districtMinH, districtMaxH);
-                buildingCount = this.placeBuildingOnLot(
-                  key, buildingCount, subX, lotStartZ, clampedW, actualLotD,
-                  bHeight, random, chunkX, chunkZ, collisionMeshes, isDowntown
-                );
-                subX += clampedW + BUILDING_GAP;
-              }
-            } else {
-              // Split along Z
-              let subZ = lotStartZ;
-              for (let s = 0; s < splitCount && subZ < lotEndZ - MIN_BUILDING_WIDTH; s++) {
-                const subD = (lotEndZ - subZ) / (splitCount - s) + random.range(-4, 4);
-                const clampedD = Math.max(MIN_BUILDING_WIDTH, Math.min(subD, lotEndZ - subZ));
-                const bHeight = random.range(districtMinH, districtMaxH);
-                buildingCount = this.placeBuildingOnLot(
-                  key, buildingCount, lotStartX, subZ, actualLotW, clampedD,
-                  bHeight, random, chunkX, chunkZ, collisionMeshes, isDowntown
-                );
-                subZ += clampedD + BUILDING_GAP;
-              }
-            }
-          }
+        if (actualBlockD < MIN_BUILDING_WIDTH) {
+          streetZ = blockEndZ + STREET_WIDTH;
+          continue;
         }
 
-        lotStartZ = lotEndZ + STREET_WIDTH;
+        // Fill this rectangular block with buildings along the long axis (Z)
+        let bz = streetZ;
+        while (bz < blockEndZ - MIN_BUILDING_WIDTH && buildingCount < 25) {
+          // Each building takes a slice of the block depth
+          const bDepth = random.range(MIN_BUILDING_WIDTH, Math.min(MAX_BUILDING_WIDTH, blockEndZ - bz));
+          const bWidth = actualBlockW; // Building fills full block width
+          const bHeight = heightForDistrict();
+
+          buildingCount = this.placeBuildingOnLot(
+            key, buildingCount, avenueX, bz, bWidth, bDepth,
+            bHeight, random, chunkX, chunkZ, collisionMeshes, isDowntown
+          );
+
+          bz += bDepth + BUILDING_GAP;
+        }
+
+        streetZ = blockEndZ + STREET_WIDTH;
       }
-      lotStartX = lotEndX + STREET_WIDTH;
+
+      avenueX = blockEndX + AVENUE_WIDTH;
     }
 
     this.chunks.set(key, {
