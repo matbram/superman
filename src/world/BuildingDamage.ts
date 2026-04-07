@@ -416,30 +416,80 @@ export class BuildingDamage {
   }
 
   /**
-   * Applies impact damage from player collision.
+   * Applies impact damage from DIRECT player collision.
+   * This is the ONLY method that voxelizes buildings.
    * Converts the building to voxels and punches a hole through it.
    */
   public applyImpactDamage(building: Mesh, impactPosition: Vector3, speed: number): void {
-    // Convert to voxel building on first damage
+    // Convert to voxel building on first direct player hit
     const vb = this.getOrCreateVoxelBuilding(building);
 
     // Punch-through: remove blocks in a sphere at impact point
-    // Radius scales with speed
     const punchRadius = 3 + Math.min(6, speed / 20);
     const removed = vb.removeBlocksInRadius(impactPosition, punchRadius);
 
     if (removed.length > 0) {
-      // Spawn rubble debris from removed blocks
       this.spawnVoxelDebris(removed, impactPosition, speed);
       this.spawnDustCloud(impactPosition, 5, 1);
-
-      // Check for unsupported blocks that should fall
       this.processUnsupportedBlocks(vb, building, impactPosition);
     }
 
-    // Also maintain the legacy structure for shake/lean effects
     const structure = this.getOrCreateStructure(building);
     structure.shakeTime = Math.min(2, speed / 20);
+  }
+
+  /**
+   * Applies beam/area damage WITHOUT voxelizing the building.
+   * Used by alien ship beam and other continuous damage sources.
+   * Uses the legacy breakpoint/shrink system to avoid converting every
+   * building in range to expensive voxel grids.
+   *
+   * If the building was already voxelized (from a direct player hit),
+   * uses the voxel system instead.
+   */
+  public applyBeamDamage(building: Mesh, damagePosition: Vector3, speed: number): void {
+    // If already voxelized, use voxel removal
+    const existingVb = this.voxelBuildings.get(building);
+    if (existingVb) {
+      const radius = 2 + Math.min(4, speed / 30);
+      const removed = existingVb.removeBlocksInRadius(damagePosition, radius);
+      if (removed.length > 0) {
+        this.spawnVoxelDebris(removed, damagePosition, speed * 0.5);
+        this.processUnsupportedBlocks(existingVb, building, damagePosition);
+      }
+      return;
+    }
+
+    // Not voxelized - use legacy breakpoint system (cheap, no grid creation)
+    const structure = this.getOrCreateStructure(building);
+    structure.shakeTime = Math.min(1, speed / 30);
+
+    // Break breakpoints near damage position
+    const bounds = structure.bounds;
+    const buildingSize = new Vector3(
+      bounds.max.x - bounds.min.x,
+      structure.currentHeight,
+      bounds.max.z - bounds.min.z
+    );
+    const relX = (damagePosition.x - structure.originalPosition.x) / buildingSize.x;
+    const relY = (damagePosition.y - bounds.min.y) / structure.currentHeight;
+    const relZ = (damagePosition.z - structure.originalPosition.z) / buildingSize.z;
+
+    let broken = 0;
+    for (const bp of structure.breakPoints) {
+      if (bp.broken || broken >= 3) continue;
+      const dx = bp.relativePosition.x - relX;
+      const dy = bp.relativePosition.y - relY;
+      const dz = bp.relativePosition.z - relZ;
+      if (dx * dx + dy * dy + dz * dz < 0.15) {
+        this.breakChunkWithType(structure, bp, damagePosition, speed);
+        broken++;
+      }
+    }
+
+    if (broken > 0) {
+      this.checkStructuralIntegrity(structure, damagePosition);
+    }
   }
 
   /**
@@ -448,7 +498,7 @@ export class BuildingDamage {
    * Limited to a few iterations per call to avoid frame drops.
    */
   private processUnsupportedBlocks(vb: VoxelBuilding, buildingMesh: Mesh, impactPos: Vector3): void {
-    const maxIterations = 3; // Cascade up to 3 levels per frame
+    const maxIterations = 1; // One cascade level per call, spread across frames
 
     for (let iter = 0; iter < maxIterations; iter++) {
       const unsupported = vb.findUnsupportedBlocks();
@@ -814,24 +864,13 @@ export class BuildingDamage {
         const dot = Math.abs(Vector3.Dot(this._toBuilding, this._flyDir));
 
         if (dot < 0.5) {
-          // Use voxel building system for wake damage too
-          const vb = this.getOrCreateVoxelBuilding(building);
-          const proximityFactor = 1 - (horizontalDist / wakeRadius);
-          const damageRadius = 3 + proximityFactor * 4;
-
-          // Damage the side of building facing the player
+          // Use beam damage - only voxelizes already-voxelized buildings
           this._impactPos.set(
             buildingPos.x - this._toBuilding.x * (buildingPos.x - playerPosition.x) * 0.3,
             buildingPos.y + 10 + Math.random() * 20,
             buildingPos.z - this._toBuilding.z * (buildingPos.z - playerPosition.z) * 0.3
           );
-          const removed = vb.removeBlocksInRadius(this._impactPos, damageRadius);
-
-          if (removed.length > 0) {
-            this.spawnVoxelDebris(removed, playerPosition, speed * 0.3);
-            this.spawnDustCloud(this._impactPos, 3, 0.8);
-            this.processUnsupportedBlocks(vb, building, this._impactPos);
-          }
+          this.applyBeamDamage(building, this._impactPos, speed * 0.3);
         }
       }
     }
@@ -1280,8 +1319,8 @@ export class BuildingDamage {
         const damageMultiplier = 1 - (distance / radius);
         const damage = force * damageMultiplier;
 
-        // Use impact damage system with shockwave center as impact point
-        this.applyImpactDamage(building, position, damage * 30);
+        // Use beam damage (non-voxelizing) for area shockwave effects
+        this.applyBeamDamage(building, position, damage * 30);
       }
     }
   }

@@ -60,6 +60,9 @@ export class VoxelBuilding {
   // For damage callbacks
   public onBlockRemoved: ((worldPos: Vector3, count: number) => void) | null = null;
 
+  // Dirty column tracking - only scan these columns for unsupported blocks
+  private dirtyColumns: Set<string> = new Set();
+
   // Map from instance index back to grid key (for swap-and-shrink)
   private instanceToGrid: string[] = [];
 
@@ -106,14 +109,14 @@ export class VoxelBuilding {
       }
     }
 
-    // Create thin instance mesh
+    // Create thin instance mesh - slight overlap to eliminate visible seams
     this.blockMesh = MeshBuilder.CreateBox(
       'voxelBlock',
-      { size: VOXEL_SIZE * 0.98 }, // Tiny gap between blocks for visual seam
+      { size: VOXEL_SIZE * 1.01 },
       scene
     );
     this.blockMesh.material = material;
-    this.blockMesh.isPickable = true;
+    this.blockMesh.isPickable = false;
     this.blockMesh.receiveShadows = true;
 
     // Build instance buffer
@@ -217,6 +220,13 @@ export class VoxelBuilding {
     if (!this.isSolid(x, y, z)) return null;
 
     this.grid[x][y][z] = false;
+
+    // Mark this column and neighbors as dirty for structural support check
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        this.dirtyColumns.add(`${x + dx},${z + dz}`);
+      }
+    }
 
     // Swap-and-shrink: move the last instance into this slot, then shrink count.
     // This avoids zero-scale matrices which break hardware instancing in Babylon.js.
@@ -349,32 +359,45 @@ export class VoxelBuilding {
    * A block is unsupported if there's no solid block directly below it
    * and it's not on the ground floor.
    */
+  /**
+   * Finds unsupported blocks, but ONLY in columns that were recently modified.
+   * O(height × dirtyColumns) instead of O(width × height × depth).
+   */
   public findUnsupportedBlocks(): { x: number; y: number; z: number }[] {
     const unsupported: { x: number; y: number; z: number }[] = [];
 
-    // Check from bottom up - ground floor (y=0) is always supported
-    for (let y = 1; y < this.gridHeight; y++) {
-      for (let x = 0; x < this.gridWidth; x++) {
-        for (let z = 0; z < this.gridDepth; z++) {
-          if (!this.grid[x][y][z]) continue;
+    if (this.dirtyColumns.size === 0) return unsupported;
 
-          // Check if any block directly below supports this one
-          // A block is supported if ANY adjacent block below it is solid
-          let supported = false;
-          for (let dx = -SUPPORT_CHECK_RADIUS; dx <= SUPPORT_CHECK_RADIUS && !supported; dx++) {
-            for (let dz = -SUPPORT_CHECK_RADIUS; dz <= SUPPORT_CHECK_RADIUS && !supported; dz++) {
-              if (this.isSolid(x + dx, y - 1, z + dz)) {
-                supported = true;
-              }
+    // Only scan columns that had blocks removed recently
+    for (const colKey of this.dirtyColumns) {
+      const parts = colKey.split(',');
+      const cx = parseInt(parts[0]);
+      const cz = parseInt(parts[1]);
+
+      if (cx < 0 || cx >= this.gridWidth || cz < 0 || cz >= this.gridDepth) continue;
+
+      // Scan this column from bottom up
+      for (let y = 1; y < this.gridHeight; y++) {
+        if (!this.grid[cx][y][cz]) continue;
+
+        // Check if any adjacent block below supports this one
+        let supported = false;
+        for (let dx = -1; dx <= 1 && !supported; dx++) {
+          for (let dz = -1; dz <= 1 && !supported; dz++) {
+            if (this.isSolid(cx + dx, y - 1, cz + dz)) {
+              supported = true;
             }
           }
+        }
 
-          if (!supported) {
-            unsupported.push({ x, y, z });
-          }
+        if (!supported) {
+          unsupported.push({ x: cx, y, z: cz });
         }
       }
     }
+
+    // Clear dirty columns after processing
+    this.dirtyColumns.clear();
 
     return unsupported;
   }

@@ -113,9 +113,9 @@ class Game {
         const horizontalDist = Math.sqrt(dx * dx + dz * dz);
 
         if (horizontalDist < radius) {
-          // Apply high-speed impact damage to tear chunks off
+          // Use beam damage (non-voxelizing) for continuous alien beam
           const impactSpeed = 40 + damage * (1 - horizontalDist / radius);
-          this.buildingDamage.applyImpactDamage(building, position, impactSpeed);
+          this.buildingDamage.applyBeamDamage(building, position, impactSpeed);
         }
       }
     });
@@ -145,9 +145,9 @@ class Game {
       this.buildingDamage.applyImpactDamage(buildingMesh, impactPosition, speed);
     });
 
-    // Connect heat vision to damage system
+    // Connect heat vision to damage system (beam, not direct collision)
     this.player.setOnHeatVisionDamage((building, position, damage) => {
-      this.buildingDamage.applyImpactDamage(building, position, damage);
+      this.buildingDamage.applyBeamDamage(building, position, damage);
     });
 
     // Initialize UI
