@@ -461,6 +461,8 @@ export class BuildingDamage {
         if (pos) removedPositions.push(pos);
       }
 
+      vb.flushChanges();
+
       if (removedPositions.length > 0) {
         // Falling rubble - mostly downward velocity
         const maxFalling = Math.min(removedPositions.length, MAX_DEBRIS_PIECES - this.debris.length, 8);

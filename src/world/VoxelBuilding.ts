@@ -14,7 +14,7 @@
  */
 
 import { Scene } from '@babylonjs/core/scene';
-import { Vector3, Matrix, Quaternion } from '@babylonjs/core/Maths/math';
+import { Vector3, Matrix } from '@babylonjs/core/Maths/math';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
@@ -59,10 +59,12 @@ export class VoxelBuilding {
   // For damage callbacks
   public onBlockRemoved: ((worldPos: Vector3, count: number) => void) | null = null;
 
+  // Map from instance index back to grid key (for swap-and-shrink)
+  private instanceToGrid: string[] = [];
+
   // Reusable objects
   private static _tmpMatrix = Matrix.Identity();
   private static _tmpPosition = new Vector3();
-  private static _zeroMatrix = Matrix.Scaling(0, 0, 0);
 
   constructor(
     scene: Scene,
@@ -136,6 +138,7 @@ export class VoxelBuilding {
     // 16 floats per 4x4 matrix
     this.instanceMatrices = new Float32Array(count * 16);
     this.gridToInstance.clear();
+    this.instanceToGrid = [];
 
     let idx = 0;
     for (let x = 0; x < this.gridWidth; x++) {
@@ -150,7 +153,9 @@ export class VoxelBuilding {
           Matrix.TranslationToRef(worldX, worldY, worldZ, VoxelBuilding._tmpMatrix);
           VoxelBuilding._tmpMatrix.copyToArray(this.instanceMatrices, idx * 16);
 
-          this.gridToInstance.set(`${x},${y},${z}`, idx);
+          const key = `${x},${y},${z}`;
+          this.gridToInstance.set(key, idx);
+          this.instanceToGrid[idx] = key;
           idx++;
         }
       }
@@ -204,20 +209,60 @@ export class VoxelBuilding {
    * Removes a single block at grid coordinates.
    * Returns the world position of the removed block, or null if already empty.
    */
+  // Track whether buffer needs updating (batch multiple removes per frame)
+  private bufferDirty = false;
+
   public removeBlock(x: number, y: number, z: number): Vector3 | null {
     if (!this.isSolid(x, y, z)) return null;
 
     this.grid[x][y][z] = false;
 
-    // Hide the thin instance by zeroing its matrix
+    // Swap-and-shrink: move the last instance into this slot, then shrink count.
+    // This avoids zero-scale matrices which break hardware instancing in Babylon.js.
     const key = `${x},${y},${z}`;
-    const instanceIdx = this.gridToInstance.get(key);
-    if (instanceIdx !== undefined) {
-      VoxelBuilding._zeroMatrix.copyToArray(this.instanceMatrices, instanceIdx * 16);
-      this.blockMesh.thinInstanceBufferUpdated('matrix');
+    const removeIdx = this.gridToInstance.get(key);
+    if (removeIdx !== undefined) {
+      const lastIdx = this.instanceCount - 1;
+
+      if (removeIdx !== lastIdx) {
+        // Copy last instance's matrix into the removed slot
+        const srcOffset = lastIdx * 16;
+        const dstOffset = removeIdx * 16;
+        for (let i = 0; i < 16; i++) {
+          this.instanceMatrices[dstOffset + i] = this.instanceMatrices[srcOffset + i];
+        }
+
+        // Update the maps: the grid key that was at lastIdx is now at removeIdx
+        const lastKey = this.instanceToGrid[lastIdx];
+        this.gridToInstance.set(lastKey, removeIdx);
+        this.instanceToGrid[removeIdx] = lastKey;
+      }
+
+      // Remove from maps
+      this.gridToInstance.delete(key);
+      this.instanceCount--;
+
+      this.bufferDirty = true;
     }
 
     return this.gridToWorld(x, y, z);
+  }
+
+  /**
+   * Flushes pending instance buffer changes to the GPU.
+   * Call after a batch of removeBlock calls for efficiency.
+   */
+  public flushChanges(): void {
+    if (!this.bufferDirty) return;
+    this.bufferDirty = false;
+
+    // Update the thin instance buffer with new count
+    this.blockMesh.thinInstanceSetBuffer(
+      'matrix',
+      this.instanceMatrices.subarray(0, this.instanceCount * 16),
+      16,
+      false
+    );
   }
 
   /**
@@ -253,6 +298,7 @@ export class VoxelBuilding {
       }
     }
 
+    this.flushChanges();
     return removed;
   }
 
@@ -280,10 +326,8 @@ export class VoxelBuilding {
       // Remove blocks in cylinder around ray
       for (let dx = -gridRadius; dx <= gridRadius; dx++) {
         for (let dz = -gridRadius; dz <= gridRadius; dz++) {
-          // Cylindrical check (ignore Y for punch-through)
           if (dx * dx + dz * dz > gridRadius * gridRadius) continue;
 
-          // Remove at the hit Y level and a few above/below for body height
           for (let dy = -1; dy <= 1; dy++) {
             const gx = center.x + dx;
             const gy = center.y + dy;
@@ -295,6 +339,7 @@ export class VoxelBuilding {
       }
     }
 
+    this.flushChanges();
     return removed;
   }
 
