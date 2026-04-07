@@ -13,6 +13,7 @@ import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera';
+import { Diag } from '../core/DiagnosticLog';
 import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator';
 
 import { PhysicsManager, CharacterPhysics } from '../physics/physics';
@@ -833,9 +834,9 @@ export class Player {
    */
   private checkBuildingCollision(): void {
     // Only check when flying at significant speed
-    if (!this.isFlightMode || this.currentSpeed < 20) return;
+    if (!this.isFlightMode || this.currentSpeed < 15) return;
 
-    // Prevent rapid-fire collision triggers (shorter cooldown for responsiveness)
+    // Prevent rapid-fire collision triggers
     const now = performance.now();
     if (now - this.lastBuildingCollisionTime < 50) return;
 
@@ -887,7 +888,8 @@ export class Player {
       const isBuilding = meshName.startsWith('building_');
 
       if (isBuilding) {
-        // Trigger building collision damage
+        Diag.log('Collision', `${meshName.substring(0, 30)} speed=${this.currentSpeed.toFixed(0)} dist=${hitResult.distance.toFixed(1)}`);
+        Diag.count('Collision', 'buildingHits');
         if (this.onBuildingCollision) {
           this.onBuildingCollision(hitResult.mesh, hitResult.point, this.currentSpeed);
         }

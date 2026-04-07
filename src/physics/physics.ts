@@ -8,6 +8,7 @@ import { Scene } from '@babylonjs/core/scene';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Ray } from '@babylonjs/core/Culling/ray';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { Diag } from '../core/DiagnosticLog';
 import { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh';
 import '@babylonjs/core/Collisions/collisionCoordinator';
 
@@ -293,7 +294,7 @@ export class PhysicsManager {
           // Building collision: Superman hits the surface, damage callback breaks blocks.
           // Speed loss proportional to speed: fast = less loss, slow = more loss
           const speed = velocity.length();
-          // Logged via DiagnosticLog in main.ts
+          Diag.log('PhysicsHit', `${meshName.substring(0, 25)} spd=${speed.toFixed(0)} keep=${(keepRatio * 100).toFixed(0)}%`);
           const keepRatio = speed > 80 ? 0.92 : speed > 40 ? 0.85 : 0.75;
           character.velocity = velocity.scale(keepRatio);
           // Push forward past the broken surface (at least one voxel width = 4 units)
