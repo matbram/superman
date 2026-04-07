@@ -24,6 +24,10 @@ export class LandingState extends BasePlayerState {
 
     player.setFlightMode(false);
     player.setBoostActive(false);
+
+    // Clamp position above ground
+    const pos = player.getPhysics().position;
+    if (pos.y < 0.9) pos.y = 0.9;
   }
 
   exit(player: Player): void {

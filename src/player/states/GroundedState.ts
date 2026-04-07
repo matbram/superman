@@ -23,11 +23,17 @@ export class GroundedState extends BasePlayerState {
   private flyWasReleased: boolean = true;
 
   enter(player: Player): void {
-    // DON'T snap pitch/roll to 0 instantly - causes camera whip on superhero landing
-    // Instead, gradually level out during the grace period
     this.moveVelocity = Vector3.Zero();
     player.setVelocity(new Vector3(0, 0, 0));
-    this.landingGracePeriod = 0.3; // Longer grace period for smooth camera transition
+    this.landingGracePeriod = 0.3;
+
+    // CRITICAL: Ensure position is above ground when entering Grounded state
+    // Super dive can arrive at negative Y - clamp immediately
+    const pos = player.getPhysics().position;
+    const minY = 1.8 / 2; // PLAYER_HEIGHT / 2
+    if (pos.y < minY) {
+      pos.y = minY;
+    }
   }
 
   update(player: Player, input: InputState, deltaTime: number): PlayerStateType | null {

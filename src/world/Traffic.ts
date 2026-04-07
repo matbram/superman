@@ -154,16 +154,19 @@ export class TrafficSystem {
 
       // Knocked vehicles tumble through the air
       if (v.knocked) {
-        v.knockVelY -= 30 * deltaTime; // Gravity
+        v.knockVelY -= 30 * deltaTime;
+        // Cap downward velocity to prevent tunneling through ground
+        if (v.knockVelY < -80) v.knockVelY = -80;
         v.root.position.y += v.knockVelY * deltaTime;
-        v.root.rotation.x += deltaTime * 3; // Tumble
+        v.root.rotation.x += deltaTime * 3;
         v.root.rotation.z += deltaTime * 2;
         v.speed *= (1 - deltaTime * 2);
 
-        // Hit the ground
-        if (v.root.position.y < 0) {
+        // ABSOLUTE floor - clamp to ground, never go below
+        if (v.root.position.y <= 0) {
           v.root.position.y = 0;
-          v.knockVelY = 0;
+          v.knockVelY = Math.abs(v.knockVelY) * 0.2; // Small bounce
+          if (v.knockVelY < 1) v.knockVelY = 0;
           v.speed *= 0.3;
         }
 

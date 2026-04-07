@@ -354,41 +354,40 @@ export class PhysicsManager {
       character.velocity = velocity;
     }
 
-    // Ground check (skip ground snapping in flight mode)
+    // ── GROUND COLLISION (robust, multi-layered) ──
+    // Layer 1: Raycast down to find the actual ground surface
     const groundCheck = this.checkGrounded(character.position, character.height);
     character.isGrounded = groundCheck.hit && !character.isFlying;
     character.groundNormal = groundCheck.normal;
 
-    // Snap to ground if close and moving down (only when not flying)
+    // Layer 2: Snap to ground if raycast found it
     if (groundCheck.hit && !character.isFlying) {
       const groundY = groundCheck.point.y;
-      // Position is character center, so add half height to stand ON the ground
       const targetY = groundY + character.height / 2;
 
-      // Prevent falling through ground - enforce minimum height
       if (character.position.y < targetY) {
         character.position.y = targetY;
-        if (character.velocity.y < 0) {
-          character.velocity.y = 0;
-        }
+        if (character.velocity.y < 0) character.velocity.y = 0;
         character.isGrounded = true;
-      }
-      // Snap down to ground if close and moving down
-      else if (character.position.y < targetY + 0.15 && velocity.y <= 0) {
+      } else if (character.position.y < targetY + 0.15 && velocity.y <= 0) {
         character.position.y = targetY;
-        if (character.velocity.y < 0) {
-          character.velocity.y = 0;
-        }
+        if (character.velocity.y < 0) character.velocity.y = 0;
       }
     }
 
-    // Absolute minimum height - never go below ground level 0
-    if (!character.isFlying && character.position.y < character.height / 2) {
-      character.position.y = character.height / 2;
-      if (character.velocity.y < 0) {
-        character.velocity.y = 0;
-      }
-      character.isGrounded = true;
+    // Layer 3: ABSOLUTE floor - can NEVER go below Y=0 ground level
+    // This catches ALL edge cases: chunk boundaries, high-speed impacts, missed raycasts
+    const absoluteMinY = character.height / 2;
+    if (character.position.y < absoluteMinY) {
+      character.position.y = absoluteMinY;
+      if (character.velocity.y < 0) character.velocity.y = 0;
+      character.isGrounded = !character.isFlying;
+    }
+
+    // Layer 4: Velocity sanity check - prevent falling faster than terminal velocity
+    // This prevents single-frame tunneling through the ground
+    if (!character.isFlying && character.velocity.y < -100) {
+      character.velocity.y = -100; // Terminal velocity cap
     }
   }
 
