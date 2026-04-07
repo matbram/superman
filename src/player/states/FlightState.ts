@@ -87,7 +87,8 @@ export class FlightState extends BasePlayerState {
     // SUPER DIVE: force landing at any speed when near ground
     if (this.superDiving) {
       const height = player.getHeightAboveGround();
-      if (height < 15) { // Higher threshold for fast dive
+      if (height < 15) {
+        console.log(`[SuperDive] LANDING TRIGGERED! height=${height.toFixed(1)} speed=${this.currentSpeed.toFixed(0)}`);
         this.superDiving = false;
         return PlayerStateType.Landing;
       }
@@ -178,39 +179,45 @@ export class FlightState extends BasePlayerState {
     }
 
     // ── DOUBLE-TAP LT → SUPER DIVE (instant descent + superhero landing) ──
-    // Single press = normal brake. Double-tap within 400ms = dive.
-    // Brake is delayed during the window so first tap doesn't kill speed.
     if (input.descendTrigger > 0.3) {
       if (this.descendWasReleased) {
-        if (now - this.lastDescendPressTime < 400 && this.lastDescendPressTime > 0) {
-          // DOUBLE TAP confirmed! Trigger super dive
+        const timeSinceLastPress = now - this.lastDescendPressTime;
+        if (timeSinceLastPress < 400 && this.lastDescendPressTime > 0) {
+          // DOUBLE TAP confirmed!
+          console.log(`[SuperDive] DOUBLE TAP DETECTED! timeBetween=${timeSinceLastPress.toFixed(0)}ms speed=${this.currentSpeed.toFixed(0)}`);
           this.superDiving = true;
           this.lastDescendPressTime = 0;
           this.currentSpeed = Math.max(this.currentSpeed, MAX_SPEED * 0.6);
         } else {
+          console.log(`[SuperDive] First tap registered. trigger=${input.descendTrigger.toFixed(2)} wasReleased=${this.descendWasReleased}`);
           this.lastDescendPressTime = now;
         }
         this.descendWasReleased = false;
       }
     } else if (input.descendTrigger < 0.15) {
-      // Trigger must go below 0.15 to count as "released" for next tap
+      if (!this.descendWasReleased && this.lastDescendPressTime > 0) {
+        console.log(`[SuperDive] Released. trigger=${input.descendTrigger.toFixed(2)} timeSincePress=${(now - this.lastDescendPressTime).toFixed(0)}ms`);
+      }
       this.descendWasReleased = true;
     }
 
     // Super dive: pitch down, accelerate, ignore brakes, cause destruction on landing
     if (this.superDiving) {
       this.currentSpeed = Math.min(MAX_SPEED, this.currentSpeed + 500 * deltaTime);
-      player.setPitch(Math.PI * 0.45); // POSITIVE pitch = nose down
+      player.setPitch(Math.PI * 0.45);
 
-      // Force velocity downward - override any upward momentum from boost
       const vel = player.getVelocity();
+      const height = player.getHeightAboveGround();
+      console.log(`[SuperDive] ACTIVE speed=${this.currentSpeed.toFixed(0)} height=${height.toFixed(1)} vel.y=${vel.y.toFixed(1)} pitch=${player.getPitch().toFixed(2)}`);
+
       if (vel.y > 0) {
-        vel.y = -Math.abs(vel.y); // Reverse upward velocity to downward
+        vel.y = -Math.abs(vel.y);
         player.setVelocity(vel);
+        console.log(`[SuperDive] Reversed upward velocity to ${vel.y.toFixed(1)}`);
       }
 
       player.setCurrentSpeed(this.currentSpeed);
-      return; // RETURN EARLY - bypass ALL brake logic
+      return;
     }
 
     // RT pressure directly controls target speed
