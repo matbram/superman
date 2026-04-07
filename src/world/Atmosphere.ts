@@ -12,10 +12,14 @@ import { GlowLayer } from '@babylonjs/core/Layers/glowLayer';
 
 // Atmosphere constants
 const SUN_DISTANCE = 800;
-const CLOUD_HEIGHT_MIN = 120;
-const CLOUD_HEIGHT_MAX = 350;
-const CLOUD_RENDER_DISTANCE = 600;
-const NUM_CLOUD_CLUSTERS = 35; // More clouds for a fuller sky
+const CLOUD_HEIGHT_MIN = 350;
+const CLOUD_HEIGHT_MAX = 550;
+const CLOUD_RENDER_DISTANCE = 800;
+const NUM_CLOUD_CLUSTERS = 35;
+
+// Wind system - blows clouds across the sky
+const WIND_SPEED_X = 8;   // m/s eastward
+const WIND_SPEED_Z = 3;   // m/s slightly south
 
 // Cloud dispersion constants
 const CLOUD_DISPERSE_RADIUS = 35;
@@ -309,9 +313,9 @@ export class Atmosphere {
       puffs,
       basePosition: position.clone(),
       driftSpeed: new Vector3(
-        (Math.random() - 0.5) * 2,
-        0,
-        (Math.random() - 0.5) * 2
+        WIND_SPEED_X + (Math.random() - 0.5) * 4, // Wind + random variation
+        (Math.random() - 0.5) * 0.5,              // Slight vertical drift
+        WIND_SPEED_Z + (Math.random() - 0.5) * 4
       ),
       rotationSpeed: (Math.random() - 0.5) * 0.01,
       rotation: Math.random() * Math.PI * 2,
@@ -347,10 +351,21 @@ export class Atmosphere {
 
     // Update cloud clusters
     for (const cluster of this.cloudClusters) {
-      // Drift clouds slowly - inline to avoid scale() allocation
+      // Wind blows clouds across the sky
       cluster.basePosition.x += cluster.driftSpeed.x * deltaTime;
       cluster.basePosition.y += cluster.driftSpeed.y * deltaTime;
       cluster.basePosition.z += cluster.driftSpeed.z * deltaTime;
+
+      // Wrap clouds that drift too far from player (infinite sky)
+      const cdx = cluster.basePosition.x - playerPosition.x;
+      const cdz = cluster.basePosition.z - playerPosition.z;
+      if (cdx > CLOUD_RENDER_DISTANCE) cluster.basePosition.x -= CLOUD_RENDER_DISTANCE * 2;
+      if (cdx < -CLOUD_RENDER_DISTANCE) cluster.basePosition.x += CLOUD_RENDER_DISTANCE * 2;
+      if (cdz > CLOUD_RENDER_DISTANCE) cluster.basePosition.z -= CLOUD_RENDER_DISTANCE * 2;
+      if (cdz < -CLOUD_RENDER_DISTANCE) cluster.basePosition.z += CLOUD_RENDER_DISTANCE * 2;
+      // Keep at cloud height
+      if (cluster.basePosition.y < CLOUD_HEIGHT_MIN) cluster.basePosition.y = CLOUD_HEIGHT_MIN;
+      if (cluster.basePosition.y > CLOUD_HEIGHT_MAX) cluster.basePosition.y = CLOUD_HEIGHT_MAX;
 
       // Update each puff with bobbing and dispersion
       for (const puff of cluster.puffs) {
