@@ -83,7 +83,8 @@ export class VoxelWorld {
   // Effects
   private debris: DebrisPiece[] = [];
   private dustClouds: DustCloud[] = [];
-  // Falling voxel blocks tracked via debris array
+  // Leaning buildings (structurally compromised, tilting before collapse)
+  private leaningBuildings: Map<VoxelBuilding, { angle: number; speed: number; dirX: number; dirZ: number }> = new Map();
   private debrisMaterials: StandardMaterial[] = [];
 
   // Gravity zone
@@ -276,6 +277,9 @@ export class VoxelWorld {
     // Auto-destroy nearly empty buildings
     if (vb.getPercentRemaining() < AUTO_DESTROY_THRESHOLD) {
       this.destroyBuilding(vb);
+    } else {
+      // Check structural lean - asymmetric base damage causes building to tilt
+      this.checkLean(vb);
     }
 
     Diag.track('Damage', 'activeDebris', this.debris.length);
@@ -306,6 +310,8 @@ export class VoxelWorld {
 
     if (vb.getPercentRemaining() < AUTO_DESTROY_THRESHOLD) {
       this.destroyBuilding(vb);
+    } else {
+      this.checkLean(vb);
     }
   }
 
@@ -575,10 +581,118 @@ export class VoxelWorld {
     this.dustClouds.push({ particles: ps, lifetime: 8 });
   }
 
+  // ── Building Lean ───────────────────────────────────────────────────
+
+  private checkLean(vb: VoxelBuilding): void {
+    const lean = vb.calculateLean();
+    if (!lean) {
+      this.leaningBuildings.delete(vb);
+      return;
+    }
+
+    if (lean.intensity > 0.3 && !this.leaningBuildings.has(vb)) {
+      // Building starts leaning
+      this.leaningBuildings.set(vb, {
+        angle: 0,
+        speed: 0.05 + lean.intensity * 0.2,
+        dirX: lean.direction.x,
+        dirZ: lean.direction.z,
+      });
+      Diag.log('Lean', `building starting to lean, intensity=${lean.intensity.toFixed(2)}`);
+    }
+  }
+
+  private updateLeaningBuildings(deltaTime: number): void {
+    for (const [vb, lean] of this.leaningBuildings) {
+      // Accelerate the lean
+      lean.speed += deltaTime * 0.8;
+      lean.angle += lean.speed * deltaTime;
+
+      // Apply visual lean to the voxel mesh
+      vb.applyLean(lean.angle, lean.dirX, lean.dirZ);
+
+      // Smoke from the base as it leans
+      if (lean.angle > 0.05 && Math.random() < deltaTime * 3) {
+        const basePos = new Vector3(
+          vb.minWorld.x + (vb.maxWorld.x - vb.minWorld.x) * 0.5,
+          vb.minWorld.y,
+          vb.minWorld.z + (vb.maxWorld.z - vb.minWorld.z) * 0.5
+        );
+        this.spawnDust(basePos, 4, 1);
+      }
+
+      // Past tipping point: collapse entirely
+      if (lean.angle > 0.4) { // ~23 degrees
+        // Camera shake!
+        if (this.onCameraShake) {
+          this.onCameraShake(5);
+        }
+
+        // Massive smoke + dust at base
+        const basePos = new Vector3(
+          vb.minWorld.x + (vb.maxWorld.x - vb.minWorld.x) * 0.5,
+          vb.minWorld.y,
+          vb.minWorld.z + (vb.maxWorld.z - vb.minWorld.z) * 0.5
+        );
+        this.spawnSmoke(basePos, 15, 50);
+        this.spawnDust(basePos, 12, 3);
+
+        // Smoke at the "crash" point (where the top of the building hits)
+        const crashPos = basePos.add(
+          new Vector3(lean.dirX, 0, lean.dirZ).scale(vb.worldHeight * 0.7)
+        );
+        crashPos.y = 0;
+        this.spawnSmoke(crashPos, 12, 40);
+        this.spawnDust(crashPos, 10, 2.5);
+
+        // Destroy the building - all remaining blocks become debris
+        this.collapseEntireBuilding(vb);
+        this.leaningBuildings.delete(vb);
+      }
+    }
+  }
+
+  /**
+   * Collapse an entire building - all blocks become falling debris.
+   */
+  private collapseEntireBuilding(vb: VoxelBuilding): void {
+    // Gather all remaining block positions
+    const allBlocks: Vector3[] = [];
+    for (let x = 0; x < vb.gridWidth; x++) {
+      for (let y = 0; y < vb.gridHeight; y++) {
+        for (let z = 0; z < vb.gridDepth; z++) {
+          if (vb.isSolid(x, y, z)) {
+            allBlocks.push(vb.gridToWorldPos(x, y, z));
+          }
+        }
+      }
+    }
+
+    // Spawn debris from sampled blocks
+    const center = new Vector3(
+      (vb.minWorld.x + vb.maxWorld.x) * 0.5,
+      vb.minWorld.y,
+      (vb.minWorld.z + vb.maxWorld.z) * 0.5
+    );
+    this.handleDisconnectedBlocks(vb,
+      allBlocks.map(p => {
+        const g = vb.worldToGrid(p);
+        return g || { x: 0, y: 0, z: 0 };
+      }),
+      center
+    );
+
+    // Destroy the building
+    this.destroyBuilding(vb);
+  }
+
   // ── Update Loop ────────────────────────────────────────────────────
 
   public update(deltaTime: number, playerPos?: Vector3): void {
     const now = performance.now();
+
+    // Update leaning buildings (tilt, smoke, collapse when past tipping point)
+    this.updateLeaningBuildings(deltaTime);
 
     // Dust cleanup
     for (let i = this.dustClouds.length - 1; i >= 0; i--) {

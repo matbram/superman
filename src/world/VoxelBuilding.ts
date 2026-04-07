@@ -531,6 +531,72 @@ export class VoxelBuilding {
     return disconnected;
   }
 
+  /**
+   * Calculate the structural lean of the building based on asymmetric damage.
+   * Returns a lean vector (XZ direction) and intensity (0=stable, 1=falling over).
+   * Buildings lean toward the side with the most damage at the base.
+   */
+  public calculateLean(): { direction: Vector3; intensity: number } | null {
+    if (this.gridHeight < 4) return null;
+
+    // Count solid blocks on each side at the base (bottom 30%)
+    const baseHeight = Math.max(2, Math.floor(this.gridHeight * 0.3));
+    let countXNeg = 0, countXPos = 0, countZNeg = 0, countZPos = 0;
+    let totalBase = 0;
+    const halfX = this.gridWidth / 2;
+    const halfZ = this.gridDepth / 2;
+
+    for (let y = 0; y < baseHeight; y++) {
+      for (let x = 0; x < this.gridWidth; x++) {
+        for (let z = 0; z < this.gridDepth; z++) {
+          if (this.grid[x][y][z]) {
+            totalBase++;
+            if (x < halfX) countXNeg++; else countXPos++;
+            if (z < halfZ) countZNeg++; else countZPos++;
+          }
+        }
+      }
+    }
+
+    if (totalBase === 0) return null;
+
+    // Calculate asymmetry - lean toward the side with FEWER blocks (missing support)
+    const maxPossible = baseHeight * this.gridWidth * this.gridDepth * 0.5;
+    const asymX = (countXPos - countXNeg) / Math.max(1, maxPossible);
+    const asymZ = (countZPos - countZNeg) / Math.max(1, maxPossible);
+
+    // Lean direction: toward the weaker side
+    const leanX = -asymX; // Lean toward side with fewer blocks
+    const leanZ = -asymZ;
+    const leanMag = Math.sqrt(leanX * leanX + leanZ * leanZ);
+
+    if (leanMag < 0.15) return null; // Balanced enough, no lean
+
+    // Intensity: how much of the base is destroyed
+    const fullBase = this.gridWidth * baseHeight * this.gridDepth;
+    const baseDamage = 1 - (totalBase / Math.max(1, fullBase));
+    const intensity = Math.min(1, baseDamage * 2 + leanMag * 0.5);
+
+    return {
+      direction: new Vector3(leanX / leanMag, 0, leanZ / leanMag),
+      intensity,
+    };
+  }
+
+  /**
+   * Apply a lean transformation to the mesh. The building visually tilts.
+   */
+  public applyLean(angle: number, axisX: number, axisZ: number): void {
+    this.blockMesh.rotationQuaternion = null;
+    // Lean around the base (pivot at bottom center)
+    this.blockMesh.setPivotPoint(new Vector3(0, -(this.worldHeight * 0.5), 0));
+    if (Math.abs(axisX) > Math.abs(axisZ)) {
+      this.blockMesh.rotation.z = angle * Math.sign(axisX);
+    } else {
+      this.blockMesh.rotation.x = angle * Math.sign(axisZ);
+    }
+  }
+
   // ── Queries ────────────────────────────────────────────────────────
 
   public getPercentRemaining(): number {
