@@ -15,8 +15,8 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import '@babylonjs/core/Meshes/thinInstanceMesh';
 
-const CLOUD_HEIGHT_MIN = 380;
-const CLOUD_HEIGHT_MAX = 520;
+const CLOUD_HEIGHT_MIN = 500;
+const CLOUD_HEIGHT_MAX = 700;
 const NUM_CLOUDS = 40;
 const VOXELS_PER_CLOUD = 120;  // Dense fluffy clouds
 const VOXEL_SIZE = 2.5;        // Small cubes = softer look
@@ -58,9 +58,9 @@ export class VoxelClouds {
 
     const mat = new StandardMaterial('cloudVoxelMat', scene);
     mat.diffuseColor = new Color3(0.92, 0.93, 0.97);
-    mat.emissiveColor = new Color3(0.35, 0.38, 0.45); // Subtle - not blinding white
+    mat.emissiveColor = new Color3(0.25, 0.28, 0.35); // Very subtle glow
     mat.specularColor = new Color3(0, 0, 0);
-    mat.alpha = 0.35; // More transparent - clouds are wispy
+    mat.alpha = 0.2; // Very wispy and transparent
     mat.backFaceCulling = false;
     mat.freeze();
     this.cloudMesh.material = mat;

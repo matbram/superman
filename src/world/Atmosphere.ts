@@ -205,16 +205,7 @@ export class Atmosphere {
    * Generates initial cloud clusters around origin
    */
   private generateInitialClouds(): void {
-    for (let i = 0; i < NUM_CLOUD_CLUSTERS; i++) {
-      const angle = (i / NUM_CLOUD_CLUSTERS) * Math.PI * 2;
-      const radius = 80 + Math.random() * (CLOUD_RENDER_DISTANCE - 80);
-
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      const y = CLOUD_HEIGHT_MIN + Math.random() * (CLOUD_HEIGHT_MAX - CLOUD_HEIGHT_MIN);
-
-      this.createCloudCluster(new Vector3(x, y, z));
-    }
+    // Old sphere clouds disabled - replaced by VoxelClouds system
   }
 
   /**
