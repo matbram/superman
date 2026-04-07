@@ -11,6 +11,7 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
+import { VoxelBuilding } from './VoxelBuilding';
 
 // Debris constants - balanced for destruction quality and performance
 const MAX_DEBRIS_PIECES = 100; // Higher cap for more rubble persistence
@@ -163,6 +164,7 @@ export class BuildingDamage {
   private scene: Scene;
   private debris: DebrisPiece[] = [];
   private buildingStructures: Map<Mesh, BuildingStructure> = new Map();
+  private voxelBuildings: Map<Mesh, VoxelBuilding> = new Map();
   private debrisMaterials: StandardMaterial[] = [];
   private collapsingBuildings: CollapsingBuilding[] = [];
   private pancakeSections: PancakeSection[] = [];
@@ -343,62 +345,174 @@ export class BuildingDamage {
   }
 
   /**
-   * Applies impact damage from player collision
-   * Realistic punch-through: breaks chunks along flight path, exit-side debris
-   * Building only collapses if structurally compromised, not from speed alone
+   * Converts a building mesh to a voxel building on first damage.
+   * The original mesh is hidden and replaced with a thin-instance voxel grid.
+   */
+  private getOrCreateVoxelBuilding(building: Mesh): VoxelBuilding {
+    let vb = this.voxelBuildings.get(building);
+    if (!vb) {
+      const bounds = building.getBoundingInfo().boundingBox;
+      const size = bounds.maximumWorld.subtract(bounds.minimumWorld);
+      const material = (building.material as StandardMaterial) || this.debrisMaterials[0];
+
+      vb = new VoxelBuilding(
+        this.scene,
+        new Vector3(building.position.x, bounds.minimumWorld.y, building.position.z),
+        size.x, size.y, size.z,
+        material
+      );
+
+      // Hide the original building mesh
+      building.isVisible = false;
+
+      this.voxelBuildings.set(building, vb);
+    }
+    return vb;
+  }
+
+  /**
+   * Spawns debris for each removed voxel block position
+   */
+  private spawnVoxelDebris(positions: Vector3[], impactPosition: Vector3, speed: number): void {
+    const maxSpawn = Math.min(positions.length, MAX_DEBRIS_PIECES - this.debris.length, 12);
+
+    for (let i = 0; i < maxSpawn; i++) {
+      const pos = positions[i];
+      const dirX = pos.x - impactPosition.x;
+      const dirZ = pos.z - impactPosition.z;
+      const dirLen = Math.sqrt(dirX * dirX + dirZ * dirZ) || 1;
+
+      // Varied rubble sizes
+      const sizeBase = 0.8 + Math.random() * 2;
+      const rubble = MeshBuilder.CreateBox(`rbl_${this.debris.length}`, {
+        width: sizeBase * (0.4 + Math.random() * 0.8),
+        height: sizeBase * (0.3 + Math.random() * 0.5),
+        depth: sizeBase * (0.4 + Math.random() * 0.8),
+      }, this.scene);
+      rubble.position.copyFrom(pos);
+      rubble.material = this.debrisMaterials[Math.floor(Math.random() * this.debrisMaterials.length)];
+      rubble.isPickable = false;
+      rubble.rotation.set(Math.random(), Math.random() * Math.PI, Math.random());
+
+      const push = Math.min(speed * 0.1, 10);
+      this.debris.push({
+        mesh: rubble,
+        velocity: new Vector3(
+          (dirX / dirLen) * push + (Math.random() - 0.5) * 4,
+          1 + Math.random() * 4,
+          (dirZ / dirLen) * push + (Math.random() - 0.5) * 4
+        ),
+        angularVelocity: new Vector3(
+          (Math.random() - 0.5) * 4,
+          (Math.random() - 0.5) * 2,
+          (Math.random() - 0.5) * 4
+        ),
+        isChunk: true,
+        settled: false,
+        settleTime: 0,
+        debrisType: DebrisType.Concrete,
+      });
+    }
+  }
+
+  /**
+   * Applies impact damage from player collision.
+   * Converts the building to voxels and punches a hole through it.
    */
   public applyImpactDamage(building: Mesh, impactPosition: Vector3, speed: number): void {
-    const structure = this.getOrCreateStructure(building);
+    // Convert to voxel building on first damage
+    const vb = this.getOrCreateVoxelBuilding(building);
 
-    structure.shakeTime = Math.min(2, speed / 20);
+    // Punch-through: remove blocks in a sphere at impact point
+    // Radius scales with speed
+    const punchRadius = 3 + Math.min(6, speed / 20);
+    const removed = vb.removeBlocksInRadius(impactPosition, punchRadius);
 
-    const bounds = structure.bounds;
-    const buildingCenter = structure.originalPosition;
-    const buildingSize = bounds.max.subtract(bounds.min);
+    if (removed.length > 0) {
+      // Spawn rubble debris from removed blocks
+      this.spawnVoxelDebris(removed, impactPosition, speed);
+      this.spawnDustCloud(impactPosition, 5, 1);
 
-    // Calculate relative impact position within building
-    const relImpactX = (impactPosition.x - buildingCenter.x) / buildingSize.x;
-    const relImpactY = (impactPosition.y - bounds.min.y) / buildingSize.y;
-    const relImpactZ = (impactPosition.z - buildingCenter.z) / buildingSize.z;
-
-    // Punch-through radius scales with speed - faster = bigger hole
-    const punchRadius = 0.15 + Math.min(0.3, speed / 200);
-
-    // Break breakpoints near the flight path (cylindrical selection)
-    let chunksCreated = 0;
-    const maxChunks = Math.min(16, 4 + Math.floor(speed / 15));
-
-    // Sort by proximity to impact for natural break pattern
-    const candidates: { bp: BreakPoint; dist: number }[] = [];
-    for (const bp of structure.breakPoints) {
-      if (bp.broken) continue;
-      const dx = bp.relativePosition.x - relImpactX;
-      const dy = bp.relativePosition.y - relImpactY;
-      const dz = bp.relativePosition.z - relImpactZ;
-      // Use cylindrical distance (XZ plane) so we punch through all Z depths at this height
-      const cylDist = Math.sqrt(dx * dx + dy * dy * 4); // Weight Y distance more
-      candidates.push({ bp, dist: cylDist });
+      // Check for unsupported blocks that should fall
+      this.processUnsupportedBlocks(vb, building, impactPosition);
     }
 
-    candidates.sort((a, b) => a.dist - b.dist);
+    // Also maintain the legacy structure for shake/lean effects
+    const structure = this.getOrCreateStructure(building);
+    structure.shakeTime = Math.min(2, speed / 20);
+  }
 
-    for (const { bp, dist } of candidates) {
-      if (chunksCreated >= maxChunks) break;
-      // Break chunks within punch radius, and load-bearing columns need more force
-      const effectiveRadius = bp.isLoadBearing ? punchRadius * 0.6 : punchRadius;
-      if (dist < effectiveRadius || (speed > 60 && dist < punchRadius * 1.5)) {
-        this.breakChunkWithType(structure, bp, impactPosition, speed);
-        chunksCreated++;
+  /**
+   * Finds unsupported blocks in a voxel building, removes them, and spawns debris.
+   * Unsupported blocks cascade - removing them can cause more blocks above to fall.
+   * Limited to a few iterations per call to avoid frame drops.
+   */
+  private processUnsupportedBlocks(vb: VoxelBuilding, buildingMesh: Mesh, impactPos: Vector3): void {
+    const maxIterations = 3; // Cascade up to 3 levels per frame
+
+    for (let iter = 0; iter < maxIterations; iter++) {
+      const unsupported = vb.findUnsupportedBlocks();
+      if (unsupported.length === 0) break;
+
+      // Remove unsupported blocks and spawn them as falling debris
+      const removedPositions: Vector3[] = [];
+      for (const { x, y, z } of unsupported) {
+        const pos = vb.removeBlock(x, y, z);
+        if (pos) removedPositions.push(pos);
+      }
+
+      if (removedPositions.length > 0) {
+        // Falling rubble - mostly downward velocity
+        const maxFalling = Math.min(removedPositions.length, MAX_DEBRIS_PIECES - this.debris.length, 8);
+        for (let i = 0; i < maxFalling; i++) {
+          const pos = removedPositions[i];
+          const sizeBase = 0.8 + Math.random() * 2;
+          const rubble = MeshBuilder.CreateBox(`fall_${this.debris.length}`, {
+            width: sizeBase * (0.5 + Math.random() * 0.7),
+            height: sizeBase * (0.3 + Math.random() * 0.5),
+            depth: sizeBase * (0.5 + Math.random() * 0.7),
+          }, this.scene);
+          rubble.position.copyFrom(pos);
+          rubble.material = this.debrisMaterials[Math.floor(Math.random() * this.debrisMaterials.length)];
+          rubble.isPickable = false;
+          rubble.rotation.set(Math.random(), Math.random() * Math.PI, Math.random());
+
+          this.debris.push({
+            mesh: rubble,
+            velocity: new Vector3(
+              (Math.random() - 0.5) * 3,
+              -2 - Math.random() * 3, // Falls down
+              (Math.random() - 0.5) * 3
+            ),
+            angularVelocity: new Vector3(
+              (Math.random() - 0.5) * 3,
+              (Math.random() - 0.5) * 2,
+              (Math.random() - 0.5) * 3
+            ),
+            isChunk: true,
+            settled: false,
+            settleTime: 0,
+            debrisType: DebrisType.Concrete,
+          });
+        }
+
+        // Dust cloud at the collapse point
+        if (removedPositions.length > 3) {
+          const midPos = removedPositions[Math.floor(removedPositions.length / 2)];
+          this.spawnDustCloud(midPos, 4, 1);
+        }
       }
     }
 
-    // Spawn exit-side debris (chunks fly out the far side)
-    if (chunksCreated > 0) {
-      this.spawnImpactDebris(impactPosition, speed, 3 + chunksCreated);
+    // If most of the building is gone, collapse what remains
+    const remaining = vb.getSolidCount();
+    const topLevel = vb.getTopLevel();
+    if (remaining < 10 || topLevel < 0) {
+      // Building is basically destroyed
+      vb.dispose();
+      this.voxelBuildings.delete(buildingMesh);
+      buildingMesh.dispose();
     }
-
-    // Check structural integrity after damage
-    this.checkStructuralIntegrity(structure, impactPosition);
   }
 
   /**
@@ -698,35 +812,23 @@ export class BuildingDamage {
         const dot = Math.abs(Vector3.Dot(this._toBuilding, this._flyDir));
 
         if (dot < 0.5) {
-          const structure = this.getOrCreateStructure(building);
-
+          // Use voxel building system for wake damage too
+          const vb = this.getOrCreateVoxelBuilding(building);
           const proximityFactor = 1 - (horizontalDist / wakeRadius);
-          const chunksToBreak = Math.min(5, Math.floor(proximityFactor * 3) + 2);
+          const damageRadius = 3 + proximityFactor * 4;
 
-          let broken = 0;
-          for (const bp of structure.breakPoints) {
-            if (bp.broken) continue;
-            if (broken >= chunksToBreak) break;
+          // Damage the side of building facing the player
+          this._impactPos.set(
+            buildingPos.x - this._toBuilding.x * (buildingPos.x - playerPosition.x) * 0.3,
+            buildingPos.y + 10 + Math.random() * 20,
+            buildingPos.z - this._toBuilding.z * (buildingPos.z - playerPosition.z) * 0.3
+          );
+          const removed = vb.removeBlocksInRadius(this._impactPos, damageRadius);
 
-            const chunkWorldX = structure.originalPosition.x + bp.relativePosition.x * 20;
-            const chunkWorldZ = structure.originalPosition.z + bp.relativePosition.z * 20;
-            const ctpX = playerPosition.x - chunkWorldX;
-            const ctpZ = playerPosition.z - chunkWorldZ;
-            const ctpLen = Math.sqrt(ctpX * ctpX + ctpZ * ctpZ) || 1;
-            this._chunkToPlayer.set(ctpX / ctpLen, 0, ctpZ / ctpLen);
-
-            if (Vector3.Dot(this._chunkToPlayer, this._toBuilding) > 0.3) {
-              this.breakChunkWithType(structure, bp, playerPosition, speed * 0.5);
-              broken++;
-            }
-          }
-
-          if (broken > 0) {
-            structure.shakeTime = Math.min(0.8, structure.shakeTime + 0.3);
-            this._impactPos.set(buildingPos.x, buildingPos.y + 15, buildingPos.z);
-            this.spawnImpactDebris(this._impactPos, speed * 0.3, broken * 2);
-            // Check if wake damage compromised the structure
-            this.checkStructuralIntegrity(structure, playerPosition);
+          if (removed.length > 0) {
+            this.spawnVoxelDebris(removed, playerPosition, speed * 0.3);
+            this.spawnDustCloud(this._impactPos, 3, 0.8);
+            this.processUnsupportedBlocks(vb, building, this._impactPos);
           }
         }
       }
