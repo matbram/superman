@@ -85,7 +85,7 @@ export class DayNightCycle {
     scene: Scene,
     sunLight: DirectionalLight,
     ambientLight: HemisphericLight,
-    startHour: number = 17 // Start at late afternoon
+    startHour: number = 10 // Start at mid-morning daylight
   ) {
     this.scene = scene;
     this.sunLight = sunLight;
@@ -124,6 +124,10 @@ export class DayNightCycle {
     this.buildingMaterials = mats;
   }
 
+  public setTimeOfDay(hour: number): void {
+    this.timeOfDay = hour % 24;
+  }
+
   public getTimeOfDay(): number {
     return this.timeOfDay;
   }
@@ -133,12 +137,10 @@ export class DayNightCycle {
   }
 
   public update(deltaTime: number): void {
-    // Frozen at sunrise - the heroic dawn look
-    this.timeOfDay = 6.5;
-
-    // Moon is ALWAYS hidden at sunrise
-    this.moonMesh.setEnabled(false);
-    this.moonLight.intensity = 0;
+    // Time progresses slowly - 1 full day in ~8 minutes
+    // This lets you watch the lighting change and find the look you want
+    this.timeOfDay += this.timeSpeed * deltaTime;
+    if (this.timeOfDay >= 24) this.timeOfDay -= 24;
 
     const t = this.timeOfDay;
 

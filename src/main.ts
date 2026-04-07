@@ -313,6 +313,9 @@ class Game {
     t1 = performance.now();
     this.perfTimings.birds += t1 - t0;
 
+    // Log current time of day so user can find the lighting they want
+    Diag.track('DayNight', 'hour', this.dayNightCycle.getTimeOfDay());
+
     // Update HUD
     this.hud.update(
       this.player.getCurrentStateType(),

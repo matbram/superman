@@ -1,9 +1,9 @@
 /**
  * Traffic System - Voxel vehicles driving along the street grid.
  *
- * Vehicles are built from a few boxes (voxel-style body + cabin + wheels).
- * They follow avenues (N-S) and cross streets (E-W) in the city grid.
- * Each vehicle is a small group of meshes parented to a root transform.
+ * Vehicles are built from boxes (voxel-style body + cabin + wheels).
+ * They snap to avenue/street center lines and drive in lanes.
+ * Sized realistically relative to Superman (~4 units tall).
  */
 
 import { Scene } from '@babylonjs/core/scene';
@@ -13,17 +13,17 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 
-const MAX_VEHICLES = 40;
-const VEHICLE_SPEED = 10;       // ~22 mph urban speed
+const MAX_VEHICLES = 35;
+const VEHICLE_SPEED = 14;       // ~30 mph
 const SPAWN_RADIUS = 300;
 const DESPAWN_RADIUS = 400;
-const SPAWN_INTERVAL = 0.5;
+const SPAWN_INTERVAL = 0.6;
 
-// Street grid constants (must match City.ts)
+// Must match City.ts street grid
+const CHUNK_SIZE = 200;
 const AVENUE_WIDTH = 40;
 const STREET_WIDTH = 24;
 const BLOCK_WIDTH = 70;
-const BLOCK_DEPTH_AVG = 160;
 
 interface Vehicle {
   root: TransformNode;
@@ -33,127 +33,85 @@ interface Vehicle {
   dirX: number;
   dirZ: number;
   speed: number;
-  laneOffset: number;  // Offset within the street (left/right lane)
 }
 
-// Shared materials (created once)
-let vehicleMaterials: StandardMaterial[] | null = null;
-let wheelMaterial: StandardMaterial | null = null;
-let windowMaterial: StandardMaterial | null = null;
+// Shared materials
+let bodyMats: StandardMaterial[] | null = null;
+let wheelMat: StandardMaterial | null = null;
+let windowMat: StandardMaterial | null = null;
 
-function createVehicleMaterials(scene: Scene): void {
-  if (vehicleMaterials) return;
-
-  vehicleMaterials = [];
+function ensureMaterials(scene: Scene): void {
+  if (bodyMats) return;
+  bodyMats = [];
   const colors = [
-    new Color3(0.75, 0.1, 0.1),   // Red
-    new Color3(0.1, 0.15, 0.6),   // Blue
-    new Color3(0.9, 0.9, 0.88),   // White
-    new Color3(0.08, 0.08, 0.08), // Black
-    new Color3(0.9, 0.8, 0.15),   // Yellow (taxi)
-    new Color3(0.55, 0.55, 0.6),  // Silver
-    new Color3(0.15, 0.4, 0.15),  // Green
-    new Color3(0.5, 0.25, 0.1),   // Brown
+    new Color3(0.7, 0.08, 0.08),  // Red
+    new Color3(0.1, 0.12, 0.55),  // Blue
+    new Color3(0.88, 0.88, 0.85), // White
+    new Color3(0.06, 0.06, 0.06), // Black
+    new Color3(0.88, 0.78, 0.12), // Yellow taxi
+    new Color3(0.5, 0.5, 0.55),   // Silver
+    new Color3(0.12, 0.35, 0.12), // Green
+    new Color3(0.45, 0.22, 0.08), // Brown
   ];
   for (const c of colors) {
-    const m = new StandardMaterial('vehMat', scene);
-    m.diffuseColor = c;
-    m.specularColor = new Color3(0.2, 0.2, 0.2);
-    m.freeze();
-    vehicleMaterials.push(m);
+    const m = new StandardMaterial('vMat', scene);
+    m.diffuseColor = c; m.specularColor = new Color3(0.25, 0.25, 0.25);
+    m.freeze(); bodyMats.push(m);
   }
-
-  wheelMaterial = new StandardMaterial('wheelMat', scene);
-  wheelMaterial.diffuseColor = new Color3(0.1, 0.1, 0.1);
-  wheelMaterial.freeze();
-
-  windowMaterial = new StandardMaterial('vehWindowMat', scene);
-  windowMaterial.diffuseColor = new Color3(0.15, 0.2, 0.3);
-  windowMaterial.specularColor = new Color3(0.4, 0.4, 0.5);
-  windowMaterial.freeze();
+  wheelMat = new StandardMaterial('wMat', scene);
+  wheelMat.diffuseColor = new Color3(0.08, 0.08, 0.08); wheelMat.freeze();
+  windowMat = new StandardMaterial('winMat', scene);
+  windowMat.diffuseColor = new Color3(0.12, 0.18, 0.28);
+  windowMat.specularColor = new Color3(0.4, 0.4, 0.5); windowMat.freeze();
 }
 
-/**
- * Build a voxel-style car from boxes.
- */
-function buildCar(scene: Scene, colorIndex: number): { root: TransformNode; meshes: Mesh[] } {
-  createVehicleMaterials(scene);
-  const root = new TransformNode('vehicle', scene);
+function buildCar(scene: Scene, ci: number): { root: TransformNode; meshes: Mesh[] } {
+  ensureMaterials(scene);
+  const root = new TransformNode('car', scene);
   const meshes: Mesh[] = [];
-  const mat = vehicleMaterials![colorIndex % vehicleMaterials!.length];
+  const mat = bodyMats![ci % bodyMats!.length];
 
-  // Body (lower box)
-  const body = MeshBuilder.CreateBox('vBody', { width: 2.2, height: 1.2, depth: 5 }, scene);
-  body.position.y = 0.8;
-  body.material = mat;
-  body.parent = root;
-  body.isPickable = false;
-  meshes.push(body);
+  // Body: ~4.5m long, 2m wide, 1.2m tall = 10x4.4x2.7 units
+  const body = MeshBuilder.CreateBox('cb', { width: 4.4, height: 2.5, depth: 10 }, scene);
+  body.position.y = 1.8; body.material = mat; body.parent = root;
+  body.isPickable = false; meshes.push(body);
 
-  // Cabin (upper box, shorter)
-  const cabin = MeshBuilder.CreateBox('vCabin', { width: 2, height: 1, depth: 2.5 }, scene);
-  cabin.position.set(0, 1.8, -0.3);
-  cabin.material = windowMaterial!;
-  cabin.parent = root;
-  cabin.isPickable = false;
-  meshes.push(cabin);
+  // Cabin/windows
+  const cabin = MeshBuilder.CreateBox('cc', { width: 4, height: 2, depth: 5 }, scene);
+  cabin.position.set(0, 3.6, -0.5); cabin.material = windowMat!; cabin.parent = root;
+  cabin.isPickable = false; meshes.push(cabin);
 
-  // Wheels (4 small dark boxes)
-  const wheelPositions = [
-    [-1.1, 0.3, 1.5], [1.1, 0.3, 1.5],
-    [-1.1, 0.3, -1.5], [1.1, 0.3, -1.5],
-  ];
-  for (const [wx, wy, wz] of wheelPositions) {
-    const wheel = MeshBuilder.CreateBox('vWheel', { width: 0.4, height: 0.6, depth: 0.8 }, scene);
-    wheel.position.set(wx, wy, wz);
-    wheel.material = wheelMaterial!;
-    wheel.parent = root;
-    wheel.isPickable = false;
-    meshes.push(wheel);
+  // 4 wheels
+  for (const [wx, wz] of [[-2.2, 3], [2.2, 3], [-2.2, -3], [2.2, -3]]) {
+    const w = MeshBuilder.CreateBox('cw', { width: 0.8, height: 1.2, depth: 1.6 }, scene);
+    w.position.set(wx, 0.6, wz); w.material = wheelMat!; w.parent = root;
+    w.isPickable = false; meshes.push(w);
   }
-
   return { root, meshes };
 }
 
-/**
- * Build a voxel-style truck/van from boxes.
- */
-function buildTruck(scene: Scene, colorIndex: number): { root: TransformNode; meshes: Mesh[] } {
-  createVehicleMaterials(scene);
+function buildTruck(scene: Scene, ci: number): { root: TransformNode; meshes: Mesh[] } {
+  ensureMaterials(scene);
   const root = new TransformNode('truck', scene);
   const meshes: Mesh[] = [];
-  const mat = vehicleMaterials![colorIndex % vehicleMaterials!.length];
+  const mat = bodyMats![ci % bodyMats!.length];
 
-  // Long body
-  const body = MeshBuilder.CreateBox('tBody', { width: 2.5, height: 2.5, depth: 7 }, scene);
-  body.position.set(0, 1.5, -0.5);
-  body.material = mat;
-  body.parent = root;
-  body.isPickable = false;
-  meshes.push(body);
+  // Cargo body: ~7m long, 2.5m wide, 3m tall
+  const cargo = MeshBuilder.CreateBox('tb', { width: 5, height: 5, depth: 12 }, scene);
+  cargo.position.set(0, 3, -1); cargo.material = mat; cargo.parent = root;
+  cargo.isPickable = false; meshes.push(cargo);
 
-  // Cab (front, shorter)
-  const cab = MeshBuilder.CreateBox('tCab', { width: 2.4, height: 1.8, depth: 2.5 }, scene);
-  cab.position.set(0, 1.2, 3);
-  cab.material = windowMaterial!;
-  cab.parent = root;
-  cab.isPickable = false;
-  meshes.push(cab);
+  // Cab
+  const cab = MeshBuilder.CreateBox('tc', { width: 4.8, height: 3.5, depth: 5 }, scene);
+  cab.position.set(0, 2.2, 6); cab.material = windowMat!; cab.parent = root;
+  cab.isPickable = false; meshes.push(cab);
 
-  // Wheels
-  const wheelPositions = [
-    [-1.3, 0.4, 2.5], [1.3, 0.4, 2.5],
-    [-1.3, 0.4, -2], [1.3, 0.4, -2],
-  ];
-  for (const [wx, wy, wz] of wheelPositions) {
-    const wheel = MeshBuilder.CreateBox('tWheel', { width: 0.5, height: 0.8, depth: 1 }, scene);
-    wheel.position.set(wx, wy, wz);
-    wheel.material = wheelMaterial!;
-    wheel.parent = root;
-    wheel.isPickable = false;
-    meshes.push(wheel);
+  // 4 wheels (bigger)
+  for (const [wx, wz] of [[-2.5, 5], [2.5, 5], [-2.5, -4], [2.5, -4]]) {
+    const w = MeshBuilder.CreateBox('tw', { width: 1, height: 1.6, depth: 2 }, scene);
+    w.position.set(wx, 0.8, wz); w.material = wheelMat!; w.parent = root;
+    w.isPickable = false; meshes.push(w);
   }
-
   return { root, meshes };
 }
 
@@ -164,27 +122,22 @@ export class TrafficSystem {
 
   constructor(scene: Scene) {
     this.scene = scene;
-    createVehicleMaterials(scene);
+    ensureMaterials(scene);
   }
 
   public update(deltaTime: number, playerPos: Vector3): void {
-    // Spawn
     this.spawnTimer += deltaTime;
     if (this.spawnTimer >= SPAWN_INTERVAL && this.vehicles.length < MAX_VEHICLES) {
       this.spawnTimer = 0;
       this.trySpawnVehicle(playerPos);
     }
 
-    // Update positions
     for (let i = this.vehicles.length - 1; i >= 0; i--) {
       const v = this.vehicles[i];
       v.x += v.dirX * v.speed * deltaTime;
       v.z += v.dirZ * v.speed * deltaTime;
+      v.root.position.set(v.x, 0, v.z);
 
-      // Update mesh position
-      v.root.position.set(v.x + v.laneOffset * v.dirZ, 0, v.z - v.laneOffset * v.dirX);
-
-      // Despawn if too far
       const dx = v.x - playerPos.x, dz = v.z - playerPos.z;
       if (dx * dx + dz * dz > DESPAWN_RADIUS * DESPAWN_RADIUS) {
         for (const m of v.meshes) m.dispose();
@@ -195,59 +148,64 @@ export class TrafficSystem {
   }
 
   private trySpawnVehicle(playerPos: Vector3): void {
-    // Pick a random street near the player
-    const minDist = 60;
+    const minDist = 80;
     const angle = Math.random() * Math.PI * 2;
     const dist = minDist + Math.random() * (SPAWN_RADIUS - minDist);
     const rawX = playerPos.x + Math.cos(angle) * dist;
     const rawZ = playerPos.z + Math.sin(angle) * dist;
 
-    // Snap to nearest street grid line
-    // Avenues run along Z at regular X intervals
-    // Streets run along X at regular Z intervals
-    const avenueSpacing = BLOCK_WIDTH + AVENUE_WIDTH;
-    const streetSpacing = BLOCK_DEPTH_AVG + STREET_WIDTH;
+    // Find the nearest avenue or cross street center line
+    // Avenues are at X positions: chunkX * CHUNK_SIZE + AVENUE_WIDTH/2, then every (BLOCK_WIDTH + AVENUE_WIDTH)
+    // Streets are at Z positions: chunkZ * CHUNK_SIZE + STREET_WIDTH/2, then every ~160 + STREET_WIDTH
 
     const driveOnAvenue = Math.random() > 0.5;
-
     let x: number, z: number, dirX: number, dirZ: number;
 
     if (driveOnAvenue) {
-      // Snap X to nearest avenue center
-      x = Math.round(rawX / avenueSpacing) * avenueSpacing + AVENUE_WIDTH * 0.25;
+      // Snap to avenue center (avenues repeat every BLOCK_WIDTH + AVENUE_WIDTH = 110)
+      const avenueSpacing = BLOCK_WIDTH + AVENUE_WIDTH;
+      const chunkOriginX = Math.floor(rawX / CHUNK_SIZE) * CHUNK_SIZE;
+      const localX = rawX - chunkOriginX;
+      // Find nearest avenue center within the chunk
+      const avenueIndex = Math.round((localX - AVENUE_WIDTH * 0.5) / avenueSpacing);
+      x = chunkOriginX + AVENUE_WIDTH * 0.5 + avenueIndex * avenueSpacing;
+
+      // Add lane offset (drive on one side of the avenue)
+      const lane = (Math.random() > 0.5 ? 1 : -1) * (AVENUE_WIDTH * 0.2);
+      x += lane;
+
       z = rawZ;
       dirX = 0;
       dirZ = Math.random() > 0.5 ? 1 : -1;
     } else {
-      // Snap Z to nearest street center
+      // Snap to cross street center
+      const streetSpacing = 160 + STREET_WIDTH; // approximate average block depth + street
+      const chunkOriginZ = Math.floor(rawZ / CHUNK_SIZE) * CHUNK_SIZE;
+      const localZ = rawZ - chunkOriginZ;
+      const streetIndex = Math.round((localZ - STREET_WIDTH * 0.5) / streetSpacing);
+      z = chunkOriginZ + STREET_WIDTH * 0.5 + streetIndex * streetSpacing;
+
+      const lane = (Math.random() > 0.5 ? 1 : -1) * (STREET_WIDTH * 0.2);
+      z += lane;
+
       x = rawX;
-      z = Math.round(rawZ / streetSpacing) * streetSpacing + STREET_WIDTH * 0.25;
       dirX = Math.random() > 0.5 ? 1 : -1;
       dirZ = 0;
     }
 
-    // Lane offset (left or right side of street)
-    const laneOffset = (Math.random() > 0.5 ? 1 : -1) * (3 + Math.random() * 3);
-
-    // Build the vehicle
     const colorIndex = Math.floor(Math.random() * 8);
-    const isTruck = Math.random() > 0.7; // 30% trucks
-    const { root, meshes } = isTruck
-      ? buildTruck(this.scene, colorIndex)
-      : buildCar(this.scene, colorIndex);
+    const isTruck = Math.random() > 0.75;
+    const { root, meshes } = isTruck ? buildTruck(this.scene, colorIndex) : buildCar(this.scene, colorIndex);
 
-    // Set rotation to face movement direction
-    root.position.set(x + laneOffset * (dirZ !== 0 ? 1 : 0), 0, z - laneOffset * (dirX !== 0 ? 1 : 0));
-    if (dirX !== 0) {
-      root.rotation.y = dirX > 0 ? Math.PI / 2 : -Math.PI / 2;
-    } else {
-      root.rotation.y = dirZ > 0 ? 0 : Math.PI;
-    }
+    // Face movement direction
+    if (dirX !== 0) root.rotation.y = dirX > 0 ? Math.PI / 2 : -Math.PI / 2;
+    else root.rotation.y = dirZ > 0 ? 0 : Math.PI;
+
+    root.position.set(x, 0, z);
 
     this.vehicles.push({
       root, meshes, x, z, dirX, dirZ,
       speed: VEHICLE_SPEED * (0.7 + Math.random() * 0.6),
-      laneOffset,
     });
   }
 
