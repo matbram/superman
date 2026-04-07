@@ -176,20 +176,20 @@ export class FlightState extends BasePlayerState {
     }
 
     // ── DOUBLE-TAP DESCEND (LT) → SUPER DIVE + SUPERHERO LAND ──
-    if (input.descendTrigger > 0.3) {
+    // Lower press threshold (0.2) and release threshold (0.1) for responsive double-tap
+    if (input.descendTrigger > 0.2) {
       if (this.descendWasReleased) {
         if (now - this.lastDescendPressTime < DOUBLE_TAP_WINDOW) {
           // DOUBLE TAP! Super dive straight down
           this.superDiving = true;
           this.lastDescendPressTime = 0;
-          // Immediately set high speed for dramatic dive
           this.currentSpeed = Math.max(this.currentSpeed, MAX_SPEED * 0.5);
         } else {
           this.lastDescendPressTime = now;
         }
         this.descendWasReleased = false;
       }
-    } else {
+    } else if (input.descendTrigger < 0.1) {
       this.descendWasReleased = true;
     }
 

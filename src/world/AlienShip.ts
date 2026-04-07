@@ -64,17 +64,27 @@ export class AlienShip {
   private beamPhase: number = 0;
   private time: number = 0;
 
+  // AI Movement - ship patrols the city attacking
+  private targetPosition: Vector3;
+  private moveSpeed: number = 30; // m/s movement speed
+  private attackTimer: number = 0;
+  private attackCooldown: number = 3; // seconds between target changes
+
   // Gravity zone (exported for BuildingDamage to use)
   public gravityZone: GravityZone;
 
   // Callbacks
   private onBuildingDamage: ((position: Vector3, radius: number, damage: number) => void) | null = null;
+  // New: direct NPC destruction
+  public pedestrianSystem: any = null;
+  public trafficSystem: any = null;
 
   constructor(scene: Scene, worldCenter: Vector3 = Vector3.Zero()) {
     this.scene = scene;
 
     // Position ship above world center
     this.shipPosition = new Vector3(worldCenter.x, SHIP_HEIGHT, worldCenter.z);
+    this.targetPosition = this.shipPosition.clone();
 
     // Initialize gravity zone
     this.gravityZone = {
@@ -441,13 +451,42 @@ export class AlienShip {
     this._coreColor.b = 1.0 * corePulse;
     (this.hullCore.material as StandardMaterial).emissiveColor = this._coreColor;
 
-    // Subtle ship rotation
-    this.root.rotation.y += deltaTime * 0.05;
+    // ── AI: Ship patrols the city, attacking different areas ──
+    this.attackTimer += deltaTime;
+    if (this.attackTimer > this.attackCooldown) {
+      this.attackTimer = 0;
+      this.attackCooldown = 4 + Math.random() * 6;
+      const range = 400;
+      this.targetPosition.set(
+        this.shipPosition.x + (Math.random() - 0.5) * range,
+        SHIP_HEIGHT,
+        this.shipPosition.z + (Math.random() - 0.5) * range
+      );
+    }
 
-    // Update rising debris particles gravity - set components directly
+    // Move toward target
+    const moveDx = this.targetPosition.x - this.shipPosition.x;
+    const moveDz = this.targetPosition.z - this.shipPosition.z;
+    const moveDist = Math.sqrt(moveDx * moveDx + moveDz * moveDz);
+    if (moveDist > 5) {
+      const moveAmt = Math.min(this.moveSpeed * deltaTime, moveDist);
+      this.shipPosition.x += (moveDx / moveDist) * moveAmt;
+      this.shipPosition.z += (moveDz / moveDist) * moveAmt;
+      this.root.position.copyFrom(this.shipPosition);
+      this.gravityZone.center.x = this.shipPosition.x;
+      this.gravityZone.center.z = this.shipPosition.z;
+      this.beamMesh.position.x = this.shipPosition.x;
+      this.beamMesh.position.z = this.shipPosition.z;
+      this.beamCore.position.x = this.shipPosition.x;
+      this.beamCore.position.z = this.shipPosition.z;
+    }
+
+    // Ship rotation
+    this.root.rotation.y += deltaTime * 0.08;
+
+    // Beam gravity oscillation
     const gravityOscillation = Math.sin(this.beamPhase);
     this.risingDebrisParticles.gravity.set(0, -gravityOscillation * 25, 0);
-
     if (gravityOscillation < 0) {
       this.risingDebrisParticles.direction1.set(-5, 20, -5);
       this.risingDebrisParticles.direction2.set(5, 50, 5);
@@ -458,13 +497,15 @@ export class AlienShip {
       this.risingDebrisParticles.emitRate = 30;
     }
 
-    // Apply continuous damage to buildings in beam zone
+    // ── ATTACK: Damage buildings + kill NPCs in beam zone ──
     if (this.onBuildingDamage) {
-      this.onBuildingDamage(
-        this.gravityZone.center,
-        BEAM_DAMAGE_RADIUS,
-        200 * deltaTime
-      );
+      this.onBuildingDamage(this.gravityZone.center, BEAM_DAMAGE_RADIUS, 300 * deltaTime);
+    }
+    if (this.pedestrianSystem) {
+      this.pedestrianSystem.killNear(this.gravityZone.center, BEAM_DAMAGE_RADIUS);
+    }
+    if (this.trafficSystem) {
+      this.trafficSystem.destroyNear(this.gravityZone.center, BEAM_DAMAGE_RADIUS);
     }
   }
 

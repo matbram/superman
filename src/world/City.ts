@@ -278,12 +278,13 @@ export class City {
    */
   private createGround(): void {
     // Create a large fallback ground that's slightly below chunk grounds
-    this.groundMesh = MeshBuilder.CreateGround(
+    // Thick fallback ground - prevents seeing the skybox below
+    this.groundMesh = MeshBuilder.CreateBox(
       'fallbackGround',
-      { width: 6000, height: 6000 },
+      { width: 8000, height: 20, depth: 8000 },
       this.scene
     );
-    this.groundMesh.position.y = -0.1; // Slightly below chunk grounds
+    this.groundMesh.position.y = -10.5; // Top surface at -0.5, below chunk grounds
 
     const fallbackMat = new StandardMaterial('fallbackGroundMat', this.scene);
     fallbackMat.diffuseColor = new Color3(0.15, 0.18, 0.12);
@@ -599,12 +600,14 @@ export class City {
     const collisionMeshes: Mesh[] = [];
 
     // Create chunk ground (dark asphalt road surface)
-    const chunkGround = MeshBuilder.CreateGround(
+    // Thick ground box - can't see through it or break into nothingness
+    const GROUND_THICKNESS = 10;
+    const chunkGround = MeshBuilder.CreateBox(
       `ground_${key}`,
-      { width: CHUNK_SIZE, height: CHUNK_SIZE },
+      { width: CHUNK_SIZE, height: GROUND_THICKNESS, depth: CHUNK_SIZE },
       this.scene
     );
-    chunkGround.position = new Vector3(worldX + halfChunk, 0, worldZ + halfChunk);
+    chunkGround.position = new Vector3(worldX + halfChunk, -GROUND_THICKNESS / 2, worldZ + halfChunk);
     chunkGround.material = this.groundMaterial;
     chunkGround.receiveShadows = true;
     chunkGround.isPickable = true;

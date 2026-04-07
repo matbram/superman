@@ -152,6 +152,10 @@ class Game {
     // Pedestrians walking on sidewalks
     this.pedestrians = new PedestrianSystem(this.sceneContext.scene);
 
+    // Give AlienShip access to NPCs so it can attack them
+    this.alienShip.pedestrianSystem = this.pedestrians;
+    this.alienShip.trafficSystem = this.traffic;
+
     // Initialize birds
     this.birds = new Birds(this.sceneContext.scene);
 
