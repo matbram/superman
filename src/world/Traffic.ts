@@ -13,11 +13,11 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 
-const MAX_VEHICLES = 35;
-const VEHICLE_SPEED = 14;       // ~30 mph
-const SPAWN_RADIUS = 300;
-const DESPAWN_RADIUS = 400;
-const SPAWN_INTERVAL = 0.6;
+const MAX_VEHICLES = 60;
+const VEHICLE_SPEED = 14;
+const SPAWN_RADIUS = 250;
+const DESPAWN_RADIUS = 350;
+const SPAWN_INTERVAL = 0.25;  // Spawn much faster for denser traffic
 
 // Must match City.ts street grid
 const CHUNK_SIZE = 200;

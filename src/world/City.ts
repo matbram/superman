@@ -453,14 +453,10 @@ export class City {
       billboard.isPickable = false;
       billboard.freezeWorldMatrix();
 
-      const adMat = new StandardMaterial('adMat', this.scene);
-      const adColors = [
-        new Color3(0.9, 0.2, 0.1), new Color3(0.1, 0.5, 0.9),
-        new Color3(0.9, 0.8, 0.1), new Color3(0.1, 0.9, 0.3),
-      ];
-      adMat.emissiveColor = adColors[Math.floor(Math.random() * adColors.length)];
-      adMat.diffuseColor = adMat.emissiveColor;
-      billboard.material = adMat;
+      // Use shared billboard materials (cheaper than creating new ones per chunk)
+      const adMats = this.buildingMaterials;
+      const adIdx = Math.floor(Math.random() * adMats.length);
+      billboard.material = adMats[adIdx];
       collisionMeshes.push(billboard);
     }
   }
@@ -708,7 +704,7 @@ export class City {
 
         // ── SIDEWALK for this city block ──
         // Raised concrete platform under the buildings, with 4-unit sidewalk overhang
-        const SW_OVERHANG = 8; // Wide sidewalks: room for trees, lamps, pedestrians
+        const SW_OVERHANG = 12; // Extra-wide sidewalks: NYC-style with trees, lamps, benches
         const swX = avenueX - SW_OVERHANG;
         const swZ = streetZ - SW_OVERHANG;
         const swW = actualBlockW + SW_OVERHANG * 2;

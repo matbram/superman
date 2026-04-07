@@ -13,11 +13,11 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import '@babylonjs/core/Meshes/thinInstanceMesh';
 
-const MAX_PEDESTRIANS = 120;
-const WALK_SPEED = 1.5;       // ~3.4 mph walking speed
+const MAX_PEDESTRIANS = 180;
+const WALK_SPEED = 1.5;
 const SPAWN_RADIUS = 200;
 const DESPAWN_RADIUS = 280;
-const SPAWN_INTERVAL = 0.15;
+const SPAWN_INTERVAL = 0.08;  // Spawn faster for crowded sidewalks
 
 // Street grid (match City.ts)
 const CHUNK_SIZE = 200;
