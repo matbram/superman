@@ -15,11 +15,11 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import '@babylonjs/core/Meshes/thinInstanceMesh';
 
-const CLOUD_HEIGHT_MIN = 500;
-const CLOUD_HEIGHT_MAX = 700;
-const NUM_CLOUDS = 40;
-const VOXELS_PER_CLOUD = 120;  // Dense fluffy clouds
-const VOXEL_SIZE = 2.5;        // Small cubes = softer look
+const CLOUD_HEIGHT_MIN = 300;
+const CLOUD_HEIGHT_MAX = 450;
+const NUM_CLOUDS = 30;
+const VOXELS_PER_CLOUD = 80;
+const VOXEL_SIZE = 5;           // Bigger cubes so they're actually visible
 const DISPERSE_RADIUS = 50;
 const DISPERSE_FORCE = 120;
 const RECOVER_SPEED = 4;       // Slow recovery = floaty feel
@@ -57,10 +57,10 @@ export class VoxelClouds {
     }, scene);
 
     const mat = new StandardMaterial('cloudVoxelMat', scene);
-    mat.diffuseColor = new Color3(0.92, 0.93, 0.97);
-    mat.emissiveColor = new Color3(0.25, 0.28, 0.35); // Very subtle glow
+    mat.diffuseColor = new Color3(0.95, 0.95, 1.0);
+    mat.emissiveColor = new Color3(0.5, 0.52, 0.6); // Visible but soft
     mat.specularColor = new Color3(0, 0, 0);
-    mat.alpha = 0.2; // Very wispy and transparent
+    mat.alpha = 0.4; // Visible but still cloud-like
     mat.backFaceCulling = false;
     mat.freeze();
     this.cloudMesh.material = mat;
@@ -72,10 +72,10 @@ export class VoxelClouds {
       const cy = CLOUD_HEIGHT_MIN + Math.random() * (CLOUD_HEIGHT_MAX - CLOUD_HEIGHT_MIN);
       const cz = (Math.random() - 0.5) * CLOUD_SPREAD * 2;
 
-      // Clouds are WIDE and FLAT (like real cumulus clouds)
-      const cloudWidth = 80 + Math.random() * 120;
-      const cloudDepth = 60 + Math.random() * 100;
-      const cloudHeight = 8 + Math.random() * 12; // Very flat
+      // Clouds are WIDE and FLAT with some vertical volume
+      const cloudWidth = 100 + Math.random() * 150;
+      const cloudDepth = 80 + Math.random() * 120;
+      const cloudHeight = 15 + Math.random() * 25; // Some vertical mass
 
       for (let v = 0; v < VOXELS_PER_CLOUD; v++) {
         this.voxels.push({
