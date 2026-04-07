@@ -18,6 +18,7 @@ export interface SceneContext {
   scene: Scene;
   camera: FreeCamera;
   sunLight: DirectionalLight;
+  ambientLight: HemisphericLight;
   shadowGenerator: ShadowGenerator;
 }
 
@@ -37,35 +38,35 @@ export function createScene(engine: Engine): SceneContext {
   scene.fogDensity = 0.00035;
   scene.fogColor = new Color3(0.85, 0.65, 0.45); // Warm golden haze
 
-  // Ambient light - warm golden hour tones
+  // Ambient light - VERY low so sun is the dominant light source
+  // This creates realistic shadows - areas not hit by sun are dark
   const ambientLight = new HemisphericLight(
     'ambientLight',
     new Vector3(0, 1, 0),
     scene
   );
-  ambientLight.intensity = 0.5;
-  ambientLight.diffuse = new Color3(1.0, 0.85, 0.7);       // Warm top light
-  ambientLight.groundColor = new Color3(0.3, 0.25, 0.35);  // Cool shadow fill
+  ambientLight.intensity = 0.25;  // Low - sun should be primary
+  ambientLight.diffuse = new Color3(0.7, 0.75, 0.9);  // Subtle sky fill
+  ambientLight.groundColor = new Color3(0.15, 0.12, 0.18); // Dark shadow areas
 
-  // Sun - low angle for dramatic long shadows (golden hour / sunset)
+  // Sun - the primary and dominant light source
   const sunLight = new DirectionalLight(
     'sunLight',
-    new Vector3(-0.8, -0.3, -0.5).normalize(), // Low angle sun
+    new Vector3(-0.8, -0.3, -0.5).normalize(),
     scene
   );
-  sunLight.intensity = 1.0;
-  sunLight.diffuse = new Color3(1.0, 0.8, 0.5);  // Warm golden sunlight
+  sunLight.intensity = 1.2;  // Bright - this IS the light
+  sunLight.diffuse = new Color3(1.0, 0.85, 0.6);
   sunLight.specular = new Color3(1.0, 0.9, 0.7);
   sunLight.position = new Vector3(500, 150, 300);
 
-  // Shadow generator - larger map for better quality at distance
-  const shadowGenerator = new ShadowGenerator(1024, sunLight);
+  // Shadow generator - dominant visual feature, buildings cast real shadows
+  const shadowGenerator = new ShadowGenerator(2048, sunLight);
   shadowGenerator.useBlurExponentialShadowMap = true;
-  shadowGenerator.blurKernel = 16;
-  shadowGenerator.setDarkness(0.5);
+  shadowGenerator.blurKernel = 32;
+  shadowGenerator.setDarkness(0.65);  // Dark shadows - sun is primary light
   shadowGenerator.bias = 0.001;
   shadowGenerator.normalBias = 0.02;
-  // Freeze shadow map when not actively changing (huge perf win)
   shadowGenerator.freezeShadowCastersBoundingInfo = true;
 
   // Create main camera (will be controlled by CameraController)
@@ -83,12 +84,14 @@ export function createScene(engine: Engine): SceneContext {
     scene,
     camera,
     sunLight,
+    ambientLight,
     shadowGenerator,
   };
 }
 
 /**
- * Creates a sunset sky with gradient and visible sun disc
+ * Creates the sky dome and sun/glow meshes.
+ * DayNightCycle controls their colors and positions over time.
  */
 function createSkyGradient(scene: Scene): void {
   // Sky dome
@@ -98,58 +101,40 @@ function createSkyGradient(scene: Scene): void {
     scene
   );
   skybox.infiniteDistance = true;
-
   const skyMaterial = new StandardMaterial('skyMaterial', scene);
   skyMaterial.backFaceCulling = false;
   skyMaterial.disableLighting = true;
-  // Upper sky: deep blue fading to warm horizon
   skyMaterial.emissiveColor = new Color3(0.3, 0.45, 0.75);
   skybox.material = skyMaterial;
   skybox.isPickable = false;
 
-  // Horizon glow band (warm orange ring at the horizon)
-  const horizonBand = MeshBuilder.CreateTorus(
-    'horizonGlow',
-    { diameter: 3400, thickness: 200, tessellation: 24 },
-    scene
-  );
-  horizonBand.infiniteDistance = true;
-  horizonBand.rotation.x = Math.PI / 2;
-  const horizonMat = new StandardMaterial('horizonMat', scene);
-  horizonMat.backFaceCulling = false;
-  horizonMat.disableLighting = true;
-  horizonMat.emissiveColor = new Color3(1.0, 0.6, 0.25);
-  horizonMat.alpha = 0.4;
-  horizonBand.material = horizonMat;
-  horizonBand.isPickable = false;
-
-  // Sun disc - big, warm, low on the horizon
+  // Sun disc - MASSIVE, sits right on the horizon
   const sun = MeshBuilder.CreateSphere(
     'sunDisc',
-    { diameter: 120, segments: 16 },
+    { diameter: 400, segments: 16 },
     scene
   );
-  // Position the sun at the horizon in the direction the sunlight comes FROM
-  sun.position = new Vector3(800, 150, 500);
   sun.infiniteDistance = true;
   const sunMat = new StandardMaterial('sunMat', scene);
   sunMat.disableLighting = true;
-  sunMat.emissiveColor = new Color3(1.0, 0.85, 0.4);  // Warm golden sun
+  sunMat.emissiveColor = new Color3(1.0, 0.85, 0.4);
   sun.material = sunMat;
   sun.isPickable = false;
+  // Initial position - DayNightCycle will update this
+  sun.position = new Vector3(1500, 50, -500);
 
-  // Sun glow (larger, softer halo around the sun)
+  // Sun glow halo - huge soft glow around the sun
   const sunGlow = MeshBuilder.CreateSphere(
     'sunGlow',
-    { diameter: 350, segments: 8 },
+    { diameter: 900, segments: 8 },
     scene
   );
-  sunGlow.position = sun.position.clone();
   sunGlow.infiniteDistance = true;
   const glowMat = new StandardMaterial('sunGlowMat', scene);
   glowMat.disableLighting = true;
   glowMat.emissiveColor = new Color3(1.0, 0.7, 0.3);
-  glowMat.alpha = 0.15;
+  glowMat.alpha = 0.12;
   sunGlow.material = glowMat;
   sunGlow.isPickable = false;
+  sunGlow.position = sun.position.clone();
 }

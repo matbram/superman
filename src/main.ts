@@ -12,6 +12,8 @@ import { Player } from './player/Player';
 import { City } from './world/City';
 import { Atmosphere } from './world/Atmosphere';
 import { VoxelWorld } from './world/VoxelWorld';
+import { DayNightCycle } from './world/DayNightCycle';
+import { TrafficSystem } from './world/Traffic';
 import { AlienShip } from './world/AlienShip';
 import { Birds } from './world/Birds';
 import { Hud } from './ui/Hud';
@@ -35,6 +37,8 @@ class Game {
   private city: City;
   private atmosphere: Atmosphere;
   private voxelWorld: VoxelWorld;
+  private dayNightCycle: DayNightCycle;
+  private traffic: TrafficSystem;
   private alienShip: AlienShip;
   private birds: Birds;
   private hud: Hud;
@@ -124,6 +128,18 @@ class Game {
         }
       }
     });
+
+    // Initialize day/night cycle
+    this.dayNightCycle = new DayNightCycle(
+      this.sceneContext.scene,
+      this.sceneContext.sunLight,
+      this.sceneContext.ambientLight,
+      17.5 // Start at late afternoon approaching sunset
+    );
+    this.dayNightCycle.setBuildingMaterials(this.city.getBuildingMaterials());
+
+    // Initialize traffic
+    this.traffic = new TrafficSystem(this.sceneContext.scene);
 
     // Initialize birds
     this.birds = new Birds(this.sceneContext.scene);
@@ -284,6 +300,12 @@ class Game {
     this.alienShip.update(deltaTime);
     t1 = performance.now();
     this.perfTimings.alienShip += t1 - t0;
+
+    // Update day/night cycle
+    this.dayNightCycle.update(deltaTime);
+
+    // Update traffic
+    this.traffic.update(deltaTime, playerPos);
 
     // Update birds
     t0 = performance.now();

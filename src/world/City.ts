@@ -112,6 +112,8 @@ export class City {
   private groundMaterial!: StandardMaterial;
   private rooftopMaterial!: StandardMaterial;
   private windowMaterial!: StandardMaterial;
+  private streetLightMat!: StandardMaterial;
+  private lampPoleMat!: StandardMaterial;
 
   constructor(
     scene: Scene,
@@ -240,6 +242,24 @@ export class City {
     whiteMod.specularColor = new Color3(0.2, 0.2, 0.2);
     whiteMod.freeze();
     this.buildingMaterials.push(whiteMod);
+
+    // Street light materials
+    this.streetLightMat = new StandardMaterial('streetLightMat', this.scene);
+    this.streetLightMat.diffuseColor = new Color3(1.0, 0.95, 0.7);
+    this.streetLightMat.emissiveColor = new Color3(0.8, 0.7, 0.3); // Warm glow
+    this.streetLightMat.freeze();
+
+    this.lampPoleMat = new StandardMaterial('lampPoleMat', this.scene);
+    this.lampPoleMat.diffuseColor = new Color3(0.25, 0.25, 0.25);
+    this.lampPoleMat.specularColor = new Color3(0.1, 0.1, 0.1);
+    this.lampPoleMat.freeze();
+  }
+
+  /**
+   * Get building materials for external systems (day/night cycle).
+   */
+  public getBuildingMaterials(): StandardMaterial[] {
+    return this.buildingMaterials;
   }
 
   /**
@@ -364,6 +384,45 @@ export class City {
     parkGround.material = parkMat;
     parkGround.receiveShadows = true;
     parkGround.freezeWorldMatrix();
+  }
+
+  /**
+   * Add street light poles along avenues in a chunk.
+   * Just emissive meshes - no actual light sources (performance safe).
+   */
+  private addStreetLights(worldX: number, worldZ: number, collisionMeshes: Mesh[]): void {
+    const LIGHT_SPACING = 40; // One light every 40 units along streets
+    const POLE_HEIGHT = 10;
+
+    // Place lights along the chunk edges (where streets are)
+    for (let x = worldX + AVENUE_WIDTH / 2; x < worldX + CHUNK_SIZE; x += LIGHT_SPACING) {
+      for (let z = worldZ + STREET_WIDTH / 2; z < worldZ + CHUNK_SIZE; z += LIGHT_SPACING) {
+        // Only place at street-adjacent positions (skip building interiors)
+        const inStreetX = (x - worldX) % (BLOCK_WIDTH + AVENUE_WIDTH) < AVENUE_WIDTH;
+        const inStreetZ = (z - worldZ) % (BLOCK_DEPTH_MIN + STREET_WIDTH) < STREET_WIDTH;
+        if (!inStreetX && !inStreetZ) continue;
+
+        // Pole
+        const pole = MeshBuilder.CreateCylinder(`lamp_pole`, {
+          diameter: 0.4, height: POLE_HEIGHT, tessellation: 6
+        }, this.scene);
+        pole.position = new Vector3(x, POLE_HEIGHT / 2 + SIDEWALK_HEIGHT, z);
+        pole.material = this.lampPoleMat;
+        pole.isPickable = false;
+        pole.freezeWorldMatrix();
+        collisionMeshes.push(pole);
+
+        // Light globe on top
+        const globe = MeshBuilder.CreateSphere(`lamp_light`, {
+          diameter: 1.5, segments: 4
+        }, this.scene);
+        globe.position = new Vector3(x, POLE_HEIGHT + 1 + SIDEWALK_HEIGHT, z);
+        globe.material = this.streetLightMat;
+        globe.isPickable = false;
+        globe.freezeWorldMatrix();
+        collisionMeshes.push(globe);
+      }
+    }
   }
 
   /**
@@ -607,6 +666,9 @@ export class City {
 
       avenueX = blockEndX + AVENUE_WIDTH;
     }
+
+    // Add street light poles at avenue intersections
+    this.addStreetLights(worldX, worldZ, collisionMeshes);
 
     this.chunks.set(key, {
       key,
