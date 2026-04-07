@@ -373,6 +373,10 @@ export class BuildingDamage {
       building.isPickable = false;
       if (this.physicsManager) {
         this.physicsManager.removeCollisionMesh(building);
+        // Add voxel mesh to collision system so heat vision raycasts can hit it
+        const voxelMesh = vb.getMesh();
+        voxelMesh.isPickable = true;
+        this.physicsManager.addCollisionMesh(voxelMesh);
       }
 
       this.voxelBuildings.set(building, vb);
