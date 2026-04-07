@@ -700,7 +700,35 @@ export class Player {
     setTimeout(() => { dustSystem.emitRate = 0; }, 400);
     setTimeout(() => { dustSystem.dispose(); }, 5000);
 
-    // ── Building damage from landing impact ──
+    // ── DESTROY EVERYTHING at impact point using DDA (same as heat vision) ──
+    if (this.superBreathVoxelWorld) {
+      // Fire rays outward from impact in all directions to destroy nearby buildings/blocks
+      const numRays = 16;
+      const destroyRadius = 25 + impactForce * 2;
+      for (let i = 0; i < numRays; i++) {
+        const angle = (i / numRays) * Math.PI * 2;
+        const dir = new Vector3(Math.cos(angle), 0, Math.sin(angle));
+        const hit = this.superBreathVoxelWorld.fullCollideRay
+          ? this.superBreathVoxelWorld.fullCollideRay(pos, dir, destroyRadius, this.physicsManager)
+          : this.superBreathVoxelWorld.collideRay(pos, dir, destroyRadius);
+        if (hit.hit && hit.building) {
+          this.superBreathVoxelWorld.applyDamageAtGrid(hit.building, hit.gridX, hit.gridY, hit.gridZ, 500);
+        }
+      }
+      // Also fire rays downward at angles to break street-level blocks
+      for (let i = 0; i < 8; i++) {
+        const angle = (i / 8) * Math.PI * 2;
+        const dir = new Vector3(Math.cos(angle) * 0.5, -1, Math.sin(angle) * 0.5).normalize();
+        const hit = this.superBreathVoxelWorld.fullCollideRay
+          ? this.superBreathVoxelWorld.fullCollideRay(pos.add(new Vector3(0, 5, 0)), dir, destroyRadius, this.physicsManager)
+          : this.superBreathVoxelWorld.collideRay(pos.add(new Vector3(0, 5, 0)), dir, destroyRadius);
+        if (hit.hit && hit.building) {
+          this.superBreathVoxelWorld.applyDamageAtGrid(hit.building, hit.gridX, hit.gridY, hit.gridZ, 500);
+        }
+      }
+    }
+
+    // Also trigger callback for non-voxelized buildings in radius
     if (this.onBuildingDamage) {
       const radius = 30 + impactForce * 4;
       this.onBuildingDamage(pos, radius, impactForce * 3);
