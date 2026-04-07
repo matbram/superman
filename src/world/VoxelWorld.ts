@@ -245,10 +245,13 @@ export class VoxelWorld {
     }
 
     // Remove blocks at impact
-    // Cap radius to half the thinnest wall so we don't blow through both sides
+    // Base radius scales with speed but is capped to prevent blowing through both walls.
+    // At low speed (walking/heat vision ~50): small precise holes (radius ~3-5)
+    // At high speed (220 m/s flight): larger holes (radius ~6-8) but still wall-only
     const minDim = Math.min(vb.worldWidth, vb.worldDepth);
-    const maxRadius = minDim * 0.4; // Never remove more than 40% of building width
-    const punchRadius = Math.min(3 + Math.min(6, speed / 20), maxRadius);
+    const maxRadius = Math.max(VOXEL_SIZE, minDim * 0.35);
+    const baseRadius = VOXEL_SIZE * 0.8 + Math.min(VOXEL_SIZE, speed / 40);
+    const punchRadius = Math.min(baseRadius, maxRadius);
     const removed = vb.removeBlocksInRadius(position, punchRadius);
 
     if (removed.length > 0) {
@@ -256,11 +259,15 @@ export class VoxelWorld {
       this.spawnDebrisFromPositions(removed, position, speed);
       this.spawnDust(position, 5, 1);
 
-      // Structural cascade - disconnected blocks fall
+      // Structural cascade - limited per frame to prevent "building explodes"
+      // Shell-only buildings can have huge disconnected sections.
+      // We remove a limited number per call; the rest cascade over subsequent frames.
       const disconnected = vb.findDisconnectedBlocks();
       if (disconnected.length > 0) {
+        const maxCascade = Math.min(disconnected.length, 15);
         const fallingPositions: Vector3[] = [];
-        for (const { x, y, z } of disconnected) {
+        for (let i = 0; i < maxCascade; i++) {
+          const { x, y, z } = disconnected[i];
           const pos = vb.removeBlock(x, y, z);
           if (pos) fallingPositions.push(pos);
         }
@@ -287,8 +294,9 @@ export class VoxelWorld {
   public applyDamageAtGrid(vb: VoxelBuilding, gridX: number, gridY: number, gridZ: number, speed: number): void {
     const worldPos = vb.gridToWorldPos(gridX, gridY, gridZ);
     const minDim = Math.min(vb.worldWidth, vb.worldDepth);
-    const maxRadius = minDim * 0.4;
-    const punchRadius = Math.min(3 + Math.min(6, speed / 20), maxRadius);
+    const maxRadius = Math.max(VOXEL_SIZE, minDim * 0.35);
+    const baseRadius = VOXEL_SIZE * 0.8 + Math.min(VOXEL_SIZE, speed / 40);
+    const punchRadius = Math.min(baseRadius, maxRadius);
     const removed = vb.removeBlocksInRadius(worldPos, punchRadius);
 
     if (removed.length > 0) {
@@ -298,8 +306,10 @@ export class VoxelWorld {
 
       const disconnected = vb.findDisconnectedBlocks();
       if (disconnected.length > 0) {
+        const maxCascade = Math.min(disconnected.length, 15);
         const falling: Vector3[] = [];
-        for (const { x, y, z } of disconnected) {
+        for (let i = 0; i < maxCascade; i++) {
+          const { x, y, z } = disconnected[i];
           const pos = vb.removeBlock(x, y, z);
           if (pos) falling.push(pos);
         }
