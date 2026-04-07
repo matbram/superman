@@ -55,11 +55,15 @@ export function createScene(engine: Engine): SceneContext {
   sunLight.intensity = 0.7;
   sunLight.position = new Vector3(100, 200, 100);
 
-  // Create shadow generator - optimized settings
-  const shadowGenerator = new ShadowGenerator(512, sunLight);
+  // Shadow generator - larger map for better quality at distance
+  const shadowGenerator = new ShadowGenerator(1024, sunLight);
   shadowGenerator.useBlurExponentialShadowMap = true;
-  shadowGenerator.blurKernel = 8;
-  shadowGenerator.setDarkness(0.4);
+  shadowGenerator.blurKernel = 16;
+  shadowGenerator.setDarkness(0.5);
+  shadowGenerator.bias = 0.001;
+  shadowGenerator.normalBias = 0.02;
+  // Freeze shadow map when not actively changing (huge perf win)
+  shadowGenerator.freezeShadowCastersBoundingInfo = true;
 
   // Create main camera (will be controlled by CameraController)
   const camera = new FreeCamera('mainCamera', new Vector3(0, 10, -20), scene);

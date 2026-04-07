@@ -24,8 +24,8 @@ const CITY_PERF_LOG_INTERVAL = 2000;
 
 // NYC-scale street grid (1 unit ≈ 1 meter)
 // Real NYC: avenues are ~30m wide, cross streets ~18m wide
-const AVENUE_WIDTH = 30;        // Wide avenues like 5th Ave, Broadway
-const STREET_WIDTH = 18;        // Cross streets
+const AVENUE_WIDTH = 40;        // Wide avenues - Superman needs room to fly
+const STREET_WIDTH = 24;        // Cross streets - wide enough for street-level flight
 const SIDEWALK_HEIGHT = 0.15;
 const BUILDING_GAP = 2;
 
@@ -534,7 +534,8 @@ export class City {
     );
 
     for (const mesh of meshes) {
-      if (buildingCount < 2 && mesh.name.includes('main')) {
+      // Taller buildings cast shadows (up to 5 per chunk for performance)
+      if (buildingCount < 5 && height > 60) {
         this.shadowGenerator.addShadowCaster(mesh);
       }
       mesh.visibility = 0;
@@ -559,15 +560,10 @@ export class City {
     const cx = lotX + width / 2;
     const cz = lotZ + depth / 2;
 
-    // Pick material based on district
-    let mat: StandardMaterial;
-    if (isDowntown && height > 60) {
-      mat = this.buildingMaterials[8]; // Glass for downtown towers
-    } else if (isDowntown) {
-      mat = this.buildingMaterials[matIndex < 5 ? matIndex : 8];
-    } else {
-      mat = this.buildingMaterials[matIndex];
-    }
+    // Pick material - ALL buildings get varied colors.
+    // Tall buildings use the full material palette including glass, steel, white.
+    // Short buildings tend toward concrete, brick, warm tones.
+    const mat = this.buildingMaterials[matIndex];
 
     // ONE mesh per building - fills the lot
     const main = MeshBuilder.CreateBox(`${baseName}_main`, {
