@@ -59,46 +59,50 @@ const enum DebrisType {
 }
 
 /**
- * Structural breakpoint - defines where a building can break
- * When fragmented, each breakpoint has a corresponding segment mesh
- * that IS the visible piece of the building. Breaking it detaches the mesh.
+ * Structural breakpoint - internal damage tracking point.
+ * Breakpoints are invisible - they track damage internally.
+ * When broken, rubble spawns and falls down the building face.
+ * The building mesh itself shrinks as floors collapse.
  */
 interface BreakPoint {
   relativePosition: Vector3;  // Position relative to building center (0-1 range)
-  size: Vector3;              // Size of the chunk that breaks off
-  broken: boolean;            // Whether this breakpoint has been triggered
-  threshold: number;          // Damage threshold to break this point (0-1)
-  floor: number;              // Which floor this breakpoint belongs to
-  isLoadBearing: boolean;     // Center columns are load-bearing
-  segmentMesh: Mesh | null;   // The visible building segment (created on first damage)
+  size: Vector3;              // Size of rubble to spawn when broken
+  broken: boolean;
+  threshold: number;
+  floor: number;
+  isLoadBearing: boolean;
 }
 
 /**
  * Per-floor structural data
  */
 interface FloorData {
-  totalPoints: number;    // Total breakpoints on this floor
-  brokenPoints: number;   // How many are broken
-  collapsed: boolean;     // Has this floor pancaked
+  totalPoints: number;
+  brokenPoints: number;
+  collapsed: boolean;
   floorY: number;         // Normalized Y position (0-1)
 }
 
 /**
- * Building structure data for destruction
+ * Building structure data for destruction.
+ * The original mesh stays visible and is scaled/repositioned as it crumbles.
+ * No fragmentation into segments - the building IS the mesh.
  */
 interface BuildingStructure {
   mesh: Mesh;
   breakPoints: BreakPoint[];
-  floors: FloorData[];        // Per-floor structural tracking
+  floors: FloorData[];
   originalPosition: Vector3;
+  originalHeight: number;       // Original building height
+  currentHeight: number;        // Shrinks as top floors collapse
   bounds: { min: Vector3; max: Vector3 };
   shakeTime: number;
   shakeOffset: Vector3;
-  leanAngle: number;          // Current lean in radians
-  leanDirection: Vector3;     // Direction building is leaning
-  isLeaning: boolean;         // Whether structural weakness detected
-  weakestFloor: number;       // Index of most damaged floor
-  fragmented: boolean;        // Whether the building has been split into segment meshes
+  leanAngle: number;
+  leanDirection: Vector3;
+  isLeaning: boolean;
+  weakestFloor: number;
+  damageLevel: number;          // 0-1 overall damage for visual effects
 }
 
 /**
@@ -267,7 +271,6 @@ export class BuildingDamage {
             threshold,
             floor,
             isLoadBearing: isCenter,
-            segmentMesh: null,
           });
           pointsOnFloor++;
         }
@@ -289,7 +292,7 @@ export class BuildingDamage {
       threshold: 0.1,
       floor: numFloors - 1,
       isLoadBearing: false,
-      segmentMesh: null,
+
     });
     breakPoints.push({
       relativePosition: new Vector3(-0.25, 0.95, 0.25),
@@ -298,7 +301,7 @@ export class BuildingDamage {
       threshold: 0.1,
       floor: numFloors - 1,
       isLoadBearing: false,
-      segmentMesh: null,
+
     });
 
     return { breakPoints, floors };
@@ -313,11 +316,14 @@ export class BuildingDamage {
     if (!structure) {
       const bounds = building.getBoundingInfo().boundingBox;
       const { breakPoints, floors } = this.generateBreakPoints(building);
+      const height = bounds.maximumWorld.y - bounds.minimumWorld.y;
       structure = {
         mesh: building,
         breakPoints,
         floors,
         originalPosition: building.position.clone(),
+        originalHeight: height,
+        currentHeight: height,
         bounds: {
           min: bounds.minimumWorld.clone(),
           max: bounds.maximumWorld.clone(),
@@ -328,55 +334,12 @@ export class BuildingDamage {
         leanDirection: Vector3.Zero(),
         isLeaning: false,
         weakestFloor: -1,
-        fragmented: false,
+        damageLevel: 0,
       };
       this.buildingStructures.set(building, structure);
     }
 
     return structure;
-  }
-
-  /**
-   * Fragments a building on first damage - replaces the single mesh with
-   * a grid of smaller segment meshes. Each segment corresponds to a breakpoint.
-   * When a breakpoint breaks, its segment is detached and becomes debris.
-   * This makes the building visually show holes where pieces were knocked out.
-   *
-   * Only called once per building, and only when damage first occurs.
-   */
-  private fragmentBuilding(structure: BuildingStructure): void {
-    if (structure.fragmented) return;
-    structure.fragmented = true;
-
-    const bounds = structure.bounds;
-    const buildingSize = bounds.max.subtract(bounds.min);
-    const material = structure.mesh.material;
-
-    // Hide the original building mesh
-    structure.mesh.isVisible = false;
-
-    // Create a segment mesh for each non-broken breakpoint
-    for (const bp of structure.breakPoints) {
-      if (bp.broken) continue;
-
-      const seg = MeshBuilder.CreateBox(
-        `seg_${structure.mesh.name}_${bp.floor}`,
-        { width: bp.size.x, height: bp.size.y, depth: bp.size.z },
-        this.scene
-      );
-
-      seg.position.set(
-        structure.originalPosition.x + bp.relativePosition.x * buildingSize.x,
-        bounds.min.y + bp.relativePosition.y * buildingSize.y,
-        structure.originalPosition.z + bp.relativePosition.z * buildingSize.z
-      );
-
-      seg.material = material;
-      seg.isPickable = false;
-      seg.freezeWorldMatrix();
-
-      bp.segmentMesh = seg;
-    }
   }
 
   /**
@@ -526,6 +489,58 @@ export class BuildingDamage {
     this._impactPos.set(structure.originalPosition.x, floorWorldY, structure.originalPosition.z);
     this.spawnDustCloud(this._impactPos, 6, 1.5);
 
+    // Spawn rubble cascade - debris tumbles down the building face
+    const rubbleCount = Math.min(8, MAX_DEBRIS_PIECES - this.debris.length);
+    const halfW = buildingSize.x * 0.5;
+    const halfD = buildingSize.z * 0.5;
+    for (let r = 0; r < rubbleCount; r++) {
+      const rubbleSize = 1 + Math.random() * 3;
+      const rubble = MeshBuilder.CreateBox(`rbl_${this.debris.length}`, {
+        width: rubbleSize * (0.5 + Math.random() * 0.8),
+        height: rubbleSize * (0.3 + Math.random() * 0.5),
+        depth: rubbleSize * (0.5 + Math.random() * 0.8),
+      }, this.scene);
+      // Spawn on the building surface edges
+      const side = Math.floor(Math.random() * 4);
+      const px = side === 0 ? -halfW : side === 1 ? halfW : (Math.random() - 0.5) * buildingSize.x;
+      const pz = side === 2 ? -halfD : side === 3 ? halfD : (Math.random() - 0.5) * buildingSize.z;
+      rubble.position.set(
+        structure.originalPosition.x + px,
+        floorWorldY + Math.random() * 5,
+        structure.originalPosition.z + pz
+      );
+      rubble.material = this.debrisMaterials[Math.floor(Math.random() * this.debrisMaterials.length)];
+      rubble.isPickable = false;
+      rubble.rotation.set(Math.random(), Math.random() * Math.PI, Math.random());
+
+      // Rubble falls outward and down - tumbles off the building
+      this.debris.push({
+        mesh: rubble,
+        velocity: new Vector3(
+          px * 0.15 + (Math.random() - 0.5) * 3,
+          -2 - Math.random() * 5,
+          pz * 0.15 + (Math.random() - 0.5) * 3
+        ),
+        angularVelocity: new Vector3(
+          (Math.random() - 0.5) * 4,
+          (Math.random() - 0.5) * 2,
+          (Math.random() - 0.5) * 4
+        ),
+        isChunk: true,
+        settled: false,
+        settleTime: 0,
+        debrisType: DebrisType.Concrete,
+      });
+    }
+
+    // Shrink the building mesh to remove the collapsed floor visually
+    structure.currentHeight = structure.originalHeight * (floorIndex / structure.floors.length);
+    const heightRatio = structure.currentHeight / structure.originalHeight;
+    if (heightRatio > 0.05) {
+      structure.mesh.scaling.y = heightRatio;
+      structure.mesh.position.y = bounds.min.y + structure.currentHeight * 0.5;
+    }
+
     // Count how many floors above this one are still intact
     let floorsAbove = 0;
     for (let i = floorIndex + 1; i < structure.floors.length; i++) {
@@ -638,14 +653,6 @@ export class BuildingDamage {
     this.spawnDustCloud(damageOrigin, 8, 2);
     this._impactPos.set(damageOrigin.x, damageOrigin.y + height * 0.3, damageOrigin.z);
     this.spawnDustCloud(this._impactPos, 6, 1.5);
-
-    // Clean up any remaining segment meshes
-    for (const bp of structure.breakPoints) {
-      if (bp.segmentMesh) {
-        bp.segmentMesh.dispose();
-        bp.segmentMesh = null;
-      }
-    }
 
     this.buildingStructures.delete(structure.mesh);
   }
@@ -810,9 +817,9 @@ export class BuildingDamage {
   }
 
   /**
-   * Enhanced chunk breaking - detaches the building segment mesh as debris.
-   * The segment IS the visible piece of the building, so removing it leaves a hole.
-   * For glass/steel types, creates a new shaped mesh instead.
+   * Breaks a chunk and spawns rubble debris that tumbles down the building.
+   * The original building mesh stays visible - it shrinks as floors collapse.
+   * Rubble spawns at the breakpoint's position on the building surface and falls.
    */
   private breakChunkWithType(
     structure: BuildingStructure,
@@ -820,28 +827,27 @@ export class BuildingDamage {
     impactPosition: Vector3,
     speed: number
   ): void {
-    if (this.debris.length >= MAX_DEBRIS_PIECES) {
-      // Still mark broken and hide segment so building shows the hole
-      breakPoint.broken = true;
-      if (breakPoint.segmentMesh) {
-        breakPoint.segmentMesh.dispose();
-        breakPoint.segmentMesh = null;
-      }
-      return;
-    }
-
     breakPoint.broken = true;
 
-    // Fragment building on first damage - creates segment meshes
-    if (!structure.fragmented) {
-      this.fragmentBuilding(structure);
+    // Update damage level
+    let totalBroken = 0;
+    for (const bp of structure.breakPoints) {
+      if (bp.broken) totalBroken++;
     }
+    structure.damageLevel = totalBroken / structure.breakPoints.length;
+
+    if (this.debris.length >= MAX_DEBRIS_PIECES) return;
 
     const bounds = structure.bounds;
-    const buildingSize = bounds.max.subtract(bounds.min);
+    const buildingSize = new Vector3(
+      bounds.max.x - bounds.min.x,
+      structure.currentHeight,
+      bounds.max.z - bounds.min.z
+    );
 
+    // Spawn point: on the building surface, not inside it
     const chunkPosX = structure.originalPosition.x + breakPoint.relativePosition.x * buildingSize.x;
-    const chunkPosY = bounds.min.y + breakPoint.relativePosition.y * buildingSize.y;
+    const chunkPosY = bounds.min.y + breakPoint.relativePosition.y * structure.currentHeight;
     const chunkPosZ = structure.originalPosition.z + breakPoint.relativePosition.z * buildingSize.z;
 
     // Direction away from impact
@@ -855,8 +861,8 @@ export class BuildingDamage {
     let debrisType: DebrisType;
     if (breakPoint.isLoadBearing) {
       debrisType = DebrisType.Steel;
-    } else if (Math.abs(breakPoint.relativePosition.x) > 0.3 || Math.abs(breakPoint.relativePosition.z) > 0.3) {
-      debrisType = Math.random() < 0.4 ? DebrisType.Glass : DebrisType.Concrete;
+    } else if (Math.abs(breakPoint.relativePosition.x) > 0.35 || Math.abs(breakPoint.relativePosition.z) > 0.35) {
+      debrisType = Math.random() < 0.35 ? DebrisType.Glass : DebrisType.Concrete;
     } else {
       debrisType = DebrisType.Concrete;
     }
@@ -866,32 +872,13 @@ export class BuildingDamage {
     let vx: number, vy: number, vz: number;
     let avx: number, avy: number, avz: number;
 
-    // For concrete: reuse the segment mesh directly (it IS the building piece)
-    // For steel/glass: create a new shaped mesh and dispose the segment
-    if (debrisType === DebrisType.Concrete && breakPoint.segmentMesh) {
-      // Detach the segment mesh - it becomes the debris. The building now has a hole.
-      chunk = breakPoint.segmentMesh;
-      chunk.unfreezeWorldMatrix();
-      chunk.material = this.debrisMaterials[Math.floor(Math.random() * this.debrisMaterials.length)];
-      breakPoint.segmentMesh = null;
-
-      vx = normDirX * horizontalPush + (Math.random() - 0.5) * 3;
-      vy = 2 + Math.random() * 3;
-      vz = normDirZ * horizontalPush + (Math.random() - 0.5) * 3;
-      avx = (Math.random() - 0.5) * 2;
-      avy = (Math.random() - 0.5) * 1;
-      avz = (Math.random() - 0.5) * 2;
-    } else {
-      // Dispose the segment (leaves a hole) and create a new shaped mesh
-      if (breakPoint.segmentMesh) {
-        breakPoint.segmentMesh.dispose();
-        breakPoint.segmentMesh = null;
-      }
-
-      if (debrisType === DebrisType.Steel) {
-        const beamLength = breakPoint.size.y * (0.8 + Math.random() * 0.4);
-        chunk = MeshBuilder.CreateBox(`steel_${this.debris.length}`, {
-          width: breakPoint.size.x * 0.15, height: beamLength, depth: breakPoint.size.z * 0.15,
+    switch (debrisType) {
+      case DebrisType.Steel: {
+        // Steel beams/rebar - long thin pieces that tumble slowly
+        const beamLen = breakPoint.size.y * (0.6 + Math.random() * 0.6);
+        const beamThick = 0.3 + Math.random() * 0.3;
+        chunk = MeshBuilder.CreateBox(`rbl_${this.debris.length}`, {
+          width: beamThick, height: beamLen, depth: beamThick,
         }, this.scene);
         chunk.material = this.debrisMaterials[1];
         vx = normDirX * horizontalPush * 0.5 + (Math.random() - 0.5) * 2;
@@ -900,10 +887,13 @@ export class BuildingDamage {
         avx = (Math.random() - 0.5) * 1.5;
         avy = (Math.random() - 0.5) * 0.5;
         avz = (Math.random() - 0.5) * 1.5;
-      } else { // Glass
-        const s = Math.random() * 0.8 + 0.3;
-        chunk = MeshBuilder.CreateBox(`glass_${this.debris.length}`, {
-          width: s, height: s * 0.1, depth: s * (0.5 + Math.random() * 0.5),
+        break;
+      }
+      case DebrisType.Glass: {
+        // Glass - small flat shards, fast
+        const s = 0.3 + Math.random() * 0.6;
+        chunk = MeshBuilder.CreateBox(`rbl_${this.debris.length}`, {
+          width: s, height: s * 0.08, depth: s * (0.4 + Math.random() * 0.6),
         }, this.scene);
         chunk.material = this.debrisMaterials[3];
         vx = normDirX * horizontalPush * 2 + (Math.random() - 0.5) * 8;
@@ -912,12 +902,30 @@ export class BuildingDamage {
         avx = (Math.random() - 0.5) * 10;
         avy = (Math.random() - 0.5) * 10;
         avz = (Math.random() - 0.5) * 10;
+        break;
       }
-      chunk.position.set(chunkPosX, chunkPosY, chunkPosZ);
+      default: {
+        // Concrete rubble - irregular-ish boxes, various sizes
+        const sizeScale = 0.5 + Math.random() * 0.8;
+        chunk = MeshBuilder.CreateBox(`rbl_${this.debris.length}`, {
+          width: breakPoint.size.x * sizeScale * (0.5 + Math.random() * 0.5),
+          height: breakPoint.size.y * sizeScale * (0.3 + Math.random() * 0.5),
+          depth: breakPoint.size.z * sizeScale * (0.5 + Math.random() * 0.5),
+        }, this.scene);
+        chunk.material = this.debrisMaterials[Math.floor(Math.random() * this.debrisMaterials.length)];
+        vx = normDirX * horizontalPush + (Math.random() - 0.5) * 3;
+        vy = 1 + Math.random() * 3;
+        vz = normDirZ * horizontalPush + (Math.random() - 0.5) * 3;
+        avx = (Math.random() - 0.5) * 3;
+        avy = (Math.random() - 0.5) * 2;
+        avz = (Math.random() - 0.5) * 3;
+        break;
+      }
     }
 
+    chunk.position.set(chunkPosX, chunkPosY, chunkPosZ);
     chunk.isPickable = false;
-    chunk.rotation.set(Math.random() * 0.3, Math.random() * Math.PI * 2, Math.random() * 0.3);
+    chunk.rotation.set(Math.random() * 0.5, Math.random() * Math.PI * 2, Math.random() * 0.5);
 
     this.debris.push({
       mesh: chunk,
@@ -1503,61 +1511,28 @@ export class BuildingDamage {
       }
     }
 
-    // Check for unsupported segments - segments above broken ones should fall
+    // Update building visual damage - shrink buildings as they take damage
     for (const [, structure] of this.buildingStructures) {
-      if (!structure.fragmented) continue;
+      if (structure.damageLevel <= 0) continue;
 
-      const buildingSize = structure.bounds.max.subtract(structure.bounds.min);
+      // Count collapsed floors from top down to determine new height
+      let topIntactFloor = structure.floors.length - 1;
+      while (topIntactFloor >= 0 && structure.floors[topIntactFloor].collapsed) {
+        topIntactFloor--;
+      }
 
-      for (const bp of structure.breakPoints) {
-        if (bp.broken || !bp.segmentMesh) continue;
+      // Shrink building to intact height
+      const targetHeight = topIntactFloor >= 0
+        ? structure.originalHeight * ((topIntactFloor + 1) / structure.floors.length)
+        : structure.originalHeight * 0.05; // Near-ground rubble stub
 
-        // Check if any breakpoint directly below this one is broken
-        // "Below" = same column (similar relX, relZ), one floor lower
-        const myFloor = bp.floor;
-        if (myFloor === 0) continue; // Ground floor always supported
-
-        let hasSupport = false;
-        for (const other of structure.breakPoints) {
-          if (other.floor !== myFloor - 1) continue;
-          // Same column? Check if X and Z positions match within tolerance
-          const dx = Math.abs(other.relativePosition.x - bp.relativePosition.x);
-          const dz = Math.abs(other.relativePosition.z - bp.relativePosition.z);
-          if (dx < 0.05 && dz < 0.05) {
-            // This is our support column
-            if (!other.broken) {
-              hasSupport = true;
-            }
-            break;
-          }
-        }
-
-        if (!hasSupport) {
-          // Detach this segment as falling debris
-          const seg = bp.segmentMesh;
-          seg.unfreezeWorldMatrix();
-          bp.segmentMesh = null;
-          bp.broken = true;
-
-          // Update floor tracking
-          if (bp.floor < structure.floors.length) {
-            structure.floors[bp.floor].brokenPoints++;
-          }
-
-          if (this.debris.length < MAX_DEBRIS_PIECES) {
-            this.debris.push({
-              mesh: seg,
-              velocity: new Vector3((Math.random() - 0.5) * 1, -1, (Math.random() - 0.5) * 1),
-              angularVelocity: new Vector3((Math.random() - 0.5) * 0.5, 0, (Math.random() - 0.5) * 0.5),
-              isChunk: true,
-              settled: false,
-              settleTime: 0,
-              debrisType: DebrisType.Concrete,
-            });
-          } else {
-            seg.dispose();
-          }
-        }
+      if (structure.currentHeight > targetHeight + 0.5) {
+        // Gradually shrink toward target
+        structure.currentHeight -= (structure.currentHeight - targetHeight) * 0.08;
+        const heightRatio = structure.currentHeight / structure.originalHeight;
+        structure.mesh.scaling.y = heightRatio;
+        // Reposition so bottom stays grounded
+        structure.mesh.position.y = structure.bounds.min.y + structure.currentHeight * 0.5;
       }
     }
 
