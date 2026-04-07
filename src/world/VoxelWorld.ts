@@ -22,7 +22,7 @@ import { Diag } from '../core/DiagnosticLog';
 import type { GravityZone } from './AlienShip';
 
 // ── Constants ──────────────────────────────────────────────────────────
-const MAX_DEBRIS = 120;
+const MAX_DEBRIS = 200;
 const DEBRIS_SETTLE_TIME = 12000;
 const DEBRIS_CLEANUP_DIST = 120;
 const VOXEL_CLEANUP_DIST = 350;
@@ -30,8 +30,7 @@ const AUTO_DESTROY_THRESHOLD = 0.08;
 const DAMAGE_COOLDOWN = 60;
 const GRAVITY = -30;
 const MAX_DUST = 20;
-const COLLAPSE_THRESHOLD = 12; // Min disconnected blocks to trigger falling section
-const MAX_COLLAPSING = 8;      // Max simultaneous collapsing sections
+const MAX_FALLING_BLOCKS = 50;  // Max individual voxel blocks falling at once
 
 // ── Interfaces ─────────────────────────────────────────────────────────
 interface DebrisPiece {
@@ -48,20 +47,7 @@ interface DustCloud {
   lifetime: number;
 }
 
-interface CollapsingSection {
-  mesh: Mesh;
-  position: Vector3;       // Center of the section
-  tiltAxis: Vector3;       // Axis to rotate around (perpendicular to fall direction)
-  tiltAngle: number;       // Current tilt in radians
-  tiltSpeed: number;       // Radians per second
-  fallVelocity: number;    // Downward speed
-  height: number;          // For ground detection
-  groundY: number;         // Ground level
-  impacted: boolean;       // Has hit the ground
-  lifetime: number;        // Time since creation
-  blockCount: number;      // For rubble scaling
-  smokeEmitter: ParticleSystem | null;
-}
+// No CollapsingSection type needed - disconnected blocks become individual debris
 
 export interface CollisionResult {
   hit: boolean;
@@ -97,7 +83,7 @@ export class VoxelWorld {
   // Effects
   private debris: DebrisPiece[] = [];
   private dustClouds: DustCloud[] = [];
-  private collapsingSections: CollapsingSection[] = [];
+  // Falling voxel blocks tracked via debris array
   private debrisMaterials: StandardMaterial[] = [];
 
   // Gravity zone
@@ -420,190 +406,164 @@ export class VoxelWorld {
   // ── Dust ───────────────────────────────────────────────────────────
 
   private spawnDust(pos: Vector3, size: number, duration: number): void {
-    if (this.dustClouds.length >= MAX_DUST) return;
-    const ps = new ParticleSystem(`dust`, 40, this.scene);
-    ps.createSphereEmitter(size * 0.5);
-    ps.color1 = new Color4(0.7, 0.6, 0.5, 0.5);
-    ps.color2 = new Color4(0.5, 0.45, 0.4, 0.3);
+    if (this.dustClouds.length >= MAX_DUST * 2) return;
+    const particleCount = Math.min(100, 30 + Math.floor(size * 5));
+    const ps = new ParticleSystem(`dust`, particleCount, this.scene);
+    ps.createSphereEmitter(size * 0.7);
+    // Thick brown-gray dust cloud
+    ps.color1 = new Color4(0.75, 0.65, 0.5, 0.7);
+    ps.color2 = new Color4(0.55, 0.48, 0.38, 0.5);
     ps.colorDead = new Color4(0.4, 0.35, 0.3, 0);
-    ps.minSize = size * 0.8; ps.maxSize = size * 2;
-    ps.minLifeTime = duration * 0.5; ps.maxLifeTime = duration * 1.5;
-    ps.direction1 = new Vector3(-size * 0.3, size * 0.5, -size * 0.3);
-    ps.direction2 = new Vector3(size * 0.3, size * 1.5, size * 0.3);
-    ps.minEmitPower = 1; ps.maxEmitPower = 3;
-    ps.emitter = pos.clone(); ps.emitRate = 25;
+    ps.minSize = size * 1.2; ps.maxSize = size * 3;
+    ps.minLifeTime = duration; ps.maxLifeTime = duration * 2.5;
+    ps.direction1 = new Vector3(-size * 0.5, size * 0.3, -size * 0.5);
+    ps.direction2 = new Vector3(size * 0.5, size * 2, size * 0.5);
+    ps.minEmitPower = 2; ps.maxEmitPower = 6;
+    ps.emitter = pos.clone();
+    ps.emitRate = Math.min(60, 15 + Math.floor(size * 3));
     ps.blendMode = ParticleSystem.BLENDMODE_STANDARD;
-    ps.gravity = new Vector3(0, -2, 0);
+    ps.gravity = new Vector3(0, -1.5, 0);
     ps.start();
-    setTimeout(() => { ps.emitRate = 0; }, 200);
-    this.dustClouds.push({ particles: ps, lifetime: duration + 2 });
+    // Emit for longer proportional to size
+    const emitMs = Math.min(2000, 200 + Math.floor(size * 100));
+    setTimeout(() => { ps.emitRate = 0; }, emitMs);
+    this.dustClouds.push({ particles: ps, lifetime: duration + 4 });
   }
 
   // ── Structural Collapse ─────────────────────────────────────────────
 
   /**
-   * Handle disconnected blocks: small clusters become debris, large clusters
-   * become a tilting/falling section with smoke effects.
+   * Handle disconnected blocks: each block becomes a physics-driven debris
+   * piece that falls, bounces, and piles up. Massive smoke on large collapses.
    */
   private handleDisconnectedBlocks(
     vb: VoxelBuilding, disconnected: { x: number; y: number; z: number }[], damagePos: Vector3
   ): void {
-    if (disconnected.length >= COLLAPSE_THRESHOLD && this.collapsingSections.length < MAX_COLLAPSING) {
-      // Large cluster: create a falling section that tilts and crashes
-      this.spawnCollapsingSection(vb, disconnected, damagePos);
-    } else {
-      // Small cluster: individual falling debris (limited per frame)
-      const maxCascade = Math.min(disconnected.length, 15);
-      const falling: Vector3[] = [];
-      for (let i = 0; i < maxCascade; i++) {
-        const pos = vb.removeBlock(disconnected[i].x, disconnected[i].y, disconnected[i].z);
-        if (pos) falling.push(pos);
-      }
-      vb.flushChanges();
-      this.spawnFallingDebris(falling);
-    }
-  }
-
-  /**
-   * Create a collapsing section from disconnected blocks.
-   * The blocks are removed from the voxel grid and merged into a single
-   * falling mesh that tilts toward the damage side and crashes down.
-   */
-  private spawnCollapsingSection(
-    vb: VoxelBuilding, blocks: { x: number; y: number; z: number }[], damagePos: Vector3
-  ): void {
-    // Calculate bounds of the disconnected section
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-    let sumX = 0, sumY = 0, sumZ = 0;
-
-    for (const { x, y, z } of blocks) {
-      const wp = vb.gridToWorldPos(x, y, z);
-      minX = Math.min(minX, wp.x); maxX = Math.max(maxX, wp.x);
-      minY = Math.min(minY, wp.y); maxY = Math.max(maxY, wp.y);
-      minZ = Math.min(minZ, wp.z); maxZ = Math.max(maxZ, wp.z);
-      sumX += wp.x; sumY += wp.y; sumZ += wp.z;
-    }
-
-    const center = new Vector3(sumX / blocks.length, sumY / blocks.length, sumZ / blocks.length);
-    const sectionWidth = maxX - minX + VOXEL_SIZE;
-    const sectionHeight = maxY - minY + VOXEL_SIZE;
-    const sectionDepth = maxZ - minZ + VOXEL_SIZE;
-
-    // Remove blocks from voxel grid
-    for (const { x, y, z } of blocks) {
-      vb.removeBlock(x, y, z);
+    // Remove all disconnected blocks from the grid
+    const fallingPositions: Vector3[] = [];
+    for (const { x, y, z } of disconnected) {
+      const pos = vb.removeBlock(x, y, z);
+      if (pos) fallingPositions.push(pos);
     }
     vb.flushChanges();
 
-    // Create a visual mesh for the falling section
-    const sectionMesh = MeshBuilder.CreateBox(`collapse_${this.collapsingSections.length}`, {
-      width: sectionWidth,
-      height: sectionHeight,
-      depth: sectionDepth,
-    }, this.scene);
-    sectionMesh.position.copyFrom(center);
-    sectionMesh.material = this.debrisMaterials[Math.floor(Math.random() * this.debrisMaterials.length)];
-    sectionMesh.isPickable = false;
+    if (fallingPositions.length === 0) return;
 
-    // Tilt direction: fall AWAY from the damage point (toward the missing support)
-    const fallDir = center.subtract(damagePos);
-    fallDir.y = 0;
-    if (fallDir.lengthSquared() < 0.01) fallDir.x = 1; // Default if damage is directly below
-    fallDir.normalize();
+    // Each block becomes a real physics debris piece (capped for perf)
+    const maxBlocks = Math.min(fallingPositions.length, MAX_FALLING_BLOCKS, MAX_DEBRIS - this.debris.length);
+    // If we have more blocks than we can spawn, sample evenly
+    const step = fallingPositions.length > maxBlocks
+      ? Math.floor(fallingPositions.length / maxBlocks)
+      : 1;
 
-    // Tilt axis: perpendicular to fall direction (cross with up)
-    const tiltAxis = Vector3.Cross(Vector3.Up(), fallDir).normalize();
+    for (let i = 0; i < fallingPositions.length && this.debris.length < MAX_DEBRIS; i += step) {
+      const pos = fallingPositions[i];
 
-    // Start smoke at the base of the collapsing section
-    const smokeEmitter = this.spawnSmoke(new Vector3(center.x, minY, center.z), sectionWidth * 0.3);
-
-    this.collapsingSections.push({
-      mesh: sectionMesh,
-      position: center.clone(),
-      tiltAxis,
-      tiltAngle: 0,
-      tiltSpeed: 0.3 + Math.random() * 0.5, // Start slow, accelerate
-      fallVelocity: 0,
-      height: sectionHeight,
-      groundY: 0,
-      impacted: false,
-      lifetime: 0,
-      blockCount: blocks.length,
-      smokeEmitter,
-    });
-
-    Diag.log('Collapse', `${blocks.length} blocks, ${sectionWidth.toFixed(0)}x${sectionHeight.toFixed(0)}x${sectionDepth.toFixed(0)}`);
-  }
-
-  /**
-   * Spawn a rising smoke plume (darker than dust, longer lasting).
-   */
-  private spawnSmoke(pos: Vector3, size: number): ParticleSystem {
-    const ps = new ParticleSystem('smoke', 60, this.scene);
-    ps.createConeEmitter(size, Math.PI / 6);
-    ps.color1 = new Color4(0.3, 0.3, 0.3, 0.6);
-    ps.color2 = new Color4(0.2, 0.2, 0.2, 0.4);
-    ps.colorDead = new Color4(0.15, 0.15, 0.15, 0);
-    ps.minSize = size * 1.5;
-    ps.maxSize = size * 4;
-    ps.minLifeTime = 2;
-    ps.maxLifeTime = 5;
-    ps.direction1 = new Vector3(-size * 0.2, size * 2, -size * 0.2);
-    ps.direction2 = new Vector3(size * 0.2, size * 4, size * 0.2);
-    ps.minEmitPower = 2;
-    ps.maxEmitPower = 6;
-    ps.emitter = pos.clone();
-    ps.emitRate = 40;
-    ps.blendMode = ParticleSystem.BLENDMODE_STANDARD;
-    ps.gravity = new Vector3(0, 1, 0); // Smoke rises
-    ps.start();
-    return ps;
-  }
-
-  /**
-   * Spawn rubble pile at impact point when a section crashes down.
-   */
-  private spawnRubblePile(position: Vector3, blockCount: number, impactSpeed: number): void {
-    const rubbleCount = Math.min(Math.floor(blockCount / 3), MAX_DEBRIS - this.debris.length, 12);
-    const spread = Math.sqrt(blockCount) * VOXEL_SIZE * 0.3;
-
-    for (let i = 0; i < rubbleCount; i++) {
-      const size = 1 + Math.random() * 3;
-      const m = MeshBuilder.CreateBox(`rubble_${this.debris.length}`, {
-        width: size * (0.5 + Math.random() * 0.8),
-        height: size * (0.3 + Math.random() * 0.4),
-        depth: size * (0.5 + Math.random() * 0.8),
+      // Each debris piece is a voxel-sized block
+      const sizeVar = 0.7 + Math.random() * 0.6;
+      const m = MeshBuilder.CreateBox(`vfall_${this.debris.length}`, {
+        width: VOXEL_SIZE * sizeVar * (0.5 + Math.random() * 0.5),
+        height: VOXEL_SIZE * sizeVar * (0.3 + Math.random() * 0.5),
+        depth: VOXEL_SIZE * sizeVar * (0.5 + Math.random() * 0.5),
       }, this.scene);
-      m.position.set(
-        position.x + (Math.random() - 0.5) * spread,
-        0.5 + Math.random() * 2,
-        position.z + (Math.random() - 0.5) * spread
-      );
+      m.position.copyFrom(pos);
       m.rotation.set(Math.random() * 0.3, Math.random() * Math.PI, Math.random() * 0.3);
       m.material = this.debrisMaterials[Math.floor(Math.random() * this.debrisMaterials.length)];
       m.isPickable = false;
 
-      // Rubble scatters outward from impact
-      const dx = m.position.x - position.x;
-      const dz = m.position.z - position.z;
+      // Slight outward scatter from damage point + downward
+      const dx = pos.x - damagePos.x;
+      const dz = pos.z - damagePos.z;
+      const dist = Math.sqrt(dx * dx + dz * dz) || 1;
+
       this.debris.push({
         mesh: m,
         velocity: new Vector3(
-          dx * 2 + (Math.random() - 0.5) * impactSpeed * 0.3,
-          Math.random() * impactSpeed * 0.4 + 5,
-          dz * 2 + (Math.random() - 0.5) * impactSpeed * 0.3
+          (dx / dist) * (1 + Math.random() * 3),
+          -1 - Math.random() * 2,  // Fall down
+          (dz / dist) * (1 + Math.random() * 3)
         ),
         angularVelocity: new Vector3(
-          (Math.random() - 0.5) * 6,
-          (Math.random() - 0.5) * 3,
-          (Math.random() - 0.5) * 6
+          (Math.random() - 0.5) * 4,
+          (Math.random() - 0.5) * 2,
+          (Math.random() - 0.5) * 4
         ),
         isChunk: true,
         settled: false,
         settleTime: 0,
       });
     }
+
+    // Smoke + dust proportional to collapse size
+    const collapseSize = fallingPositions.length;
+
+    if (collapseSize >= 5) {
+      // Find center and base of collapse for smoke placement
+      let sumX = 0, sumZ = 0, baseY = Infinity;
+      for (const p of fallingPositions) {
+        sumX += p.x; sumZ += p.z;
+        baseY = Math.min(baseY, p.y);
+      }
+      const centerX = sumX / fallingPositions.length;
+      const centerZ = sumZ / fallingPositions.length;
+
+      // MASSIVE smoke at the base - scales with collapse size
+      const smokeSize = Math.min(20, 3 + collapseSize * 0.3);
+      this.spawnSmoke(new Vector3(centerX, baseY, centerZ), smokeSize, collapseSize);
+
+      // Dust cloud at the collapse center
+      this.spawnDust(new Vector3(centerX, baseY + 5, centerZ), smokeSize * 0.8, 2);
+
+      // Additional smoke puffs scattered around
+      if (collapseSize > 20) {
+        for (let i = 0; i < Math.min(3, Math.floor(collapseSize / 15)); i++) {
+          const p = fallingPositions[Math.floor(Math.random() * fallingPositions.length)];
+          this.spawnSmoke(new Vector3(p.x, baseY, p.z), smokeSize * 0.5, collapseSize * 0.3);
+        }
+      }
+    }
+
+    Diag.log('Collapse', `${collapseSize} blocks falling, ${maxBlocks} debris spawned`);
+  }
+
+  /**
+   * Spawn a rising smoke plume. Size and density scale with destruction.
+   */
+  private spawnSmoke(pos: Vector3, size: number, intensity: number = 10): void {
+    if (this.dustClouds.length >= MAX_DUST * 2) return; // Higher cap for smoke
+
+    const particleCount = Math.min(150, 30 + Math.floor(intensity * 3));
+    const ps = new ParticleSystem('smoke', particleCount, this.scene);
+    ps.createConeEmitter(size * 0.8, Math.PI / 5);
+
+    // Dark billowing smoke
+    ps.color1 = new Color4(0.35, 0.3, 0.25, 0.7);
+    ps.color2 = new Color4(0.2, 0.18, 0.15, 0.5);
+    ps.colorDead = new Color4(0.15, 0.13, 0.1, 0);
+
+    ps.minSize = size * 1.5;
+    ps.maxSize = size * 5;
+    ps.minLifeTime = 2.5;
+    ps.maxLifeTime = 6;
+
+    // Smoke billows upward and outward
+    ps.direction1 = new Vector3(-size * 0.4, size * 1.5, -size * 0.4);
+    ps.direction2 = new Vector3(size * 0.4, size * 5, size * 0.4);
+    ps.minEmitPower = 3;
+    ps.maxEmitPower = 10;
+
+    ps.emitter = pos.clone();
+    ps.emitRate = Math.min(80, 15 + intensity * 2);
+    ps.blendMode = ParticleSystem.BLENDMODE_STANDARD;
+    ps.gravity = new Vector3(0, 2, 0); // Smoke rises
+
+    ps.start();
+
+    // Smoke emits for a duration proportional to collapse size, then fades
+    const emitDuration = Math.min(3000, 500 + intensity * 50);
+    setTimeout(() => { ps.emitRate = 0; }, emitDuration);
+
+    this.dustClouds.push({ particles: ps, lifetime: 8 });
   }
 
   // ── Update Loop ────────────────────────────────────────────────────
@@ -617,80 +577,6 @@ export class VoxelWorld {
       if (this.dustClouds[i].lifetime <= 0) {
         this.dustClouds[i].particles.dispose();
         this.dustClouds.splice(i, 1);
-      }
-    }
-
-    // ── Update collapsing sections ──
-    for (let i = this.collapsingSections.length - 1; i >= 0; i--) {
-      const cs = this.collapsingSections[i];
-      cs.lifetime += deltaTime;
-
-      if (!cs.impacted) {
-        // Accelerating tilt + fall
-        cs.tiltSpeed += deltaTime * 1.5; // Angular acceleration
-        cs.tiltAngle += cs.tiltSpeed * deltaTime;
-        cs.fallVelocity += GRAVITY * deltaTime * 0.5; // Slower than freefall for dramatic effect
-
-        // Apply tilt rotation around the base pivot point
-        // Pivot is at the bottom of the section
-        const pivotY = cs.position.y - cs.height * 0.5;
-        const heightAbovePivot = cs.position.y - pivotY;
-
-        // Update position: tilt causes horizontal drift + vertical drop
-        cs.mesh.position.y += cs.fallVelocity * deltaTime;
-        cs.mesh.position.x += Math.sin(cs.tiltAngle) * cs.tiltAxis.z * deltaTime * heightAbovePivot * 0.5;
-        cs.mesh.position.z -= Math.sin(cs.tiltAngle) * cs.tiltAxis.x * deltaTime * heightAbovePivot * 0.5;
-
-        // Apply rotation
-        cs.mesh.rotationQuaternion = null;
-        if (Math.abs(cs.tiltAxis.x) > 0.5) {
-          cs.mesh.rotation.x = cs.tiltAngle * Math.sign(cs.tiltAxis.x);
-        } else {
-          cs.mesh.rotation.z = cs.tiltAngle * Math.sign(cs.tiltAxis.z);
-        }
-
-        // Smoke follows the section
-        if (cs.smokeEmitter) {
-          (cs.smokeEmitter.emitter as Vector3).copyFrom(cs.mesh.position);
-          (cs.smokeEmitter.emitter as Vector3).y = pivotY;
-        }
-
-        // Ground impact check
-        if (cs.mesh.position.y - cs.height * 0.5 <= cs.groundY || cs.tiltAngle > Math.PI * 0.45) {
-          cs.impacted = true;
-          cs.mesh.position.y = Math.max(cs.groundY + cs.height * 0.3, cs.mesh.position.y);
-
-          // IMPACT: spawn rubble pile + massive dust + screen shake
-          const impactPos = cs.mesh.position.clone();
-          impactPos.y = cs.groundY;
-          const impactSpeed = Math.abs(cs.fallVelocity) + cs.tiltSpeed * cs.height;
-
-          this.spawnRubblePile(impactPos, cs.blockCount, impactSpeed);
-          this.spawnDust(impactPos, 8 + cs.blockCount * 0.1, 2);
-          this.spawnSmoke(impactPos, cs.blockCount * 0.15);
-
-          // Stop the smoke emitter
-          if (cs.smokeEmitter) {
-            cs.smokeEmitter.emitRate = 0;
-          }
-
-          Diag.log('Collapse', `IMPACT ${cs.blockCount} blocks, speed=${impactSpeed.toFixed(0)}`);
-        }
-      } else {
-        // Post-impact: sink into ground and fade
-        cs.mesh.position.y -= deltaTime * 2;
-        cs.mesh.visibility = Math.max(0, 1 - (cs.lifetime - 1) * 0.5);
-      }
-
-      // Cleanup after 4 seconds
-      if (cs.lifetime > 4) {
-        cs.mesh.dispose();
-        if (cs.smokeEmitter) {
-          cs.smokeEmitter.emitRate = 0;
-          // Let particles finish naturally, then clean up
-          this.dustClouds.push({ particles: cs.smokeEmitter, lifetime: 3 });
-        }
-        this.collapsingSections.splice(i, 1);
       }
     }
 
