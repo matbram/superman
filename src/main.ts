@@ -155,6 +155,7 @@ class Game {
     // Give AlienShip access to NPCs so it can attack them
     this.alienShip.pedestrianSystem = this.pedestrians;
     this.alienShip.trafficSystem = this.traffic;
+    this.alienShip.voxelWorld = this.voxelWorld;
 
     // Initialize birds
     this.birds = new Birds(this.sceneContext.scene);

@@ -176,7 +176,8 @@ export class FlightState extends BasePlayerState {
     }
 
     // ── DOUBLE-TAP DESCEND (LT) → SUPER DIVE + SUPERHERO LAND ──
-    // Lower press threshold (0.2) and release threshold (0.1) for responsive double-tap
+    // First tap records time but DOESN'T brake. Second tap within window = dive.
+    // If no second tap, brake kicks in after the window expires.
     if (input.descendTrigger > 0.2) {
       if (this.descendWasReleased) {
         if (now - this.lastDescendPressTime < DOUBLE_TAP_WINDOW) {
@@ -196,10 +197,9 @@ export class FlightState extends BasePlayerState {
     // Super dive mode: pitch straight down, accelerate hard, ignore brakes
     if (this.superDiving) {
       this.currentSpeed = Math.min(MAX_SPEED, this.currentSpeed + 500 * deltaTime);
-      player.setPitch(-Math.PI * 0.45); // Nose down ~80 degrees - almost straight down
-      // Skip all other speed logic - dive overrides everything
+      player.setPitch(-Math.PI * 0.45);
       player.setCurrentSpeed(this.currentSpeed);
-      return; // RETURN EARLY - don't let brake logic slow us down
+      return; // RETURN EARLY - bypass ALL brake logic
     }
 
     // RT pressure directly controls target speed
@@ -210,8 +210,10 @@ export class FlightState extends BasePlayerState {
       this.targetSpeed = 0;
     }
 
-    // LT (descendTrigger) acts as HARD brake - abrupt stop
-    if (input.descendTrigger > 0.1 && !this.superDiving) {
+    // LT (descendTrigger) acts as HARD brake - BUT only after double-tap window expires
+    // This prevents the brake from killing speed before a double-tap can register
+    const withinDoubleTapWindow = (now - this.lastDescendPressTime) < DOUBLE_TAP_WINDOW && this.lastDescendPressTime > 0;
+    if (input.descendTrigger > 0.1 && !this.superDiving && !withinDoubleTapWindow) {
       this.currentSpeed -= BRAKE_DECELERATION * input.descendTrigger * deltaTime;
       this.currentSpeed = Math.max(0, this.currentSpeed);
 

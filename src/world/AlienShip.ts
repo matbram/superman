@@ -75,9 +75,18 @@ export class AlienShip {
 
   // Callbacks
   private onBuildingDamage: ((position: Vector3, radius: number, damage: number) => void) | null = null;
-  // New: direct NPC destruction
+  // External systems for attacks
   public pedestrianSystem: any = null;
   public trafficSystem: any = null;
+  public voxelWorld: any = null; // For DDA laser attacks on buildings
+
+  // Laser weapon state
+  private laserBeams: Mesh[] = [];
+  private laserMaterial!: StandardMaterial;
+  private laserTargetPos: Vector3 = Vector3.Zero();
+  private laserFiring: boolean = false;
+  private laserBurstTimer: number = 0;
+  private laserCooldownTimer: number = 0;
 
   constructor(scene: Scene, worldCenter: Vector3 = Vector3.Zero()) {
     this.scene = scene;
@@ -107,8 +116,32 @@ export class AlienShip {
     this.createEngineGlows();
     this.createGravityBeam();
     this.createBeamParticles();
+    this.createLaserWeapons();
 
     console.log('[AlienShip] Created at position:', this.shipPosition);
+  }
+
+  /**
+   * Creates laser beam meshes for attack weapons
+   */
+  private createLaserWeapons(): void {
+    this.laserMaterial = new StandardMaterial('laserMat', this.scene);
+    this.laserMaterial.emissiveColor = new Color3(1.0, 0.2, 0.1); // Red-orange laser
+    this.laserMaterial.disableLighting = true;
+    this.laserMaterial.alpha = 0.8;
+
+    // Create 3 laser beam cylinders (reused, repositioned each frame)
+    for (let i = 0; i < 3; i++) {
+      const beam = MeshBuilder.CreateCylinder(`alienLaser_${i}`, {
+        diameter: 1.5,
+        height: 1,
+        tessellation: 6,
+      }, this.scene);
+      beam.material = this.laserMaterial;
+      beam.isPickable = false;
+      beam.setEnabled(false);
+      this.laserBeams.push(beam);
+    }
   }
 
   /**
@@ -497,7 +530,7 @@ export class AlienShip {
       this.risingDebrisParticles.emitRate = 30;
     }
 
-    // ── ATTACK: Damage buildings + kill NPCs in beam zone ──
+    // ── GRAVITY BEAM: Damage buildings + kill NPCs in beam zone ──
     if (this.onBuildingDamage) {
       this.onBuildingDamage(this.gravityZone.center, BEAM_DAMAGE_RADIUS, 300 * deltaTime);
     }
@@ -506,6 +539,103 @@ export class AlienShip {
     }
     if (this.trafficSystem) {
       this.trafficSystem.destroyNear(this.gravityZone.center, BEAM_DAMAGE_RADIUS);
+    }
+
+    // ── LASER WEAPON: Fire precise DDA lasers at buildings (like heat vision) ──
+    this.updateLaserAttack(deltaTime);
+  }
+
+  /**
+   * Laser weapon AI: fires bursts of precise laser beams at the ground/buildings.
+   * Uses VoxelWorld DDA raycast for block-level accuracy.
+   */
+  private updateLaserAttack(deltaTime: number): void {
+    this.laserCooldownTimer -= deltaTime;
+
+    if (this.laserCooldownTimer <= 0 && !this.laserFiring) {
+      // Start a new laser burst
+      this.laserFiring = true;
+      this.laserBurstTimer = 0.8 + Math.random() * 1.2; // Fire for 0.8-2 seconds
+
+      // Pick a target on the ground near the ship
+      this.laserTargetPos.set(
+        this.shipPosition.x + (Math.random() - 0.5) * 120,
+        0,
+        this.shipPosition.z + (Math.random() - 0.5) * 120
+      );
+    }
+
+    if (this.laserFiring) {
+      this.laserBurstTimer -= deltaTime;
+      if (this.laserBurstTimer <= 0) {
+        // End burst
+        this.laserFiring = false;
+        this.laserCooldownTimer = 1.5 + Math.random() * 3; // Cooldown 1.5-4.5s
+        for (const beam of this.laserBeams) beam.setEnabled(false);
+        return;
+      }
+
+      // Sweep the target position slightly during burst
+      this.laserTargetPos.x += (Math.random() - 0.5) * 30 * deltaTime;
+      this.laserTargetPos.z += (Math.random() - 0.5) * 30 * deltaTime;
+
+      // Fire each laser beam from different points on the ship
+      for (let i = 0; i < this.laserBeams.length; i++) {
+        const beam = this.laserBeams[i];
+        const offset = (i - 1) * 15; // Spread beams
+
+        const startX = this.shipPosition.x + offset;
+        const startY = this.shipPosition.y - 10;
+        const startZ = this.shipPosition.z;
+        const endX = this.laserTargetPos.x + offset * 0.3;
+        const endZ = this.laserTargetPos.z;
+
+        // Position and orient the beam cylinder from ship to ground
+        const dx = endX - startX;
+        const dy = -startY; // Goes down to ground (y=0)
+        const dz = endZ - startZ;
+        const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+        beam.setEnabled(true);
+        beam.position.set(
+          (startX + endX) / 2,
+          startY / 2,
+          (startZ + endZ) / 2
+        );
+        beam.scaling.y = length;
+        // Point beam toward target
+        beam.lookAt(new Vector3(endX, 0, endZ));
+        beam.rotation.x += Math.PI / 2;
+
+        // Pulse the laser color
+        const pulse = 0.7 + Math.sin(this.time * 20 + i) * 0.3;
+        this.laserMaterial.alpha = 0.6 + pulse * 0.3;
+      }
+
+      // DDA raycast damage at laser impact point (like heat vision)
+      if (this.voxelWorld) {
+        const direction = new Vector3(
+          this.laserTargetPos.x - this.shipPosition.x,
+          -this.shipPosition.y,
+          this.laserTargetPos.z - this.shipPosition.z
+        ).normalize();
+
+        const hit = this.voxelWorld.collideRay(this.shipPosition, direction, 500);
+        if (hit.hit && hit.building) {
+          this.voxelWorld.applyDamageAtGrid(hit.building, hit.gridX, hit.gridY, hit.gridZ, 200);
+        } else {
+          // Hit the ground - damage buildings near impact
+          if (this.onBuildingDamage) {
+            this.onBuildingDamage(this.laserTargetPos, 15, 100 * deltaTime);
+          }
+        }
+
+        // Kill NPCs at laser impact
+        if (this.pedestrianSystem) this.pedestrianSystem.killNear(this.laserTargetPos, 10);
+        if (this.trafficSystem) this.trafficSystem.destroyNear(this.laserTargetPos, 10);
+      }
+    } else {
+      for (const beam of this.laserBeams) beam.setEnabled(false);
     }
   }
 
