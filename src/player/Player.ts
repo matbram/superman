@@ -883,16 +883,10 @@ export class Player {
     const hitThreshold = PLAYER_RADIUS * 4 + this.currentSpeed * 0.05;
 
     if (hitResult.hit && hitResult.mesh && hitResult.distance < hitThreshold) {
-      // Check mesh name - buildings start with "building_"
       const meshName = hitResult.mesh.name;
-
-      // Direct check without lowercase for speed
       const isBuilding = meshName.startsWith('building_');
 
-      // Exclude non-damageable parts
-      const isExcluded = meshName.includes('strip');
-
-      if (isBuilding && !isExcluded) {
+      if (isBuilding) {
         // Trigger building collision damage
         if (this.onBuildingCollision) {
           this.onBuildingCollision(hitResult.mesh, hitResult.point, this.currentSpeed);

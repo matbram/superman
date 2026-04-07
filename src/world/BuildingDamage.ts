@@ -369,7 +369,7 @@ export class BuildingDamage {
       );
 
       // Hide the original building mesh AND remove its collision
-      // so Superman can fly through holes in the voxelized version
+      console.log(`[Voxelize] ${building.name} → ${vb.gridWidth}x${vb.gridHeight}x${vb.gridDepth} grid, ${vb.getSolidCount()} blocks`);
       building.isVisible = false;
       building.checkCollisions = false;
       building.isPickable = false;
@@ -438,15 +438,35 @@ export class BuildingDamage {
    * Converts the building to voxels and punches a hole through it.
    */
   public applyImpactDamage(building: Mesh, impactPosition: Vector3, speed: number): void {
+    console.log(`[Damage] ${building.name} hit at speed=${speed.toFixed(1)}, pos=(${impactPosition.x.toFixed(1)},${impactPosition.y.toFixed(1)},${impactPosition.z.toFixed(1)})`);
     let vb: VoxelBuilding;
     let originalMesh: Mesh = building;
 
-    // Check if this is already a voxel block mesh (e.g. heat vision hitting voxelized building)
+    // Check if this is already a voxel block mesh
     const lookup = this.voxelMeshLookup.get(building);
     if (lookup) {
       vb = lookup.vb;
       originalMesh = lookup.original;
+    } else if (this.voxelBuildings.has(building)) {
+      // Already voxelized original mesh
+      vb = this.voxelBuildings.get(building)!;
     } else {
+      // Skip tiny decorative meshes (strips, rooftop features < 5 units tall)
+      // They shouldn't be voxelized - find the main building mesh nearby instead
+      const bounds = building.getBoundingInfo().boundingBox;
+      const height = bounds.maximumWorld.y - bounds.minimumWorld.y;
+      if (height < 5) {
+        // Small decorative piece - just hide it and spawn some debris
+        building.isVisible = false;
+        building.checkCollisions = false;
+        if (this.physicsManager) {
+          this.physicsManager.removeCollisionMesh(building);
+        }
+        this.spawnImpactDebris(impactPosition, speed, 3);
+        this.spawnDustCloud(impactPosition, 3, 0.5);
+        return;
+      }
+
       // Convert to voxel building on first hit
       vb = this.getOrCreateVoxelBuilding(building);
     }
@@ -458,7 +478,54 @@ export class BuildingDamage {
     if (removed.length > 0) {
       this.spawnVoxelDebris(removed, impactPosition, speed);
       this.spawnDustCloud(impactPosition, 5, 1);
+      this.spawnImpactShockwave(impactPosition, speed);
       this.processUnsupportedBlocks(vb, originalMesh, impactPosition);
+    }
+  }
+
+  /**
+   * Spawns a visual shockwave ring + dust burst at impact point.
+   * Shows the force of impact - scales with speed.
+   */
+  private spawnImpactShockwave(position: Vector3, speed: number): void {
+    // Expanding ring shockwave
+    const ringSize = 2 + speed * 0.05;
+    const ring = MeshBuilder.CreateTorus('shockwave', {
+      diameter: ringSize,
+      thickness: 0.3,
+      tessellation: 16,
+    }, this.scene);
+    ring.position.copyFrom(position);
+    ring.isPickable = false;
+
+    const ringMat = new StandardMaterial('shockwaveMat', this.scene);
+    ringMat.emissiveColor = new Color3(1, 0.8, 0.5);
+    ringMat.alpha = 0.7;
+    ringMat.disableLighting = true;
+    ring.material = ringMat;
+
+    // Animate expansion and fade
+    let ringLife = 0;
+    const maxLife = 0.4; // seconds
+    const expandSpeed = 15 + speed * 0.2;
+
+    const observer = this.scene.onBeforeRenderObservable.add(() => {
+      ringLife += this.scene.getEngine().getDeltaTime() / 1000;
+      const t = ringLife / maxLife;
+      const scale = 1 + t * expandSpeed * 0.1;
+      ring.scaling.setAll(scale);
+      ringMat.alpha = 0.7 * (1 - t);
+
+      if (ringLife >= maxLife) {
+        ring.dispose();
+        ringMat.dispose();
+        this.scene.onBeforeRenderObservable.remove(observer);
+      }
+    });
+
+    // Impact dust burst - bigger and more dramatic than regular dust
+    if (this.dustClouds.length < MAX_DUST_CLOUDS - 2) {
+      this.spawnDustCloud(position, 6 + speed * 0.03, 1.5);
     }
   }
 

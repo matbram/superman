@@ -290,11 +290,14 @@ export class PhysicsManager {
         const meshName = sweepResult.mesh?.name || '';
         const isBuilding = meshName.startsWith('building_');
         if (isBuilding) {
-          // Building collision: preserve most velocity so Superman punches through
-          // The damage system breaks the wall, next frame he continues
-          character.velocity = velocity.scale(0.85);
-          // Small push into the surface so next frame's sweep starts past the broken blocks
-          character.position.addInPlace(movementDir.scale(0.5));
+          // Building collision: Superman hits the surface, damage callback breaks blocks.
+          // Speed loss proportional to speed: fast = less loss, slow = more loss
+          const speed = velocity.length();
+          console.log(`[Physics] Building collision: ${meshName}, speed=${speed.toFixed(1)}, dist=${sweepResult.distance.toFixed(2)}`);
+          const keepRatio = speed > 80 ? 0.92 : speed > 40 ? 0.85 : 0.75;
+          character.velocity = velocity.scale(keepRatio);
+          // Push forward past the broken surface (at least one voxel width = 4 units)
+          character.position.addInPlace(movementDir.scale(5));
         } else {
           // Non-building (ground, sidewalk): deflect away
           const pushForce = sweepResult.normal.scale(2);
