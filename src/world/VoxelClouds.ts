@@ -15,15 +15,15 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import '@babylonjs/core/Meshes/thinInstanceMesh';
 
-const CLOUD_HEIGHT_MIN = 400;
-const CLOUD_HEIGHT_MAX = 550;
-const NUM_CLOUDS = 20;
-const VOXELS_PER_CLOUD = 60;   // More voxels per cloud for density
-const VOXEL_SIZE = 4;          // Smaller cubes look more cloud-like
-const DISPERSE_RADIUS = 50;    // How close before voxels part
-const DISPERSE_FORCE = 120;    // How fast voxels fly apart
-const RECOVER_SPEED = 5;       // How fast voxels drift back (slower = floatier)
-const CLOUD_SPREAD = 800;      // How far clouds extend from origin
+const CLOUD_HEIGHT_MIN = 380;
+const CLOUD_HEIGHT_MAX = 520;
+const NUM_CLOUDS = 40;
+const VOXELS_PER_CLOUD = 120;  // Dense fluffy clouds
+const VOXEL_SIZE = 2.5;        // Small cubes = softer look
+const DISPERSE_RADIUS = 50;
+const DISPERSE_FORCE = 120;
+const RECOVER_SPEED = 4;       // Slow recovery = floaty feel
+const CLOUD_SPREAD = 1200;     // Wide spread across the sky
 
 interface CloudVoxel {
   // Home position (where it wants to be)
