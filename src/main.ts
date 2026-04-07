@@ -8,6 +8,7 @@ import { createScene } from './core/scene';
 import { InputManager } from './input/inputManager';
 import { PhysicsManager } from './physics/physics';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Player } from './player/Player';
 import { City } from './world/City';
 import { Atmosphere } from './world/Atmosphere';
@@ -16,6 +17,7 @@ import { DayNightCycle } from './world/DayNightCycle';
 import { TrafficSystem } from './world/Traffic';
 import { StreetLife } from './world/StreetLife';
 import { PedestrianSystem } from './world/Pedestrians';
+import { VoxelClouds } from './world/VoxelClouds';
 import { AlienShip } from './world/AlienShip';
 import { Birds } from './world/Birds';
 import { Hud } from './ui/Hud';
@@ -39,6 +41,7 @@ class Game {
   private city: City;
   private atmosphere: Atmosphere;
   private voxelWorld: VoxelWorld;
+  private voxelClouds: VoxelClouds;
   private dayNightCycle: DayNightCycle;
   private traffic: TrafficSystem;
   private streetLife: StreetLife;
@@ -100,6 +103,7 @@ class Game {
 
     // Initialize atmosphere (clouds, sun, sky)
     this.atmosphere = new Atmosphere(this.sceneContext.scene);
+    this.voxelClouds = new VoxelClouds(this.sceneContext.scene);
 
     // Initialize building damage system
     this.voxelWorld = new VoxelWorld(this.sceneContext.scene, this.physicsManager);
@@ -293,6 +297,13 @@ class Game {
     );
     t1 = performance.now();
     this.perfTimings.atmosphere += t1 - t0;
+
+    // Update voxel clouds - pass disperser positions (Superman + UFO)
+    const dispersers: Vector3[] = [playerPos];
+    const ufoZone = this.alienShip.getGravityZone();
+    if (ufoZone) dispersers.push(new Vector3(ufoZone.center.x, 120, ufoZone.center.z));
+    this.voxelClouds.update(deltaTime, dispersers);
+    this.voxelClouds.recenter(playerPos);
 
     // Supersonic wake: damage already-voxelized buildings near flight path
     t0 = performance.now();
