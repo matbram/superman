@@ -53,10 +53,10 @@ export function createScene(engine: Engine): SceneContext {
   sunLight.intensity = 0.7;
   sunLight.position = new Vector3(100, 200, 100);
 
-  // Create shadow generator
-  const shadowGenerator = new ShadowGenerator(1024, sunLight);
+  // Create shadow generator - optimized settings
+  const shadowGenerator = new ShadowGenerator(512, sunLight);
   shadowGenerator.useBlurExponentialShadowMap = true;
-  shadowGenerator.blurKernel = 16;
+  shadowGenerator.blurKernel = 8;
   shadowGenerator.setDarkness(0.4);
 
   // Create main camera (will be controlled by CameraController)

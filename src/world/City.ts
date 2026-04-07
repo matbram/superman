@@ -288,11 +288,10 @@ export class City {
       const dx = Math.abs(chunk.chunkX - playerChunkX);
       const dz = Math.abs(chunk.chunkZ - playerChunkZ);
 
-      // Smooth fade-in for buildings
+      // Smooth fade-in for buildings - only iterate meshes for fading chunks
       if (!chunk.fullyVisible) {
-        chunk.fadeProgress = Math.min(1, chunk.fadeProgress + 0.03);  // Fade in over ~33 frames
+        chunk.fadeProgress = Math.min(1, chunk.fadeProgress + 0.03);
 
-        // Apply visibility to all building meshes
         for (const mesh of chunk.collisionMeshes) {
           if (mesh.name.startsWith('building_')) {
             mesh.visibility = chunk.fadeProgress;
@@ -301,12 +300,16 @@ export class City {
 
         if (chunk.fadeProgress >= 1) {
           chunk.fullyVisible = true;
+          // Freeze world matrices on fully visible buildings - they never move
+          for (const mesh of chunk.collisionMeshes) {
+            mesh.freezeWorldMatrix();
+          }
         }
       }
 
       // Unload distant chunks
       if (dx > UNLOAD_DISTANCE || dz > UNLOAD_DISTANCE) {
-        if (now - chunk.lastAccess > 5000) {  // Longer delay before unloading
+        if (now - chunk.lastAccess > 5000) {
           this.unloadChunk(key);
         }
       }

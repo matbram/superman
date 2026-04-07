@@ -21,8 +21,11 @@ export class DebugOverlay {
   private inputElement: HTMLElement;
 
   private isVisible: boolean = false;
-  private fpsBuffer: number[] = [];
+  private fpsBuffer: Float32Array;
+  private fpsBufferIdx: number = 0;
+  private fpsBufferFilled: boolean = false;
   private readonly FPS_BUFFER_SIZE = 30;
+  private frameCounter: number = 0;
 
   constructor() {
     this.overlayElement = document.getElementById('debugOverlay')!;
@@ -32,6 +35,8 @@ export class DebugOverlay {
     this.positionElement = document.getElementById('debugPosition')!;
     this.velocityElement = document.getElementById('debugVelocity')!;
     this.inputElement = document.getElementById('debugInput')!;
+
+    this.fpsBuffer = new Float32Array(this.FPS_BUFFER_SIZE);
 
     if (!this.overlayElement) {
       console.error('Debug overlay element not found');
@@ -51,15 +56,21 @@ export class DebugOverlay {
   ): void {
     if (!this.isVisible) return;
 
-    // Calculate smoothed FPS
-    const currentFps = engine.getFps();
-    this.fpsBuffer.push(currentFps);
-    if (this.fpsBuffer.length > this.FPS_BUFFER_SIZE) {
-      this.fpsBuffer.shift();
-    }
-    const avgFps = this.fpsBuffer.reduce((a, b) => a + b, 0) / this.fpsBuffer.length;
+    // Throttle debug overlay DOM updates to every 5th frame
+    this.frameCounter++;
+    if (this.frameCounter % 5 !== 0) return;
 
-    // Update elements
+    // Ring buffer FPS - O(1) instead of O(n) shift()
+    const currentFps = engine.getFps();
+    this.fpsBuffer[this.fpsBufferIdx] = currentFps;
+    this.fpsBufferIdx = (this.fpsBufferIdx + 1) % this.FPS_BUFFER_SIZE;
+    if (!this.fpsBufferFilled && this.fpsBufferIdx === 0) this.fpsBufferFilled = true;
+
+    const count = this.fpsBufferFilled ? this.FPS_BUFFER_SIZE : this.fpsBufferIdx;
+    let sum = 0;
+    for (let i = 0; i < count; i++) sum += this.fpsBuffer[i];
+    const avgFps = count > 0 ? sum / count : 0;
+
     this.fpsElement.textContent = avgFps.toFixed(1);
     this.stateElement.textContent = state;
     this.speedElement.textContent = speed.toFixed(1) + ' m/s';
@@ -67,7 +78,6 @@ export class DebugOverlay {
     this.velocityElement.textContent = this.formatVector(velocity);
     this.inputElement.textContent = inputInfo;
 
-    // Color code FPS
     if (avgFps >= 55) {
       this.fpsElement.style.color = '#0f0';
     } else if (avgFps >= 30) {

@@ -403,6 +403,10 @@ export class AlienShip {
     return this.gravityZone.center.clone();
   }
 
+  // Reusable objects to avoid per-frame allocations
+  private _beamCoreColor = new Color3();
+  private _coreColor = new Color3();
+
   /**
    * Updates the alien ship and gravity beam effects
    */
@@ -416,60 +420,50 @@ export class AlienShip {
     }
     this.gravityZone.phase = this.beamPhase;
 
-    // Animate beam pulsing
+    // Animate beam pulsing - reuse Color3 objects
     const beamPulse = 0.8 + Math.sin(this.time * 3) * 0.2;
     this.beamMaterial.alpha = 0.12 + beamPulse * 0.08;
-    this.beamCoreMaterial.emissiveColor = new Color3(
-      0.4 + beamPulse * 0.2,
-      0.5 + beamPulse * 0.2,
-      1.0
-    );
+    this._beamCoreColor.r = 0.4 + beamPulse * 0.2;
+    this._beamCoreColor.g = 0.5 + beamPulse * 0.2;
+    this._beamCoreColor.b = 1.0;
+    this.beamCoreMaterial.emissiveColor = this._beamCoreColor;
 
     // Animate engine glows
     for (let i = 0; i < this.engineGlows.length; i++) {
-      const engine = this.engineGlows[i];
       const pulse = 0.8 + Math.sin(this.time * 4 + i * 0.5) * 0.2;
-      engine.scaling.setAll(pulse);
+      this.engineGlows[i].scaling.setAll(pulse);
     }
 
-    // Animate core glow
+    // Animate core glow - reuse Color3
     const corePulse = 0.9 + Math.sin(this.time * 2) * 0.1;
-    const coreMat = this.hullCore.material as StandardMaterial;
-    coreMat.emissiveColor = new Color3(
-      0.3 * corePulse,
-      0.4 * corePulse,
-      1.0 * corePulse
-    );
+    this._coreColor.r = 0.3 * corePulse;
+    this._coreColor.g = 0.4 * corePulse;
+    this._coreColor.b = 1.0 * corePulse;
+    (this.hullCore.material as StandardMaterial).emissiveColor = this._coreColor;
 
     // Subtle ship rotation
     this.root.rotation.y += deltaTime * 0.05;
 
-    // Update rising debris particles gravity based on oscillation
+    // Update rising debris particles gravity - set components directly
     const gravityOscillation = Math.sin(this.beamPhase);
-    // When gravity oscillation is positive (pushing down phase), particles go down
-    // When negative (pulling up phase), particles rise
-    this.risingDebrisParticles.gravity = new Vector3(0, -gravityOscillation * 25, 0);
+    this.risingDebrisParticles.gravity.set(0, -gravityOscillation * 25, 0);
 
-    // Also modulate particle direction
     if (gravityOscillation < 0) {
-      // Pulling up - particles rise more
-      this.risingDebrisParticles.direction1 = new Vector3(-5, 20, -5);
-      this.risingDebrisParticles.direction2 = new Vector3(5, 50, 5);
+      this.risingDebrisParticles.direction1.set(-5, 20, -5);
+      this.risingDebrisParticles.direction2.set(5, 50, 5);
       this.risingDebrisParticles.emitRate = 60;
     } else {
-      // Pushing down - particles fall
-      this.risingDebrisParticles.direction1 = new Vector3(-5, -10, -5);
-      this.risingDebrisParticles.direction2 = new Vector3(5, 10, 5);
+      this.risingDebrisParticles.direction1.set(-5, -10, -5);
+      this.risingDebrisParticles.direction2.set(5, 10, 5);
       this.risingDebrisParticles.emitRate = 30;
     }
 
     // Apply continuous damage to buildings in beam zone
-    // Use high damage value to ensure buildings get destroyed
     if (this.onBuildingDamage) {
       this.onBuildingDamage(
         this.gravityZone.center,
         BEAM_DAMAGE_RADIUS,
-        200 * deltaTime  // High continuous damage to tear buildings apart
+        200 * deltaTime
       );
     }
   }

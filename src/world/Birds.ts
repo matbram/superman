@@ -217,6 +217,10 @@ export class Birds {
     };
   }
 
+  // Reusable vectors to avoid per-frame allocations
+  private _fleeDir = new Vector3();
+  private static readonly BIRD_SPAWN_RADIUS_SQ = BIRD_SPAWN_RADIUS * BIRD_SPAWN_RADIUS;
+
   /**
    * Updates all birds
    */
@@ -225,26 +229,38 @@ export class Birds {
       // Update turn timer
       flock.turnTimer -= deltaTime;
       if (flock.turnTimer <= 0) {
-        // Pick new random direction
-        flock.targetDirection = new Vector3(
+        flock.targetDirection.set(
           Math.random() - 0.5,
           (Math.random() - 0.5) * 0.3,
           Math.random() - 0.5
-        ).normalize();
+        );
+        flock.targetDirection.normalize();
         flock.turnTimer = 3 + Math.random() * 5;
       }
 
-      // Smoothly turn towards target direction
-      flock.direction = Vector3.Lerp(flock.direction, flock.targetDirection, deltaTime * 0.5);
+      // Smoothly turn towards target direction - Lerp in place
+      const lerpFactor = deltaTime * 0.5;
+      const invLerp = 1 - lerpFactor;
+      flock.direction.x = flock.direction.x * invLerp + flock.targetDirection.x * lerpFactor;
+      flock.direction.y = flock.direction.y * invLerp + flock.targetDirection.y * lerpFactor;
+      flock.direction.z = flock.direction.z * invLerp + flock.targetDirection.z * lerpFactor;
       flock.direction.normalize();
 
-      // Avoid player - flee if too close
-      const toPlayer = playerPosition.subtract(flock.centerPosition);
-      const playerDist = toPlayer.length();
-      if (playerDist < 50) {
-        // Flee from player
-        const fleeDir = flock.centerPosition.subtract(playerPosition).normalize();
-        flock.direction = Vector3.Lerp(flock.direction, fleeDir, deltaTime * 3);
+      // Avoid player - use squared distance to skip sqrt
+      const tpx = playerPosition.x - flock.centerPosition.x;
+      const tpy = playerPosition.y - flock.centerPosition.y;
+      const tpz = playerPosition.z - flock.centerPosition.z;
+      const playerDistSq = tpx * tpx + tpy * tpy + tpz * tpz;
+
+      if (playerDistSq < 2500) { // 50^2
+        // Flee from player - reuse vector
+        this._fleeDir.set(-tpx, -tpy, -tpz);
+        this._fleeDir.normalize();
+        const fleeLerp = deltaTime * 3;
+        const fleeInv = 1 - fleeLerp;
+        flock.direction.x = flock.direction.x * fleeInv + this._fleeDir.x * fleeLerp;
+        flock.direction.y = flock.direction.y * fleeInv + this._fleeDir.y * fleeLerp;
+        flock.direction.z = flock.direction.z * fleeInv + this._fleeDir.z * fleeLerp;
         flock.direction.normalize();
       }
 
@@ -256,38 +272,38 @@ export class Birds {
       }
       flock.direction.normalize();
 
-      // Move flock center
-      flock.centerPosition.addInPlace(flock.direction.scale(flock.speed * deltaTime));
+      // Move flock center - inline to avoid scale() allocation
+      const moveScale = flock.speed * deltaTime;
+      flock.centerPosition.x += flock.direction.x * moveScale;
+      flock.centerPosition.y += flock.direction.y * moveScale;
+      flock.centerPosition.z += flock.direction.z * moveScale;
 
-      // Respawn flock if too far from player
-      const distFromPlayer = Vector3.Distance(flock.centerPosition, playerPosition);
-      if (distFromPlayer > BIRD_SPAWN_RADIUS) {
-        // Respawn ahead of player
+      // Respawn flock if too far from player - use squared distance
+      const dfx = flock.centerPosition.x - playerPosition.x;
+      const dfy = flock.centerPosition.y - playerPosition.y;
+      const dfz = flock.centerPosition.z - playerPosition.z;
+      if (dfx * dfx + dfy * dfy + dfz * dfz > Birds.BIRD_SPAWN_RADIUS_SQ) {
         const angle = Math.random() * Math.PI * 2;
-        flock.centerPosition = playerPosition.add(new Vector3(
-          Math.cos(angle) * BIRD_SPAWN_RADIUS * 0.7,
-          BIRD_HEIGHT_MIN + Math.random() * (BIRD_HEIGHT_MAX - BIRD_HEIGHT_MIN),
-          Math.sin(angle) * BIRD_SPAWN_RADIUS * 0.7
-        ));
+        flock.centerPosition.x = playerPosition.x + Math.cos(angle) * BIRD_SPAWN_RADIUS * 0.7;
+        flock.centerPosition.y = BIRD_HEIGHT_MIN + Math.random() * (BIRD_HEIGHT_MAX - BIRD_HEIGHT_MIN);
+        flock.centerPosition.z = playerPosition.z + Math.sin(angle) * BIRD_SPAWN_RADIUS * 0.7;
       }
 
-      // Update each bird in flock
+      // Precompute facing direction once per flock
+      const facingY = Math.atan2(flock.direction.x, flock.direction.z);
+      const facingX = -flock.direction.y * 0.5;
+
+      // Update each bird in flock - set position components directly
       for (let i = 0; i < flock.birds.length; i++) {
         const bird = flock.birds[i];
 
-        // Calculate individual position with slight offset
-        const offset = new Vector3(
-          Math.sin(bird.wingPhase * 0.3 + i) * 3,
-          Math.sin(bird.wingPhase * 0.2 + i * 0.5) * 2,
-          Math.cos(bird.wingPhase * 0.25 + i) * 3
-        );
-        bird.root.position = flock.centerPosition.add(offset);
+        bird.root.position.x = flock.centerPosition.x + Math.sin(bird.wingPhase * 0.3 + i) * 3;
+        bird.root.position.y = flock.centerPosition.y + Math.sin(bird.wingPhase * 0.2 + i * 0.5) * 2;
+        bird.root.position.z = flock.centerPosition.z + Math.cos(bird.wingPhase * 0.25 + i) * 3;
 
-        // Face direction of travel
-        bird.root.rotation.y = Math.atan2(flock.direction.x, flock.direction.z);
-        bird.root.rotation.x = -flock.direction.y * 0.5;
+        bird.root.rotation.y = facingY;
+        bird.root.rotation.x = facingX;
 
-        // Flap wings
         bird.wingPhase += WING_FLAP_SPEED * deltaTime;
         const flapAngle = Math.sin(bird.wingPhase) * 0.6;
         bird.leftWing.rotation.z = flapAngle;

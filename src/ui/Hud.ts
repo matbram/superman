@@ -18,6 +18,8 @@ export class Hud {
   private boostIndicator: HTMLElement;
 
   private isVisible: boolean = true;
+  private frameCounter: number = 0;
+  private lastState: PlayerStateType = PlayerStateType.Grounded;
 
   constructor() {
     this.hudElement = document.getElementById('hud')!;
@@ -41,19 +43,24 @@ export class Hud {
   ): void {
     if (!this.isVisible) return;
 
-    // Update mode display
-    this.modeElement.textContent = this.getStateDisplayName(stateType);
-    this.modeElement.style.color = this.getStateColor(stateType);
+    // Throttle DOM updates to every 3rd frame
+    this.frameCounter++;
+    const stateChanged = stateType !== this.lastState;
 
-    // Update speed display
+    if (this.frameCounter % 3 !== 0 && !stateChanged) return;
+
+    if (stateChanged) {
+      this.lastState = stateType;
+      this.modeElement.textContent = this.getStateDisplayName(stateType);
+      this.modeElement.style.color = this.getStateColor(stateType);
+    }
+
     const displaySpeed = Math.round(speed);
     this.speedElement.textContent = displaySpeed.toString();
 
-    // Update speed bar
     const speedPercent = Math.min(100, (speed / MAX_DISPLAY_SPEED) * 100);
     this.speedFillElement.style.width = `${speedPercent}%`;
 
-    // Update boost indicator
     if (isBoostActive) {
       this.boostIndicator.classList.add('active');
     } else {

@@ -366,6 +366,12 @@ export class BuildingDamage {
    * Applies supersonic wake damage to nearby buildings (no direct contact needed)
    * Breaks off pieces from buildings leaving holes - NO full destruction
    */
+  // Reusable vectors for wake damage calculations
+  private _flyDir = new Vector3();
+  private _toBuilding = new Vector3();
+  private _chunkToPlayer = new Vector3();
+  private _impactPos = new Vector3();
+
   public applySupersonicWakeDamage(
     playerPosition: Vector3,
     playerVelocity: Vector3,
@@ -374,33 +380,31 @@ export class BuildingDamage {
   ): void {
     if (speed < WAKE_SPEED_THRESHOLD) return;
 
-    // Radius that increases with speed
     const wakeRadius = WAKE_BASE_RADIUS + (speed - WAKE_SPEED_THRESHOLD) * 0.3;
+    const wakeRadiusSq = wakeRadius * wakeRadius;
 
-    // Get normalized flight direction
-    const flyDir = playerVelocity.clone();
-    flyDir.y = 0;
-    if (flyDir.length() < 0.1) return;
-    flyDir.normalize();
+    // Get normalized flight direction - reuse vector
+    this._flyDir.set(playerVelocity.x, 0, playerVelocity.z);
+    const flyLen = this._flyDir.length();
+    if (flyLen < 0.1) return;
+    this._flyDir.scaleInPlace(1 / flyLen);
 
     for (const building of buildings) {
       const buildingPos = building.position;
       const dx = buildingPos.x - playerPosition.x;
       const dz = buildingPos.z - playerPosition.z;
-      const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+      const horizontalDistSq = dx * dx + dz * dz;
 
-      if (horizontalDist < wakeRadius && horizontalDist > 8) {
-        // Check if building is to the SIDE of the player (not in front/behind)
-        const toBuilding = new Vector3(dx, 0, dz).normalize();
+      if (horizontalDistSq < wakeRadiusSq && horizontalDistSq > 64) { // 8^2
+        const horizontalDist = Math.sqrt(horizontalDistSq);
+        const invDist = 1 / horizontalDist;
+        this._toBuilding.set(dx * invDist, 0, dz * invDist);
 
-        // Dot product - 0 means perpendicular (exactly beside player)
-        const dot = Math.abs(Vector3.Dot(toBuilding, flyDir));
+        const dot = Math.abs(Vector3.Dot(this._toBuilding, this._flyDir));
 
-        // Only affect buildings that are mostly to the side
         if (dot < 0.5) {
           const structure = this.getOrCreateStructure(building);
 
-          // Only break 1-3 chunks at a time - creates holes, not destruction
           const proximityFactor = 1 - (horizontalDist / wakeRadius);
           const chunksToBreak = Math.min(3, Math.floor(proximityFactor * 2) + 1);
 
@@ -409,17 +413,14 @@ export class BuildingDamage {
             if (bp.broken) continue;
             if (broken >= chunksToBreak) break;
 
-            // Break chunks on the side facing the player
             const chunkWorldX = structure.originalPosition.x + bp.relativePosition.x * 20;
             const chunkWorldZ = structure.originalPosition.z + bp.relativePosition.z * 20;
-            const chunkToPlayer = new Vector3(
-              playerPosition.x - chunkWorldX,
-              0,
-              playerPosition.z - chunkWorldZ
-            ).normalize();
+            const ctpX = playerPosition.x - chunkWorldX;
+            const ctpZ = playerPosition.z - chunkWorldZ;
+            const ctpLen = Math.sqrt(ctpX * ctpX + ctpZ * ctpZ) || 1;
+            this._chunkToPlayer.set(ctpX / ctpLen, 0, ctpZ / ctpLen);
 
-            // Only break chunks facing the player - creates holes on that side
-            if (Vector3.Dot(chunkToPlayer, toBuilding) > 0.3) {
+            if (Vector3.Dot(this._chunkToPlayer, this._toBuilding) > 0.3) {
               this.breakChunk(structure, bp, playerPosition, speed * 0.5);
               broken++;
             }
@@ -427,7 +428,8 @@ export class BuildingDamage {
 
           if (broken > 0) {
             structure.shakeTime = Math.min(0.8, structure.shakeTime + 0.3);
-            this.spawnImpactDebris(buildingPos.add(new Vector3(0, 15, 0)), speed * 0.3, broken * 2);
+            this._impactPos.set(buildingPos.x, buildingPos.y + 15, buildingPos.z);
+            this.spawnImpactDebris(this._impactPos, speed * 0.3, broken * 2);
           }
         }
       }
@@ -860,18 +862,16 @@ export class BuildingDamage {
 
       // If settled, check for time-based and distance-based cleanup
       if (piece.settled) {
-        // Time-based cleanup - remove after 10 seconds regardless of distance
         if (now - piece.settleTime > DEBRIS_SETTLE_CLEANUP_TIME) {
           piece.mesh.dispose();
           this.debris.splice(i, 1);
           continue;
         }
-        // Distance-based cleanup - remove if player is far away
+        // Distance-based cleanup - use squared distance to avoid sqrt
         if (playerPosition) {
           const dx = piece.mesh.position.x - playerPosition.x;
           const dz = piece.mesh.position.z - playerPosition.z;
-          const dist = Math.sqrt(dx * dx + dz * dz);
-          if (dist > DEBRIS_CLEANUP_DISTANCE) {
+          if (dx * dx + dz * dz > DEBRIS_CLEANUP_DISTANCE * DEBRIS_CLEANUP_DISTANCE) {
             piece.mesh.dispose();
             this.debris.splice(i, 1);
           }
@@ -887,22 +887,21 @@ export class BuildingDamage {
         const zoneCenter = this.gravityZone.center;
         const dx = piece.mesh.position.x - zoneCenter.x;
         const dz = piece.mesh.position.z - zoneCenter.z;
-        const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+        const horizontalDistSq = dx * dx + dz * dz;
+        const radiusSq = this.gravityZone.radius * this.gravityZone.radius;
 
-        if (horizontalDist < this.gravityZone.radius && piece.mesh.position.y < 230) {
+        if (horizontalDistSq < radiusSq && piece.mesh.position.y < 230) {
           inGravityZone = true;
           currentGravity = this.getGravityAtPosition(piece.mesh.position);
 
-          // In gravity zone, debris never fully settles - unsettle if it was settled
           if (piece.settled) {
             piece.settled = false;
-            // Give it a small velocity to start moving again
-            piece.velocity = new Vector3(
+            piece.velocity.set(
               (Math.random() - 0.5) * 5,
               Math.random() * 10 + 5,
               (Math.random() - 0.5) * 5
             );
-            piece.angularVelocity = new Vector3(
+            piece.angularVelocity.set(
               (Math.random() - 0.5) * 3,
               (Math.random() - 0.5) * 2,
               (Math.random() - 0.5) * 3
@@ -913,34 +912,33 @@ export class BuildingDamage {
 
       piece.velocity.y += currentGravity * deltaTime;
 
-      // Air resistance for large chunks (less resistance in gravity zone for floatier feel)
       if (piece.isChunk) {
         const resistanceFactor = inGravityZone ? 0.3 : 0.5;
         piece.velocity.scaleInPlace(1 - resistanceFactor * deltaTime);
       }
 
-      // Update position
-      piece.mesh.position.addInPlace(piece.velocity.scale(deltaTime));
+      // Update position - inline to avoid scale() allocation
+      piece.mesh.position.x += piece.velocity.x * deltaTime;
+      piece.mesh.position.y += piece.velocity.y * deltaTime;
+      piece.mesh.position.z += piece.velocity.z * deltaTime;
 
-      // Update rotation (faster spinning in gravity zone)
-      const rotationMultiplier = inGravityZone ? 1.5 : 1.0;
-      piece.mesh.rotation.x += piece.angularVelocity.x * deltaTime * rotationMultiplier;
-      piece.mesh.rotation.y += piece.angularVelocity.y * deltaTime * rotationMultiplier;
-      piece.mesh.rotation.z += piece.angularVelocity.z * deltaTime * rotationMultiplier;
+      // Update rotation
+      const rotMul = (inGravityZone ? 1.5 : 1.0) * deltaTime;
+      piece.mesh.rotation.x += piece.angularVelocity.x * rotMul;
+      piece.mesh.rotation.y += piece.angularVelocity.y * rotMul;
+      piece.mesh.rotation.z += piece.angularVelocity.z * rotMul;
 
-      // Ground collision - debris can be lifted back up in gravity zone
+      // Ground collision
       const groundLevel = piece.isChunk ? 1 : 0.3;
       if (piece.mesh.position.y < groundLevel) {
         const impactSpeed = Math.abs(piece.velocity.y);
-
         piece.mesh.position.y = groundLevel;
 
         if (inGravityZone) {
-          // In gravity zone, bounce higher and more erratically
           piece.velocity.y = Math.abs(piece.velocity.y) * 0.5 + 8;
           piece.velocity.x += (Math.random() - 0.5) * 10;
           piece.velocity.z += (Math.random() - 0.5) * 10;
-          piece.angularVelocity = new Vector3(
+          piece.angularVelocity.set(
             (Math.random() - 0.5) * 5,
             (Math.random() - 0.5) * 3,
             (Math.random() - 0.5) * 5
@@ -952,43 +950,43 @@ export class BuildingDamage {
           piece.angularVelocity.scaleInPlace(0.4);
         }
 
-        // Spawn dust on ground impact (only for large chunks)
         if (impactSpeed > 15 && piece.isChunk) {
           this.spawnDustCloud(piece.mesh.position, 3, 0.5);
         }
 
-        // Check if settled (very slow) - only if NOT in gravity zone
-        if (!inGravityZone && piece.velocity.length() < 1) {
-          piece.settled = true;
-          piece.settleTime = now;  // Record when it settled for time-based cleanup
-          piece.velocity = Vector3.Zero();
-          piece.angularVelocity = Vector3.Zero();
+        // Check if settled - use squared length to avoid sqrt
+        if (!inGravityZone) {
+          const vLenSq = piece.velocity.x * piece.velocity.x
+            + piece.velocity.y * piece.velocity.y
+            + piece.velocity.z * piece.velocity.z;
+          if (vLenSq < 1) { // 1^2
+            piece.settled = true;
+            piece.settleTime = now;
+            piece.velocity.setAll(0);
+            piece.angularVelocity.setAll(0);
+          }
         }
       }
 
-      // Height cap - prevent debris from going too high
+      // Height cap
       if (inGravityZone && piece.mesh.position.y > 180) {
         piece.mesh.position.y = 180;
         piece.velocity.y = -Math.abs(piece.velocity.y) * 0.3;
       }
     }
 
-    // Update building shake effects
+    // Update building shake effects - reuse vectors
     for (const [building, structure] of this.buildingStructures) {
       if (structure.shakeTime > 0) {
         structure.shakeTime -= deltaTime;
 
-        const shakeIntensity = structure.shakeTime * 0.4;
-        structure.shakeOffset = new Vector3(
-          (Math.random() - 0.5) * shakeIntensity,
-          0,
-          (Math.random() - 0.5) * shakeIntensity
-        );
-
-        building.position = structure.originalPosition.add(structure.shakeOffset);
-
         if (structure.shakeTime <= 0) {
-          building.position = structure.originalPosition.clone();
+          building.position.copyFrom(structure.originalPosition);
+        } else {
+          const shakeIntensity = structure.shakeTime * 0.4;
+          building.position.x = structure.originalPosition.x + (Math.random() - 0.5) * shakeIntensity;
+          building.position.y = structure.originalPosition.y;
+          building.position.z = structure.originalPosition.z + (Math.random() - 0.5) * shakeIntensity;
         }
       }
     }
