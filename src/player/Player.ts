@@ -146,27 +146,33 @@ export class Player {
 
     // Emission from player position (use voxel character body as emitter)
     this.speedParticles.emitter = this.voxelCharacter.getEmitterMesh();
-    this.speedParticles.minEmitBox = new Vector3(-0.5, -0.5, -0.5);
-    this.speedParticles.maxEmitBox = new Vector3(0.5, 0.5, 0.5);
+    // Wide emit area - streaks appear all around Superman, not just center
+    this.speedParticles.minEmitBox = new Vector3(-4, -3, -2);
+    this.speedParticles.maxEmitBox = new Vector3(4, 3, 2);
 
-    // Particle properties
-    this.speedParticles.color1 = new Color3(1, 1, 1).toColor4(0.5);
-    this.speedParticles.color2 = new Color3(0.8, 0.9, 1).toColor4(0.3);
+    // Wind streak particles - long white lines that stream past
+    this.speedParticles.color1 = new Color3(1, 1, 1).toColor4(0.7);
+    this.speedParticles.color2 = new Color3(0.85, 0.9, 1).toColor4(0.5);
     this.speedParticles.colorDead = new Color3(1, 1, 1).toColor4(0);
 
-    this.speedParticles.minSize = 0.05;
-    this.speedParticles.maxSize = 0.15;
+    // Stretch particles into long streaks (width vs height ratio)
+    this.speedParticles.minSize = 0.1;
+    this.speedParticles.maxSize = 0.4;
+    this.speedParticles.minScaleX = 1;
+    this.speedParticles.maxScaleX = 3;
+    this.speedParticles.minScaleY = 8;  // Long streaks!
+    this.speedParticles.maxScaleY = 20;
 
-    this.speedParticles.minLifeTime = 0.1;
-    this.speedParticles.maxLifeTime = 0.3;
+    this.speedParticles.minLifeTime = 0.08;
+    this.speedParticles.maxLifeTime = 0.25;
 
-    this.speedParticles.emitRate = 0; // Start with no particles
+    this.speedParticles.emitRate = 0;
 
     this.speedParticles.blendMode = ParticleSystem.BLENDMODE_ADD;
 
-    // Direction (behind player)
-    this.speedParticles.direction1 = new Vector3(-1, -0.5, -1);
-    this.speedParticles.direction2 = new Vector3(1, 0.5, -1);
+    // Direction (stream backward past the player)
+    this.speedParticles.direction1 = new Vector3(-2, -1, -3);
+    this.speedParticles.direction2 = new Vector3(2, 1, -3);
     this.speedParticles.minEmitPower = 5;
     this.speedParticles.maxEmitPower = 10;
 
@@ -723,8 +729,13 @@ export class Player {
     // Speed particles (subtle at lower speeds)
     if (this.speedParticles) {
       if (this.currentSpeed > SPEED_PARTICLE_THRESHOLD && this.isFlightMode) {
-        const intensity = (this.currentSpeed - SPEED_PARTICLE_THRESHOLD) / 50;
-        this.speedParticles.emitRate = Math.min(100, intensity * 50);
+        const intensity = (this.currentSpeed - SPEED_PARTICLE_THRESHOLD) / 80;
+        this.speedParticles.emitRate = Math.min(200, intensity * 80);
+        // Scale streak length with speed
+        this.speedParticles.minScaleY = 8 + intensity * 10;
+        this.speedParticles.maxScaleY = 20 + intensity * 20;
+        this.speedParticles.minEmitPower = 5 + intensity * 20;
+        this.speedParticles.maxEmitPower = 15 + intensity * 30;
       } else {
         this.speedParticles.emitRate = 0;
       }

@@ -123,17 +123,17 @@ function createSkyGradient(scene: Scene): void {
   // Initial position - DayNightCycle will update this
   sun.position = new Vector3(1500, 50, -500);
 
-  // Sun glow halo - huge soft glow around the sun
+  // Sun glow halo - subtle warm haze around the sun (NOT a second sun)
   const sunGlow = MeshBuilder.CreateSphere(
     'sunGlow',
-    { diameter: 900, segments: 8 },
+    { diameter: 600, segments: 8 },
     scene
   );
   sunGlow.infiniteDistance = true;
   const glowMat = new StandardMaterial('sunGlowMat', scene);
   glowMat.disableLighting = true;
-  glowMat.emissiveColor = new Color3(1.0, 0.7, 0.3);
-  glowMat.alpha = 0.12;
+  glowMat.emissiveColor = new Color3(1.0, 0.75, 0.4);
+  glowMat.alpha = 0.06; // Very subtle - just a warm haze, not a visible sphere
   sunGlow.material = glowMat;
   sunGlow.isPickable = false;
   sunGlow.position = sun.position.clone();

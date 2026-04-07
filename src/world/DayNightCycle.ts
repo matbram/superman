@@ -133,9 +133,12 @@ export class DayNightCycle {
   }
 
   public update(deltaTime: number): void {
-    // Frozen at golden hour sunset - no time progression
-    // The sunset lighting is the iconic Superman look
-    this.timeOfDay = 17.8;
+    // Frozen at sunrise - the heroic dawn look
+    this.timeOfDay = 6.5;
+
+    // Moon is ALWAYS hidden at sunrise
+    this.moonMesh.setEnabled(false);
+    this.moonLight.intensity = 0;
 
     const t = this.timeOfDay;
 

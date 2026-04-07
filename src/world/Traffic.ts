@@ -1,178 +1,261 @@
 /**
- * Traffic System - Cars moving along streets using thin instances.
+ * Traffic System - Voxel vehicles driving along the street grid.
  *
- * All cars are rendered as thin instances of a single mesh (ONE draw call).
- * Cars follow the street grid, moving in straight lines.
- * At night, cars get headlight glow.
+ * Vehicles are built from a few boxes (voxel-style body + cabin + wheels).
+ * They follow avenues (N-S) and cross streets (E-W) in the city grid.
+ * Each vehicle is a small group of meshes parented to a root transform.
  */
 
 import { Scene } from '@babylonjs/core/scene';
-import { Vector3, Matrix, Color3 } from '@babylonjs/core/Maths/math';
+import { Vector3, Color3 } from '@babylonjs/core/Maths/math';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
-import '@babylonjs/core/Meshes/thinInstanceMesh';
+import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 
-const MAX_CARS = 80;
-const CAR_SPEED = 12;         // ~27 mph, urban speed
-const CAR_WIDTH = 2.5;
-const CAR_HEIGHT = 1.8;
-const CAR_LENGTH = 5;
-const SPAWN_RADIUS = 400;     // Spawn cars within this radius of player
-const DESPAWN_RADIUS = 500;   // Remove cars beyond this
-const SPAWN_INTERVAL = 0.3;   // Seconds between spawn attempts
+const MAX_VEHICLES = 40;
+const VEHICLE_SPEED = 10;       // ~22 mph urban speed
+const SPAWN_RADIUS = 300;
+const DESPAWN_RADIUS = 400;
+const SPAWN_INTERVAL = 0.5;
 
-interface Car {
+// Street grid constants (must match City.ts)
+const AVENUE_WIDTH = 40;
+const STREET_WIDTH = 24;
+const BLOCK_WIDTH = 70;
+const BLOCK_DEPTH_AVG = 160;
+
+interface Vehicle {
+  root: TransformNode;
+  meshes: Mesh[];
   x: number;
   z: number;
-  dirX: number;   // Movement direction X (-1, 0, or 1)
-  dirZ: number;   // Movement direction Z (-1, 0, or 1)
+  dirX: number;
+  dirZ: number;
   speed: number;
-  colorIndex: number;
+  laneOffset: number;  // Offset within the street (left/right lane)
+}
+
+// Shared materials (created once)
+let vehicleMaterials: StandardMaterial[] | null = null;
+let wheelMaterial: StandardMaterial | null = null;
+let windowMaterial: StandardMaterial | null = null;
+
+function createVehicleMaterials(scene: Scene): void {
+  if (vehicleMaterials) return;
+
+  vehicleMaterials = [];
+  const colors = [
+    new Color3(0.75, 0.1, 0.1),   // Red
+    new Color3(0.1, 0.15, 0.6),   // Blue
+    new Color3(0.9, 0.9, 0.88),   // White
+    new Color3(0.08, 0.08, 0.08), // Black
+    new Color3(0.9, 0.8, 0.15),   // Yellow (taxi)
+    new Color3(0.55, 0.55, 0.6),  // Silver
+    new Color3(0.15, 0.4, 0.15),  // Green
+    new Color3(0.5, 0.25, 0.1),   // Brown
+  ];
+  for (const c of colors) {
+    const m = new StandardMaterial('vehMat', scene);
+    m.diffuseColor = c;
+    m.specularColor = new Color3(0.2, 0.2, 0.2);
+    m.freeze();
+    vehicleMaterials.push(m);
+  }
+
+  wheelMaterial = new StandardMaterial('wheelMat', scene);
+  wheelMaterial.diffuseColor = new Color3(0.1, 0.1, 0.1);
+  wheelMaterial.freeze();
+
+  windowMaterial = new StandardMaterial('vehWindowMat', scene);
+  windowMaterial.diffuseColor = new Color3(0.15, 0.2, 0.3);
+  windowMaterial.specularColor = new Color3(0.4, 0.4, 0.5);
+  windowMaterial.freeze();
+}
+
+/**
+ * Build a voxel-style car from boxes.
+ */
+function buildCar(scene: Scene, colorIndex: number): { root: TransformNode; meshes: Mesh[] } {
+  createVehicleMaterials(scene);
+  const root = new TransformNode('vehicle', scene);
+  const meshes: Mesh[] = [];
+  const mat = vehicleMaterials![colorIndex % vehicleMaterials!.length];
+
+  // Body (lower box)
+  const body = MeshBuilder.CreateBox('vBody', { width: 2.2, height: 1.2, depth: 5 }, scene);
+  body.position.y = 0.8;
+  body.material = mat;
+  body.parent = root;
+  body.isPickable = false;
+  meshes.push(body);
+
+  // Cabin (upper box, shorter)
+  const cabin = MeshBuilder.CreateBox('vCabin', { width: 2, height: 1, depth: 2.5 }, scene);
+  cabin.position.set(0, 1.8, -0.3);
+  cabin.material = windowMaterial!;
+  cabin.parent = root;
+  cabin.isPickable = false;
+  meshes.push(cabin);
+
+  // Wheels (4 small dark boxes)
+  const wheelPositions = [
+    [-1.1, 0.3, 1.5], [1.1, 0.3, 1.5],
+    [-1.1, 0.3, -1.5], [1.1, 0.3, -1.5],
+  ];
+  for (const [wx, wy, wz] of wheelPositions) {
+    const wheel = MeshBuilder.CreateBox('vWheel', { width: 0.4, height: 0.6, depth: 0.8 }, scene);
+    wheel.position.set(wx, wy, wz);
+    wheel.material = wheelMaterial!;
+    wheel.parent = root;
+    wheel.isPickable = false;
+    meshes.push(wheel);
+  }
+
+  return { root, meshes };
+}
+
+/**
+ * Build a voxel-style truck/van from boxes.
+ */
+function buildTruck(scene: Scene, colorIndex: number): { root: TransformNode; meshes: Mesh[] } {
+  createVehicleMaterials(scene);
+  const root = new TransformNode('truck', scene);
+  const meshes: Mesh[] = [];
+  const mat = vehicleMaterials![colorIndex % vehicleMaterials!.length];
+
+  // Long body
+  const body = MeshBuilder.CreateBox('tBody', { width: 2.5, height: 2.5, depth: 7 }, scene);
+  body.position.set(0, 1.5, -0.5);
+  body.material = mat;
+  body.parent = root;
+  body.isPickable = false;
+  meshes.push(body);
+
+  // Cab (front, shorter)
+  const cab = MeshBuilder.CreateBox('tCab', { width: 2.4, height: 1.8, depth: 2.5 }, scene);
+  cab.position.set(0, 1.2, 3);
+  cab.material = windowMaterial!;
+  cab.parent = root;
+  cab.isPickable = false;
+  meshes.push(cab);
+
+  // Wheels
+  const wheelPositions = [
+    [-1.3, 0.4, 2.5], [1.3, 0.4, 2.5],
+    [-1.3, 0.4, -2], [1.3, 0.4, -2],
+  ];
+  for (const [wx, wy, wz] of wheelPositions) {
+    const wheel = MeshBuilder.CreateBox('tWheel', { width: 0.5, height: 0.8, depth: 1 }, scene);
+    wheel.position.set(wx, wy, wz);
+    wheel.material = wheelMaterial!;
+    wheel.parent = root;
+    wheel.isPickable = false;
+    meshes.push(wheel);
+  }
+
+  return { root, meshes };
 }
 
 export class TrafficSystem {
   private scene: Scene;
-  private carMesh: Mesh;
-  private cars: Car[] = [];
-  private matrices: Float32Array;
+  private vehicles: Vehicle[] = [];
   private spawnTimer = 0;
-  private carColors: Color3[];
-
-  // Reusable
-  private static _tmpMatrix = Matrix.Identity();
 
   constructor(scene: Scene) {
     this.scene = scene;
-
-    // Car colors
-    this.carColors = [
-      new Color3(0.8, 0.1, 0.1),   // Red
-      new Color3(0.15, 0.15, 0.6), // Blue
-      new Color3(0.9, 0.9, 0.9),   // White
-      new Color3(0.1, 0.1, 0.1),   // Black
-      new Color3(0.9, 0.8, 0.1),   // Yellow (taxi!)
-      new Color3(0.6, 0.6, 0.65),  // Silver
-    ];
-
-    // Create car base mesh
-    this.carMesh = MeshBuilder.CreateBox('carBase', {
-      width: CAR_WIDTH, height: CAR_HEIGHT, depth: CAR_LENGTH
-    }, scene);
-
-    const carMat = new StandardMaterial('carMat', scene);
-    carMat.diffuseColor = new Color3(0.5, 0.5, 0.5);
-    carMat.specularColor = new Color3(0.3, 0.3, 0.3);
-    carMat.freeze();
-    this.carMesh.material = carMat;
-    this.carMesh.isPickable = false;
-    // Start visible - thin instances need the base mesh visible to render
-    this.carMesh.thinInstanceSetBuffer('matrix', new Float32Array(0), 16, false);
-
-    this.matrices = new Float32Array(MAX_CARS * 16);
+    createVehicleMaterials(scene);
   }
 
   public update(deltaTime: number, playerPos: Vector3): void {
-    // Spawn new cars periodically
+    // Spawn
     this.spawnTimer += deltaTime;
-    if (this.spawnTimer >= SPAWN_INTERVAL && this.cars.length < MAX_CARS) {
+    if (this.spawnTimer >= SPAWN_INTERVAL && this.vehicles.length < MAX_VEHICLES) {
       this.spawnTimer = 0;
-      this.trySpawnCar(playerPos);
+      this.trySpawnVehicle(playerPos);
     }
 
-    // Update car positions
-    for (let i = this.cars.length - 1; i >= 0; i--) {
-      const car = this.cars[i];
+    // Update positions
+    for (let i = this.vehicles.length - 1; i >= 0; i--) {
+      const v = this.vehicles[i];
+      v.x += v.dirX * v.speed * deltaTime;
+      v.z += v.dirZ * v.speed * deltaTime;
 
-      // Move
-      car.x += car.dirX * car.speed * deltaTime;
-      car.z += car.dirZ * car.speed * deltaTime;
+      // Update mesh position
+      v.root.position.set(v.x + v.laneOffset * v.dirZ, 0, v.z - v.laneOffset * v.dirX);
 
-      // Despawn if too far from player
-      const dx = car.x - playerPos.x;
-      const dz = car.z - playerPos.z;
+      // Despawn if too far
+      const dx = v.x - playerPos.x, dz = v.z - playerPos.z;
       if (dx * dx + dz * dz > DESPAWN_RADIUS * DESPAWN_RADIUS) {
-        this.cars.splice(i, 1);
-        continue;
+        for (const m of v.meshes) m.dispose();
+        v.root.dispose();
+        this.vehicles.splice(i, 1);
       }
     }
-
-    // Update instance matrices
-    this.updateMatrices();
   }
 
-  private trySpawnCar(playerPos: Vector3): void {
-    // Spawn on a street near the player but not too close
-    const minDist = 80;
+  private trySpawnVehicle(playerPos: Vector3): void {
+    // Pick a random street near the player
+    const minDist = 60;
     const angle = Math.random() * Math.PI * 2;
     const dist = minDist + Math.random() * (SPAWN_RADIUS - minDist);
+    const rawX = playerPos.x + Math.cos(angle) * dist;
+    const rawZ = playerPos.z + Math.sin(angle) * dist;
 
-    const x = playerPos.x + Math.cos(angle) * dist;
-    const z = playerPos.z + Math.sin(angle) * dist;
+    // Snap to nearest street grid line
+    // Avenues run along Z at regular X intervals
+    // Streets run along X at regular Z intervals
+    const avenueSpacing = BLOCK_WIDTH + AVENUE_WIDTH;
+    const streetSpacing = BLOCK_DEPTH_AVG + STREET_WIDTH;
 
-    // Cars drive along X or Z axis (following the street grid)
-    const driveAlongX = Math.random() > 0.5;
-    const direction = Math.random() > 0.5 ? 1 : -1;
+    const driveOnAvenue = Math.random() > 0.5;
 
-    this.cars.push({
-      x,
-      z,
-      dirX: driveAlongX ? direction : 0,
-      dirZ: driveAlongX ? 0 : direction,
-      speed: CAR_SPEED * (0.8 + Math.random() * 0.4), // Slight speed variation
-      colorIndex: Math.floor(Math.random() * this.carColors.length),
+    let x: number, z: number, dirX: number, dirZ: number;
+
+    if (driveOnAvenue) {
+      // Snap X to nearest avenue center
+      x = Math.round(rawX / avenueSpacing) * avenueSpacing + AVENUE_WIDTH * 0.25;
+      z = rawZ;
+      dirX = 0;
+      dirZ = Math.random() > 0.5 ? 1 : -1;
+    } else {
+      // Snap Z to nearest street center
+      x = rawX;
+      z = Math.round(rawZ / streetSpacing) * streetSpacing + STREET_WIDTH * 0.25;
+      dirX = Math.random() > 0.5 ? 1 : -1;
+      dirZ = 0;
+    }
+
+    // Lane offset (left or right side of street)
+    const laneOffset = (Math.random() > 0.5 ? 1 : -1) * (3 + Math.random() * 3);
+
+    // Build the vehicle
+    const colorIndex = Math.floor(Math.random() * 8);
+    const isTruck = Math.random() > 0.7; // 30% trucks
+    const { root, meshes } = isTruck
+      ? buildTruck(this.scene, colorIndex)
+      : buildCar(this.scene, colorIndex);
+
+    // Set rotation to face movement direction
+    root.position.set(x + laneOffset * (dirZ !== 0 ? 1 : 0), 0, z - laneOffset * (dirX !== 0 ? 1 : 0));
+    if (dirX !== 0) {
+      root.rotation.y = dirX > 0 ? Math.PI / 2 : -Math.PI / 2;
+    } else {
+      root.rotation.y = dirZ > 0 ? 0 : Math.PI;
+    }
+
+    this.vehicles.push({
+      root, meshes, x, z, dirX, dirZ,
+      speed: VEHICLE_SPEED * (0.7 + Math.random() * 0.6),
+      laneOffset,
     });
   }
 
-  private updateMatrices(): void {
-    const count = this.cars.length;
-
-    for (let i = 0; i < count; i++) {
-      const car = this.cars[i];
-
-      // Rotation: cars face their movement direction
-      const rotY = car.dirX !== 0 ? (car.dirX > 0 ? 0 : Math.PI) : (car.dirZ > 0 ? Math.PI / 2 : -Math.PI / 2);
-
-      Matrix.ComposeToRef(
-        Vector3.One(),
-        Vector3.Zero().toQuaternion(), // Will set rotation via RotationY
-        new Vector3(car.x, CAR_HEIGHT / 2 + 0.15, car.z),
-        TrafficSystem._tmpMatrix
-      );
-
-      // Manual rotation Y into the matrix
-      const cos = Math.cos(rotY);
-      const sin = Math.sin(rotY);
-      const offset = i * 16;
-      // Row-major 4x4 matrix with Y rotation
-      this.matrices[offset + 0] = cos;
-      this.matrices[offset + 1] = 0;
-      this.matrices[offset + 2] = sin;
-      this.matrices[offset + 3] = 0;
-      this.matrices[offset + 4] = 0;
-      this.matrices[offset + 5] = 1;
-      this.matrices[offset + 6] = 0;
-      this.matrices[offset + 7] = 0;
-      this.matrices[offset + 8] = -sin;
-      this.matrices[offset + 9] = 0;
-      this.matrices[offset + 10] = cos;
-      this.matrices[offset + 11] = 0;
-      this.matrices[offset + 12] = car.x;
-      this.matrices[offset + 13] = CAR_HEIGHT / 2 + 0.15;
-      this.matrices[offset + 14] = car.z;
-      this.matrices[offset + 15] = 1;
-    }
-
-    // Always update buffer - Babylon renders however many instances are in it
-    this.carMesh.thinInstanceSetBuffer(
-      'matrix',
-      count > 0 ? this.matrices.subarray(0, count * 16) : new Float32Array(0),
-      16,
-      false
-    );
-  }
-
   public dispose(): void {
-    this.carMesh.dispose();
+    for (const v of this.vehicles) {
+      for (const m of v.meshes) m.dispose();
+      v.root.dispose();
+    }
+    this.vehicles = [];
   }
 }
