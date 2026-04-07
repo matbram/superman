@@ -293,7 +293,7 @@ export class PhysicsManager {
           // Building collision: Superman hits the surface, damage callback breaks blocks.
           // Speed loss proportional to speed: fast = less loss, slow = more loss
           const speed = velocity.length();
-          console.log(`[Physics] Building collision: ${meshName}, speed=${speed.toFixed(1)}, dist=${sweepResult.distance.toFixed(2)}`);
+          // Logged via DiagnosticLog in main.ts
           const keepRatio = speed > 80 ? 0.92 : speed > 40 ? 0.85 : 0.75;
           character.velocity = velocity.scale(keepRatio);
           // Push forward past the broken surface (at least one voxel width = 4 units)

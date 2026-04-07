@@ -7,6 +7,7 @@ import { Scene } from '@babylonjs/core/scene';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { Diag } from '../core/DiagnosticLog';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator';
@@ -279,7 +280,9 @@ export class City {
         const next = this.pendingChunks.shift()!;
         this.generateChunk(next.chunkX, next.chunkZ);
         this.chunksGeneratedSinceLog++;
+        Diag.count('City', 'chunksGenerated');
       }
+      Diag.track('City', 'pendingChunks', this.pendingChunks.length);
     }
 
     // Update fade-in for chunks and unload distant ones
@@ -311,9 +314,14 @@ export class City {
       if (dx > UNLOAD_DISTANCE || dz > UNLOAD_DISTANCE) {
         if (now - chunk.lastAccess > 5000) {
           this.unloadChunk(key);
+          Diag.count('City', 'chunksUnloaded');
         }
       }
     }
+
+    // Diagnostics
+    Diag.track('City', 'loadedChunks', this.chunks.size);
+    Diag.track('City', 'updateMs', performance.now() - updateStart);
 
     // Performance logging
     if (ENABLE_CITY_PERF_LOGGING) {

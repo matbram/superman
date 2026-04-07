@@ -15,6 +15,7 @@ import { AlienShip } from './world/AlienShip';
 import { Birds } from './world/Birds';
 import { Hud } from './ui/Hud';
 import { DebugOverlay } from './ui/DebugOverlay';
+import { Diag } from './core/DiagnosticLog';
 
 // Performance logging
 const ENABLE_FRAME_PERF_LOGGING = false;
@@ -106,15 +107,19 @@ class Game {
     // Connect alien ship to damage buildings in beam zone
     // Use horizontal distance check and direct impact damage for more reliable destruction
     this.alienShip.setOnBuildingDamage((position, radius, damage) => {
+      // Alien beam uses legacy damage only - does NOT voxelize buildings
+      // Voxelizing every building in beam radius every frame was destroying perf
       const buildings = this.city.getBuildings();
       for (const building of buildings) {
         const dx = building.position.x - position.x;
         const dz = building.position.z - position.z;
-        const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+        const horizontalDistSq = dx * dx + dz * dz;
 
-        if (horizontalDist < radius) {
-          const impactSpeed = 40 + damage * (1 - horizontalDist / radius);
-          this.buildingDamage.applyImpactDamage(building, position, impactSpeed);
+        if (horizontalDistSq < radius * radius) {
+          // Only damage already-voxelized buildings, skip others
+          if (this.buildingDamage.isVoxelized(building)) {
+            this.buildingDamage.applyImpactDamage(building, building.position, damage);
+          }
         }
       }
     });
@@ -288,6 +293,11 @@ class Game {
         inputInfo
       );
     }
+
+    // Diagnostics
+    Diag.track('Frame', 'playerSpeed', this.player.getCurrentSpeed());
+    Diag.track('Frame', 'meshCount', this.sceneContext.scene.meshes.length);
+    Diag.update();
 
     // Render scene
     t0 = performance.now();

@@ -13,6 +13,7 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import { VoxelBuilding } from './VoxelBuilding';
 import { PhysicsManager } from '../physics/physics';
+import { Diag } from '../core/DiagnosticLog';
 
 // Debris constants - balanced for destruction quality and performance
 const MAX_DEBRIS_PIECES = 100; // Higher cap for more rubble persistence
@@ -369,7 +370,7 @@ export class BuildingDamage {
       );
 
       // Hide the original building mesh AND remove its collision
-      console.log(`[Voxelize] ${building.name} → ${vb.gridWidth}x${vb.gridHeight}x${vb.gridDepth} grid, ${vb.getSolidCount()} blocks`);
+      Diag.log('Voxelize', `${building.name} ${vb.gridWidth}x${vb.gridHeight}x${vb.gridDepth}`);
       building.isVisible = false;
       building.checkCollisions = false;
       building.isPickable = false;
@@ -437,8 +438,15 @@ export class BuildingDamage {
    * This is the ONLY method that voxelizes buildings.
    * Converts the building to voxels and punches a hole through it.
    */
+  /**
+   * Returns whether a building has been voxelized already
+   */
+  public isVoxelized(building: Mesh): boolean {
+    return this.voxelBuildings.has(building) || this.voxelMeshLookup.has(building);
+  }
+
   public applyImpactDamage(building: Mesh, impactPosition: Vector3, speed: number): void {
-    console.log(`[Damage] ${building.name} hit at speed=${speed.toFixed(1)}, pos=(${impactPosition.x.toFixed(1)},${impactPosition.y.toFixed(1)},${impactPosition.z.toFixed(1)})`);
+    Diag.count('Damage', 'hits');
     let vb: VoxelBuilding;
     let originalMesh: Mesh = building;
 
@@ -478,9 +486,13 @@ export class BuildingDamage {
     if (removed.length > 0) {
       this.spawnVoxelDebris(removed, impactPosition, speed);
       this.spawnDustCloud(impactPosition, 5, 1);
+      Diag.track('Damage', 'blocksRemoved', removed.length);
       this.spawnImpactShockwave(impactPosition, speed);
       this.processUnsupportedBlocks(vb, originalMesh, impactPosition);
     }
+
+    Diag.track('Damage', 'activeDebris', this.debris.length);
+    Diag.track('Damage', 'voxelBuildings', this.voxelBuildings.size);
   }
 
   /**
@@ -903,13 +915,16 @@ export class BuildingDamage {
         const dot = Math.abs(Vector3.Dot(this._toBuilding, this._flyDir));
 
         if (dot < 0.5) {
-          // Use beam damage - only voxelizes already-voxelized buildings
-          this._impactPos.set(
-            buildingPos.x - this._toBuilding.x * (buildingPos.x - playerPosition.x) * 0.3,
-            buildingPos.y + 10 + Math.random() * 20,
-            buildingPos.z - this._toBuilding.z * (buildingPos.z - playerPosition.z) * 0.3
-          );
-          this.applyImpactDamage(building, this._impactPos, speed * 0.3);
+          // Wake damage: only damages already-voxelized buildings
+          // Does NOT voxelize new buildings (that would be too expensive)
+          if (this.isVoxelized(building)) {
+            this._impactPos.set(
+              buildingPos.x - this._toBuilding.x * (buildingPos.x - playerPosition.x) * 0.3,
+              buildingPos.y + 10 + Math.random() * 20,
+              buildingPos.z - this._toBuilding.z * (buildingPos.z - playerPosition.z) * 0.3
+            );
+            this.applyImpactDamage(building, this._impactPos, speed * 0.3);
+          }
         }
       }
     }
