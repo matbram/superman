@@ -160,6 +160,11 @@ class Game {
       this.buildingDamage.applyDamage(mesh as Mesh, point, speed);
     };
 
+    // Voxel-aware collision check: lets Superman fly through holes
+    this.physicsManager.hasSolidBlocksAt = (mesh, point) => {
+      return this.buildingDamage.hasSolidBlocksAt(mesh as Mesh, point);
+    };
+
     // Heat vision
     this.player.setOnHeatVisionDamage((building, position, damage) => {
       this.buildingDamage.applyDamage(building as Mesh, position, damage);

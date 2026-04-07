@@ -59,8 +59,10 @@ export class PhysicsManager {
   private accumulator: number = 0;
   private collisionMeshes: Set<AbstractMesh> = new Set();
 
-  // Building collision callback - triggers damage immediately at collision point
+  // Building collision: triggers damage at collision point, returns whether blocks were solid
   public onBuildingCollision: ((mesh: AbstractMesh, point: Vector3, speed: number) => void) | null = null;
+  // Voxel check: returns true if solid blocks exist at this position (should stop Superman)
+  public hasSolidBlocksAt: ((mesh: AbstractMesh, point: Vector3) => boolean) | null = null;
 
   constructor(scene: Scene, config?: Partial<PhysicsConfig>) {
     this.scene = scene;
@@ -293,24 +295,37 @@ export class PhysicsManager {
         // Speed reduction based on what was hit:
         const meshName = sweepResult.mesh?.name || '';
         const isBuilding = meshName.startsWith('building_');
-        if (isBuilding) {
-          // Building collision: Superman hits the surface, damage callback breaks blocks.
-          // Speed loss proportional to speed: fast = less loss, slow = more loss
+        if (isBuilding && sweepResult.mesh) {
           const speed = velocity.length();
-          const keepRatio = speed > 80 ? 0.92 : speed > 40 ? 0.85 : 0.75;
-          Diag.log('PhysicsHit', `${meshName.substring(0, 25)} spd=${speed.toFixed(0)} keep=${(keepRatio * 100).toFixed(0)}%`);
-          character.velocity = velocity.scale(keepRatio);
 
-          // Apply damage IMMEDIATELY at the collision point BEFORE pushing forward.
-          // This eliminates the visible lag where Superman passes through first
-          // and the building breaks behind him.
-          if (this.onBuildingCollision && sweepResult.mesh) {
-            this.onBuildingCollision(sweepResult.mesh, character.position.clone(), speed);
+          // Check if there are solid voxel blocks at the collision point.
+          // If blocks exist → stop Superman, break them, he pushes through next frame.
+          // If no blocks (hole from previous damage) → let Superman fly through freely.
+          const collisionPoint = character.position.clone();
+          const hasSolid = this.hasSolidBlocksAt
+            ? this.hasSolidBlocksAt(sweepResult.mesh, collisionPoint)
+            : true; // Default: treat as solid if no checker
+
+          if (hasSolid) {
+            // Solid blocks exist: STOP Superman, apply damage to break them.
+            const keepRatio = speed > 80 ? 0.92 : speed > 40 ? 0.85 : 0.75;
+            Diag.log('PhysicsHit', `${meshName.substring(0, 25)} spd=${speed.toFixed(0)} SOLID`);
+            character.velocity = velocity.scale(keepRatio);
+
+            // Apply damage at collision point to break the blocks
+            if (this.onBuildingCollision) {
+              this.onBuildingCollision(sweepResult.mesh, collisionPoint, speed);
+            }
+
+            // Push forward just past the broken surface (one voxel layer)
+            character.position.addInPlace(movementDir.scale(5));
+          } else {
+            // No solid blocks: it's a hole! Let Superman through freely.
+            Diag.log('PhysicsHit', `${meshName.substring(0, 25)} spd=${speed.toFixed(0)} HOLE`);
+            character.position = targetPosition;
+            character.velocity = velocity; // No speed loss through holes
           }
-
-          // THEN push forward past the now-broken surface
-          character.position.addInPlace(movementDir.scale(5));
-        } else {
+        } else if (!isBuilding) {
           // Non-building (ground, sidewalk): deflect away
           const pushForce = sweepResult.normal.scale(2);
           character.position.addInPlace(pushForce.scale(deltaTime * 10));

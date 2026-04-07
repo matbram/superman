@@ -107,6 +107,43 @@ export class BuildingDamage {
     return this.voxelBuildings.has(mesh) || this.voxelMeshLookup.has(mesh);
   }
 
+  /**
+   * Get the VoxelBuilding for a mesh, if it exists.
+   */
+  public getVoxelBuilding(mesh: Mesh): VoxelBuilding | null {
+    const vb = this.voxelBuildings.get(mesh);
+    if (vb) return vb;
+    const lookup = this.voxelMeshLookup.get(mesh);
+    if (lookup) return lookup.vb;
+    return null;
+  }
+
+  /**
+   * Check if a world position inside a building has solid blocks.
+   * Used by physics to decide: stop Superman (blocks exist) or let through (hole).
+   * Returns true if NOT voxelized yet (treat as solid) or if solid blocks exist at position.
+   */
+  public hasSolidBlocksAt(mesh: Mesh, worldPos: Vector3): boolean {
+    const vb = this.getVoxelBuilding(mesh);
+    if (!vb) return true; // Not voxelized → treat as solid wall
+
+    // Check a small area around the position (Superman's radius)
+    const grid = vb.worldToGrid(worldPos);
+    if (!grid) return false; // Outside grid → hole
+
+    // Check 3x3x3 area around impact point
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          if (vb.isSolid(grid.x + dx, grid.y + dy, grid.z + dz)) {
+            return true; // At least one solid block nearby
+          }
+        }
+      }
+    }
+    return false; // All blocks removed → it's a hole
+  }
+
   // ── Single Damage Entry Point ──────────────────────────────────────
 
   /**
