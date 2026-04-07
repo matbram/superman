@@ -157,9 +157,9 @@ class Game {
       this.voxelWorld.applyDamage(buildingMesh, impactPosition, speed);
     });
 
-    // Heat vision
+    // Heat vision - explosive impact with force
     this.player.setOnHeatVisionDamage((building, position, damage) => {
-      this.voxelWorld.applyDamage(building as Mesh, position, damage);
+      this.voxelWorld.applyExplosiveDamage(building as Mesh, position, damage);
     });
 
     // Camera shake from building destruction (collapses, debris impacts)

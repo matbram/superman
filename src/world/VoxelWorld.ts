@@ -225,6 +225,100 @@ export class VoxelWorld {
   // ── Damage ─────────────────────────────────────────────────────────
 
   /**
+   * Explosive damage - blocks fly outward from impact with force.
+   * Used by heat vision for dramatic explosive destruction.
+   */
+  public applyExplosiveDamage(mesh: Mesh, position: Vector3, power: number): void {
+    const now = performance.now();
+    const lastHit = this.damageCooldowns.get(mesh) || 0;
+    if (now - lastHit < DAMAGE_COOLDOWN) return;
+    this.damageCooldowns.set(mesh, now);
+
+    Diag.count('Damage', 'explosiveHits');
+
+    let vb = this.meshToBuilding.get(mesh);
+    if (!vb) {
+      const bounds = mesh.getBoundingInfo().boundingBox;
+      if (bounds.maximumWorld.y - bounds.minimumWorld.y < 5) {
+        mesh.isVisible = false; mesh.isPickable = false;
+        if (this.physicsManager) this.physicsManager.removeCollisionMesh(mesh);
+        return;
+      }
+      vb = this.voxelizeBuilding(mesh);
+    }
+
+    // Explosive radius scales with power
+    const minDim = Math.min(vb.worldWidth, vb.worldDepth);
+    const explosionRadius = Math.min(VOXEL_SIZE * 1.5 + power * 0.02, minDim * 0.4);
+    const removed = vb.removeBlocksInRadius(position, explosionRadius);
+
+    if (removed.length > 0) {
+      Diag.track('Damage', 'blocksRemoved', removed.length);
+
+      // Blocks EXPLODE outward from impact point with force
+      const maxBlocks = Math.min(removed.length, MAX_DEBRIS - this.debris.length, 15);
+      const step = removed.length > maxBlocks ? Math.floor(removed.length / maxBlocks) : 1;
+      const explosionForce = 8 + power * 0.05;
+
+      for (let i = 0; i < removed.length && this.debris.length < MAX_DEBRIS; i += step) {
+        const pos = removed[i];
+        // Direction: outward FROM impact point
+        const dx = pos.x - position.x;
+        const dy = pos.y - position.y;
+        const dz = pos.z - position.z;
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+        const force = explosionForce * (1 + Math.random() * 0.5);
+
+        const size = VOXEL_SIZE * (0.4 + Math.random() * 0.5);
+        const m = MeshBuilder.CreateBox(`exp_${this.debris.length}`, {
+          width: size, height: size * 0.7, depth: size
+        }, this.scene);
+        m.position.copyFrom(pos);
+        m.rotation.set(Math.random(), Math.random() * Math.PI, Math.random());
+        m.material = this.debrisMaterials[Math.floor(Math.random() * this.debrisMaterials.length)];
+        m.isPickable = false;
+
+        this.debris.push({
+          mesh: m,
+          velocity: new Vector3(
+            (dx / dist) * force + (Math.random() - 0.5) * 5,
+            (dy / dist) * force + Math.random() * force * 0.5 + 5,
+            (dz / dist) * force + (Math.random() - 0.5) * 5
+          ),
+          angularVelocity: new Vector3(
+            (Math.random() - 0.5) * 10,
+            (Math.random() - 0.5) * 8,
+            (Math.random() - 0.5) * 10
+          ),
+          isChunk: true,
+          settled: false,
+          settleTime: 0,
+        });
+      }
+
+      // Explosion effects: flash, smoke, dust, shake
+      this.spawnSmoke(position, 5 + removed.length * 0.3, removed.length * 2);
+      this.spawnDust(position, 6 + removed.length * 0.2, 1.5);
+
+      if (this.onCameraShake) {
+        this.onCameraShake(Math.min(3, 0.5 + removed.length * 0.1));
+      }
+
+      // Structural cascade
+      const disconnected = vb.findDisconnectedBlocks();
+      if (disconnected.length > 0) {
+        this.handleDisconnectedBlocks(vb, disconnected, position);
+      }
+    }
+
+    if (vb.getPercentRemaining() < AUTO_DESTROY_THRESHOLD) {
+      this.destroyBuilding(vb);
+    } else {
+      this.checkLean(vb);
+    }
+  }
+
+  /**
    * Single damage entry point. All damage sources call this.
    */
   public applyDamage(mesh: Mesh, position: Vector3, speed: number): void {
