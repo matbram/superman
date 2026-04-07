@@ -852,7 +852,7 @@ export class City {
   public getSpawnPosition(): Vector3 {
     // Spawn on the road at the edge of chunk (0,0)
     // Buildings start at BUILDING_SPACING + 8 = 18, so x=5 is safe on the road
-    return new Vector3(STREET_WIDTH / 2, 1.0, CHUNK_SIZE / 2);
+    return new Vector3(STREET_WIDTH / 2, 4.5, CHUNK_SIZE / 2);
   }
 
   /**

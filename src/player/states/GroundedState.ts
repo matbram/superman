@@ -28,9 +28,10 @@ export class GroundedState extends BasePlayerState {
     this.landingGracePeriod = 0.3;
 
     // Ensure position is above ground when entering Grounded state
+    // Feet are 4.3 units below physics center - clamp so feet touch ground
     const pos = player.getPositionRef();
-    if (pos && pos.y < 0.9) {
-      pos.y = 0.9;
+    if (pos && pos.y < 4.3) {
+      pos.y = 4.3;
     }
   }
 

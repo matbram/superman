@@ -363,7 +363,9 @@ export class PhysicsManager {
     // Layer 2: Snap to ground if raycast found it
     if (groundCheck.hit && !character.isFlying) {
       const groundY = groundCheck.point.y;
-      const targetY = groundY + character.height / 2;
+      // Visual character feet are 4.3 units below physics center
+      const feetOffset = 4.3;
+      const targetY = groundY + feetOffset;
 
       if (character.position.y < targetY) {
         character.position.y = targetY;
@@ -375,9 +377,10 @@ export class PhysicsManager {
       }
     }
 
-    // Layer 3: ABSOLUTE floor - can NEVER go below Y=0 ground level
-    // This catches ALL edge cases: chunk boundaries, high-speed impacts, missed raycasts
-    const absoluteMinY = character.height / 2;
+    // Layer 3: ABSOLUTE floor - feet must stay above Y=0 ground level
+    // The visual character extends ~4.3 units below physics center
+    // (leg offset 0.25 + leg length 9*0.45 = 4.3)
+    const absoluteMinY = 4.3; // Physics center height where feet touch Y=0
     if (character.position.y < absoluteMinY) {
       character.position.y = absoluteMinY;
       if (character.velocity.y < 0) character.velocity.y = 0;

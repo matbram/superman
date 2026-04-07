@@ -27,7 +27,7 @@ export class LandingState extends BasePlayerState {
 
     // Clamp position above ground
     const pos = player.getPositionRef();
-    if (pos && pos.y < 0.9) pos.y = 0.9;
+    if (pos && pos.y < 4.3) pos.y = 4.3;
   }
 
   exit(player: Player): void {
