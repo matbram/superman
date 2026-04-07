@@ -119,14 +119,7 @@ export class StreetLife {
         Matrix.TranslationToRef(tx, treeH * 0.5 + 0.15, z, StreetLife._tmpMat);
         trunkMatrices.push(...this.matrixToArray(StreetLife._tmpMat));
 
-        // Canopy
-        Matrix.ComposeToRef(
-          new Vector3(canopySize, canopySize, canopySize),
-          null as any,
-          new Vector3(tx, treeH + 2 * canopySize, z),
-          StreetLife._tmpMat
-        );
-        // Manual scale + translate matrix
+        // Canopy (scaled + translated)
         this.setScaleTranslation(canopyMatrices, canopySize, tx, treeH + 2 * canopySize, z);
       }
 
