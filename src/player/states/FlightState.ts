@@ -38,6 +38,13 @@ export class FlightState extends BasePlayerState {
   private wasAboveBrakeThreshold: boolean = false;
   private brakeShockwaveTriggered: boolean = false;
 
+  // Double-tap tracking
+  private lastFlyPressTime: number = 0;
+  private flyWasReleased: boolean = true;
+  private lastDescendPressTime: number = 0;
+  private descendWasReleased: boolean = true;
+  private superDiving: boolean = false;
+
   enter(player: Player): void {
     // Initialize speed from current velocity
     this.currentSpeed = player.getVelocity().length();
@@ -77,6 +84,15 @@ export class FlightState extends BasePlayerState {
   }
 
   private checkTransitions(player: Player, input: InputState): PlayerStateType | null {
+    // SUPER DIVE: force landing at any speed when near ground
+    if (this.superDiving) {
+      const height = player.getHeightAboveGround();
+      if (height < LANDING_HEIGHT * 3) {
+        this.superDiving = false;
+        return PlayerStateType.Landing;
+      }
+    }
+
     // Land if pressing LT (descend) near ground and moving slowly
     if (input.descendTrigger > 0.5) {
       const height = player.getHeightAboveGround();
@@ -137,21 +153,66 @@ export class FlightState extends BasePlayerState {
 
   private updateSpeed(player: Player, input: InputState, deltaTime: number): void {
     const previousSpeed = this.currentSpeed;
+    const now = performance.now();
+    const DOUBLE_TAP_WINDOW = 350; // ms
 
-    // RT pressure directly controls target speed (procedural acceleration)
-    // More pressure = faster speed, proportional to trigger position
-    if (input.flyTrigger > 0.05) {
-      // Map trigger pressure to speed range
-      // Use a curve for better feel: slight press = slow, full press = max
-      const triggerCurve = Math.pow(input.flyTrigger, 1.5); // Slight exponential curve
-      this.targetSpeed = MIN_SPEED + (MAX_SPEED - MIN_SPEED) * triggerCurve;
+    // ── DOUBLE-TAP FLY (RT) → INSTANT MAX SPEED ──
+    if (input.flyTrigger > 0.5) {
+      if (this.flyWasReleased) {
+        // Trigger pressed fresh
+        if (now - this.lastFlyPressTime < DOUBLE_TAP_WINDOW) {
+          // DOUBLE TAP! Instant max speed + shockwave
+          this.currentSpeed = MAX_SPEED;
+          this.targetSpeed = MAX_SPEED;
+          player.triggerBrakeShockwave(MAX_SPEED); // Sonic boom effect
+          this.lastFlyPressTime = 0; // Reset so triple-tap doesn't re-trigger
+        } else {
+          this.lastFlyPressTime = now;
+        }
+        this.flyWasReleased = false;
+      }
     } else {
-      // No fly trigger = decelerate to hover
+      this.flyWasReleased = true;
+    }
+
+    // ── DOUBLE-TAP DESCEND (LT) → SUPER DIVE + SUPERHERO LAND ──
+    if (input.descendTrigger > 0.5) {
+      if (this.descendWasReleased) {
+        if (now - this.lastDescendPressTime < DOUBLE_TAP_WINDOW) {
+          // DOUBLE TAP! Super dive straight down
+          this.superDiving = true;
+          this.lastDescendPressTime = 0;
+        } else {
+          this.lastDescendPressTime = now;
+        }
+        this.descendWasReleased = false;
+      }
+    } else {
+      this.descendWasReleased = true;
+    }
+
+    // Super dive mode: pitch straight down at max speed toward ground
+    if (this.superDiving) {
+      this.currentSpeed = Math.min(MAX_SPEED, this.currentSpeed + 300 * deltaTime);
+      player.setPitch(-Math.PI * 0.4); // Nose down ~72 degrees
+      // Check if near ground - transition to landing with speed for superhero land
+      if (player.getHeightAboveGround() < 8) {
+        this.superDiving = false;
+        // The state machine will transition to Landing, and the
+        // Landing→Grounded transition triggers triggerSuperheroLanding
+      }
+    }
+
+    // RT pressure directly controls target speed
+    if (input.flyTrigger > 0.05) {
+      const triggerCurve = Math.pow(input.flyTrigger, 1.5);
+      this.targetSpeed = MIN_SPEED + (MAX_SPEED - MIN_SPEED) * triggerCurve;
+    } else if (!this.superDiving) {
       this.targetSpeed = 0;
     }
 
     // LT (descendTrigger) acts as HARD brake - abrupt stop
-    if (input.descendTrigger > 0.1) {
+    if (input.descendTrigger > 0.1 && !this.superDiving) {
       this.currentSpeed -= BRAKE_DECELERATION * input.descendTrigger * deltaTime;
       this.currentSpeed = Math.max(0, this.currentSpeed);
 

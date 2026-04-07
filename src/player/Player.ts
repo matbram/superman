@@ -61,6 +61,7 @@ export class Player {
   // Flight effects
   private isFlightMode: boolean = false;
   private isBoostActive: boolean = false;
+  private boostTakeoff: boolean = false;
   private currentSpeed: number = 0;
   private speedParticles: ParticleSystem | null = null;
   private takeoffParticles: ParticleSystem | null = null;
@@ -874,6 +875,16 @@ export class Player {
 
   public setBoostActive(active: boolean): void {
     this.isBoostActive = active;
+  }
+
+  public setBoostTakeoff(boost: boolean): void {
+    this.boostTakeoff = boost;
+  }
+
+  public consumeBoostTakeoff(): boolean {
+    const val = this.boostTakeoff;
+    this.boostTakeoff = false;
+    return val;
   }
 
   public isBoost(): boolean {
