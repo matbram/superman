@@ -15,8 +15,8 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import '@babylonjs/core/Meshes/thinInstanceMesh';
 
-const CLOUD_HEIGHT_MIN = 280;
-const CLOUD_HEIGHT_MAX = 400;
+const CLOUD_HEIGHT_MIN = 150;
+const CLOUD_HEIGHT_MAX = 280;
 const NUM_CLOUDS = 20;
 const BLOBS_PER_CLOUD = 5;     // Each cloud is made of overlapping blob clusters
 const VOXELS_PER_BLOB = 25;    // Tightly packed spheres per blob
