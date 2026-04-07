@@ -27,12 +27,10 @@ export class GroundedState extends BasePlayerState {
     player.setVelocity(new Vector3(0, 0, 0));
     this.landingGracePeriod = 0.3;
 
-    // CRITICAL: Ensure position is above ground when entering Grounded state
-    // Super dive can arrive at negative Y - clamp immediately
-    const pos = player.getPhysics().position;
-    const minY = 1.8 / 2; // PLAYER_HEIGHT / 2
-    if (pos.y < minY) {
-      pos.y = minY;
+    // Ensure position is above ground when entering Grounded state
+    const pos = player.getPositionRef();
+    if (pos && pos.y < 0.9) {
+      pos.y = 0.9;
     }
   }
 

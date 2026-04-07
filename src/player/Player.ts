@@ -826,6 +826,11 @@ export class Player {
     return this.physics.position.clone();
   }
 
+  /** Direct access to physics position (mutable - changes affect the character) */
+  public getPositionRef(): Vector3 {
+    return this.physics.position;
+  }
+
   public setPosition(pos: Vector3): void {
     this.physics.position.copyFrom(pos);
     this.rootNode.position.copyFrom(pos);
