@@ -527,6 +527,7 @@ export class Player {
 
     // Update heat vision
     this.updateHeatVision(input, deltaTime);
+    this.updateSuperBreath(input, deltaTime);
 
     // Update camera
     this.cameraController.setTarget(this.physics.position, this.getForwardDirection());
@@ -938,6 +939,86 @@ export class Player {
   public setHeatVisionTargetSystems(pedestrians: any, traffic: any): void {
     this.heatVision.pedestrianSystem = pedestrians;
     this.heatVision.trafficSystem = traffic;
+  }
+
+  // Super breath references
+  private superBreathCooldown: number = 0;
+  public superBreathVoxelWorld: any = null;
+  public superBreathPedestrians: any = null;
+  public superBreathTraffic: any = null;
+
+  /**
+   * SUPER BREATH: Explosive cone of force in the facing direction.
+   * Pushes and damages everything in a wide cone.
+   */
+  private updateSuperBreath(input: InputState, deltaTime: number): void {
+    this.superBreathCooldown -= deltaTime;
+
+    if (input.superBreathHeld && this.superBreathCooldown <= 0) {
+      this.superBreathCooldown = 0.15; // Fire every 150ms while held
+
+      const forward = this.getForwardDirection();
+      const pos = this.physics.position.clone();
+      const breathRange = 60; // How far the breath reaches
+      const breathRadius = 25; // Cone width at max range
+
+      // Create wind particle burst
+      const windParticles = new ParticleSystem('superBreath', 100, this.scene);
+      windParticles.createConeEmitter(3, Math.PI / 6);
+      windParticles.color1 = new Color4(0.8, 0.9, 1.0, 0.5);
+      windParticles.color2 = new Color4(0.6, 0.8, 1.0, 0.3);
+      windParticles.colorDead = new Color4(1, 1, 1, 0);
+      windParticles.minSize = 2;
+      windParticles.maxSize = 6;
+      windParticles.minLifeTime = 0.3;
+      windParticles.maxLifeTime = 0.8;
+      windParticles.direction1 = forward.scale(breathRange * 0.5);
+      windParticles.direction2 = forward.scale(breathRange);
+      windParticles.minEmitPower = 30;
+      windParticles.maxEmitPower = 60;
+      windParticles.emitter = pos;
+      windParticles.emitRate = 80;
+      windParticles.blendMode = ParticleSystem.BLENDMODE_ADD;
+      windParticles.gravity = new Vector3(0, -5, 0);
+      windParticles.start();
+      setTimeout(() => { windParticles.emitRate = 0; }, 150);
+      setTimeout(() => { windParticles.dispose(); }, 1500);
+
+      // Camera shake
+      this.cameraController.addShake(2);
+
+      // Damage buildings along the breath direction using DDA
+      if (this.superBreathVoxelWorld) {
+        for (let spread = -2; spread <= 2; spread++) {
+          const right = Vector3.Cross(forward, Vector3.Up()).normalize();
+          const dir = forward.add(right.scale(spread * 0.3)).normalize();
+          const hit = this.superBreathVoxelWorld.collideRay(pos, dir, breathRange);
+          if (hit.hit && hit.building) {
+            this.superBreathVoxelWorld.applyDamageAtGrid(
+              hit.building, hit.gridX, hit.gridY, hit.gridZ, 300
+            );
+          }
+        }
+      }
+
+      // Push/kill pedestrians in cone
+      if (this.superBreathPedestrians) {
+        const impactPoint = pos.add(forward.scale(breathRange * 0.5));
+        this.superBreathPedestrians.killNear(impactPoint, breathRadius);
+      }
+
+      // Launch vehicles in cone
+      if (this.superBreathTraffic) {
+        const impactPoint = pos.add(forward.scale(breathRange * 0.5));
+        this.superBreathTraffic.destroyNear(impactPoint, breathRadius);
+      }
+
+      // Building damage callback for non-voxelized buildings
+      if (this.onBuildingDamage) {
+        const impactPoint = pos.add(forward.scale(breathRange * 0.5));
+        this.onBuildingDamage(impactPoint, breathRadius, 200);
+      }
+    }
   }
 
   /**

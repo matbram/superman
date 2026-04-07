@@ -480,22 +480,56 @@ export class AlienShip {
     this._coreColor.b = 0.1 * corePulse;
     (this.hullCore.material as StandardMaterial).emissiveColor = this._coreColor;
 
-    // ── AGGRESSIVE AI: Fast movement, crashes through buildings ──
+    // ── ADVANCED UNPREDICTABLE AI ──
+    // Ship alternates between behaviors: patrol, charge, hover-strafe, dive-bomb
     this.attackTimer += deltaTime;
     if (this.attackTimer > this.attackCooldown) {
       this.attackTimer = 0;
-      this.attackCooldown = 2 + Math.random() * 4; // 2-6 seconds between moves
-      const range = 500;
-      this.targetPosition.set(
-        this.shipPosition.x + (Math.random() - 0.5) * range,
-        SHIP_HEIGHT + (Math.random() - 0.5) * 60, // Vary height 90-150
-        this.shipPosition.z + (Math.random() - 0.5) * range
-      );
+
+      // Unpredictable behavior selection
+      const behavior = Math.random();
+      if (behavior < 0.3) {
+        // CHARGE: Pick a distant target and rush at high speed
+        this.attackCooldown = 1 + Math.random() * 2;
+        this.moveSpeed = 120 + Math.random() * 80; // 120-200 m/s burst
+        const range = 600;
+        this.targetPosition.set(
+          this.shipPosition.x + (Math.random() - 0.5) * range,
+          60 + Math.random() * 80, // Low pass - tears through buildings
+          this.shipPosition.z + (Math.random() - 0.5) * range
+        );
+      } else if (behavior < 0.55) {
+        // HOVER-STRAFE: Slow movement, concentrated laser fire on one area
+        this.attackCooldown = 3 + Math.random() * 4;
+        this.moveSpeed = 15 + Math.random() * 20; // Slow, deliberate
+        this.targetPosition.set(
+          this.shipPosition.x + (Math.random() - 0.5) * 150,
+          SHIP_HEIGHT + (Math.random() - 0.5) * 40,
+          this.shipPosition.z + (Math.random() - 0.5) * 150
+        );
+      } else if (behavior < 0.75) {
+        // DIVE BOMB: Drop low and fast, then pull up
+        this.attackCooldown = 1.5;
+        this.moveSpeed = 100;
+        this.targetPosition.set(
+          this.shipPosition.x + (Math.random() - 0.5) * 300,
+          30 + Math.random() * 30, // Very low - 30-60 height
+          this.shipPosition.z + (Math.random() - 0.5) * 300
+        );
+      } else {
+        // PATROL: Normal speed, medium height
+        this.attackCooldown = 2 + Math.random() * 3;
+        this.moveSpeed = 50 + Math.random() * 30;
+        this.targetPosition.set(
+          this.shipPosition.x + (Math.random() - 0.5) * 400,
+          SHIP_HEIGHT + (Math.random() - 0.5) * 50,
+          this.shipPosition.z + (Math.random() - 0.5) * 400
+        );
+      }
     }
 
-    // Move toward target - FAST
+    // Move toward target
     const moveDx = this.targetPosition.x - this.shipPosition.x;
-    const moveDy = this.targetPosition.y - this.shipPosition.y;
     const moveDz = this.targetPosition.z - this.shipPosition.z;
     const moveDist = Math.sqrt(moveDx * moveDx + moveDz * moveDz);
     if (moveDist > 5) {
@@ -504,7 +538,7 @@ export class AlienShip {
       this.shipPosition.z += (moveDz / moveDist) * moveAmt;
     }
     // Smooth height change
-    this.shipPosition.y += (this.targetPosition.y - this.shipPosition.y) * deltaTime * 0.5;
+    this.shipPosition.y += (this.targetPosition.y - this.shipPosition.y) * deltaTime * 0.8;
     this.root.position.copyFrom(this.shipPosition);
     this.gravityZone.center.x = this.shipPosition.x;
     this.gravityZone.center.z = this.shipPosition.z;
@@ -513,24 +547,22 @@ export class AlienShip {
     this.root.rotation.y += deltaTime * 0.15;
 
     // ── COLLISION: Ship destroys buildings it flies through ──
+    // Dense ray coverage in all directions for reliable detection
     if (this.voxelWorld) {
-      // Check for buildings at ship position using DDA rays in multiple directions
-      const dirs = [
-        new Vector3(1, 0, 0), new Vector3(-1, 0, 0),
-        new Vector3(0, 0, 1), new Vector3(0, 0, -1),
-        new Vector3(0.7, 0, 0.7), new Vector3(-0.7, 0, -0.7),
-      ];
-      for (const dir of dirs) {
+      const angles = 12; // 12 horizontal directions = 30 degree coverage
+      for (let i = 0; i < angles; i++) {
+        const angle = (i / angles) * Math.PI * 2;
+        const dir = new Vector3(Math.cos(angle), 0, Math.sin(angle));
         const hit = this.voxelWorld.collideRay(this.shipPosition, dir, SHIP_COLLISION_RADIUS);
         if (hit.hit && hit.building) {
-          // SMASH through the building
-          this.voxelWorld.applyDamageAtGrid(hit.building, hit.gridX, hit.gridY, hit.gridZ, 300);
+          // MASSIVE damage - same power as Superman at max speed
+          this.voxelWorld.applyDamageAtGrid(hit.building, hit.gridX, hit.gridY, hit.gridZ, 440);
         }
       }
-      // Also check downward
+      // Downward collision
       const downHit = this.voxelWorld.collideRay(this.shipPosition, new Vector3(0, -1, 0), SHIP_COLLISION_RADIUS);
       if (downHit.hit && downHit.building) {
-        this.voxelWorld.applyDamageAtGrid(downHit.building, downHit.gridX, downHit.gridY, downHit.gridZ, 300);
+        this.voxelWorld.applyDamageAtGrid(downHit.building, downHit.gridX, downHit.gridY, downHit.gridZ, 440);
       }
     }
 
@@ -562,9 +594,9 @@ export class AlienShip {
       this.laserFiring = true;
       this.laserBurstTimer = 1.5 + Math.random() * 2; // Fire for 1.5-3.5 seconds
 
-      // Pick a target near the ship - can be buildings, streets, anything
+      // Target buildings below and around the ship
       this.laserTargetPos.set(
-        this.shipPosition.x + (Math.random() - 0.5) * 200,
+        this.shipPosition.x + (Math.random() - 0.5) * 150,
         0,
         this.shipPosition.z + (Math.random() - 0.5) * 120
       );
@@ -627,12 +659,13 @@ export class AlienShip {
 
         const hit = this.voxelWorld.collideRay(this.shipPosition, direction, 500);
         if (hit.hit && hit.building) {
-          this.voxelWorld.applyDamageAtGrid(hit.building, hit.gridX, hit.gridY, hit.gridZ, 200);
-        } else {
-          // Hit the ground - damage buildings near impact
-          if (this.onBuildingDamage) {
-            this.onBuildingDamage(this.laserTargetPos, 15, 100 * deltaTime);
-          }
+          // Same explosive power as Superman's heat vision
+          this.voxelWorld.applyExplosiveDamage(
+            hit.building.originalMeshes?.[0] || null,
+            hit.point, 400
+          );
+          // Also direct grid damage for precision
+          this.voxelWorld.applyDamageAtGrid(hit.building, hit.gridX, hit.gridY, hit.gridZ, 400);
         }
 
         // Kill NPCs at laser impact

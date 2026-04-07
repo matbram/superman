@@ -192,6 +192,11 @@ class Game {
     // Heat vision - give it direct VoxelWorld access for DDA accuracy
     this.player.setHeatVisionVoxelWorld(this.voxelWorld);
     this.player.setHeatVisionTargetSystems(this.pedestrians, this.traffic);
+
+    // Super breath systems
+    this.player.superBreathVoxelWorld = this.voxelWorld;
+    this.player.superBreathPedestrians = this.pedestrians;
+    this.player.superBreathTraffic = this.traffic;
     // Fallback callback for non-voxelized buildings hit by mesh raycast
     this.player.setOnHeatVisionDamage((building, position, damage) => {
       this.voxelWorld.applyExplosiveDamage(building as Mesh, position, damage);
