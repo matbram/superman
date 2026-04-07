@@ -249,7 +249,8 @@ export class VoxelWorld {
 
     // Explosive radius scales with power
     const minDim = Math.min(vb.worldWidth, vb.worldDepth);
-    const explosionRadius = Math.min(VOXEL_SIZE * 1.5 + power * 0.02, minDim * 0.4);
+    // Bigger explosions - heat vision is powerful
+    const explosionRadius = Math.min(VOXEL_SIZE * 2.5 + power * 0.04, minDim * 0.45);
     const removed = vb.removeBlocksInRadius(position, explosionRadius);
 
     if (removed.length > 0) {
@@ -352,7 +353,8 @@ export class VoxelWorld {
     // At high speed (220 m/s flight): larger holes (radius ~6-8) but still wall-only
     const minDim = Math.min(vb.worldWidth, vb.worldDepth);
     const maxRadius = Math.max(VOXEL_SIZE, minDim * 0.35);
-    const baseRadius = VOXEL_SIZE * 0.8 + Math.min(VOXEL_SIZE, speed / 40);
+    // Bigger holes - Superman is powerful
+    const baseRadius = VOXEL_SIZE * 1.5 + Math.min(VOXEL_SIZE * 1.5, speed / 25);
     const punchRadius = Math.min(baseRadius, maxRadius);
     const removed = vb.removeBlocksInRadius(position, punchRadius);
 
@@ -387,14 +389,42 @@ export class VoxelWorld {
     const worldPos = vb.gridToWorldPos(gridX, gridY, gridZ);
     const minDim = Math.min(vb.worldWidth, vb.worldDepth);
     const maxRadius = Math.max(VOXEL_SIZE, minDim * 0.35);
-    const baseRadius = VOXEL_SIZE * 0.8 + Math.min(VOXEL_SIZE, speed / 40);
+    // Bigger holes - Superman is powerful
+    const baseRadius = VOXEL_SIZE * 1.5 + Math.min(VOXEL_SIZE * 1.5, speed / 25);
     const punchRadius = Math.min(baseRadius, maxRadius);
     const removed = vb.removeBlocksInRadius(worldPos, punchRadius);
 
     if (removed.length > 0) {
       Diag.track('Damage', 'blocksRemoved', removed.length);
-      this.spawnDebrisFromPositions(removed, worldPos, speed);
-      this.spawnDust(worldPos, 5, 1);
+
+      // Explosive debris - blocks fly outward from impact
+      const maxBlocks = Math.min(removed.length, MAX_DEBRIS - this.debris.length, 10);
+      const step = removed.length > maxBlocks ? Math.floor(removed.length / maxBlocks) : 1;
+      const force = 10 + speed * 0.08;
+      for (let i = 0; i < removed.length && this.debris.length < MAX_DEBRIS; i += step) {
+        const pos = removed[i];
+        const dx = pos.x - worldPos.x, dy = pos.y - worldPos.y, dz = pos.z - worldPos.z;
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+        const size = VOXEL_SIZE * (0.3 + Math.random() * 0.5);
+        const m = MeshBuilder.CreateBox(`gdeb_${this.debris.length}`, {
+          width: size, height: size * 0.7, depth: size
+        }, this.scene);
+        m.position.copyFrom(pos);
+        m.material = this.debrisMaterials[Math.floor(Math.random() * this.debrisMaterials.length)];
+        m.isPickable = false;
+        this.debris.push({
+          mesh: m,
+          velocity: new Vector3(
+            (dx / dist) * force + (Math.random() - 0.5) * 6,
+            (dy / dist) * force * 0.5 + Math.random() * force * 0.6 + 8,
+            (dz / dist) * force + (Math.random() - 0.5) * 6
+          ),
+          angularVelocity: new Vector3((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 12),
+          isChunk: true, settled: false, settleTime: 0,
+        });
+      }
+
+      this.spawnDust(worldPos, 6, 1.5);
 
       const disconnected = vb.findDisconnectedBlocks();
       if (disconnected.length > 0) {

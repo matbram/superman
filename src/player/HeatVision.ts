@@ -42,6 +42,9 @@ export class HeatVision {
   // Callbacks
   private onBuildingDamage: ((building: AbstractMesh, position: Vector3, damage: number) => void) | null = null;
 
+  // VoxelWorld for DDA raycast (set externally for accurate block-level targeting)
+  public voxelWorld: any = null; // import type would create circular dep
+
   constructor(scene: Scene, physicsManager: PhysicsManager) {
     this.scene = scene;
     this.physicsManager = physicsManager;
@@ -186,28 +189,48 @@ export class HeatVision {
     let beamLength = BEAM_LENGTH;
     let hitPoint: Vector3 | null = null;
 
-    if (rayResult.hit && rayResult.mesh) {
+    // Try VoxelWorld DDA raycast first (accurate block-level targeting)
+    // Falls back to physics raycast for non-voxelized buildings
+    let hitBuilding = false;
+
+    if (this.voxelWorld) {
+      const voxelHit = this.voxelWorld.collideRay(eyePosition, aimDirection, BEAM_LENGTH);
+      if (voxelHit.hit && voxelHit.building) {
+        beamLength = voxelHit.distance;
+        hitPoint = voxelHit.point;
+        hitBuilding = true;
+
+        this.damageAccumulator += DAMAGE_PER_SECOND * deltaTime;
+        if (this.damageAccumulator >= 30) { // Fire more frequently for responsiveness
+          this.voxelWorld.applyDamageAtGrid(
+            voxelHit.building, voxelHit.gridX, voxelHit.gridY, voxelHit.gridZ,
+            this.damageAccumulator * 2
+          );
+          this.damageAccumulator = 0;
+        }
+      }
+    }
+
+    // Fall back to mesh raycast (for non-voxelized buildings, ground, etc.)
+    if (!hitBuilding && rayResult.hit && rayResult.mesh) {
       beamLength = rayResult.distance;
       hitPoint = rayResult.point;
 
-      // Check if we hit a building or ground
       const meshName = rayResult.mesh.name;
       const isTarget = meshName.startsWith('building_') || meshName.startsWith('ground');
-      Diag.log('HeatVision', `hit: ${meshName.substring(0, 30)} dist=${rayResult.distance.toFixed(1)} isTarget=${isTarget}`);
       if (isTarget) {
-        // Accumulate damage - continuous stream
+        hitBuilding = true;
         this.damageAccumulator += DAMAGE_PER_SECOND * deltaTime;
-
-        // Deal damage frequently for massive destruction
-        if (this.damageAccumulator >= 50) {
+        if (this.damageAccumulator >= 30) {
           if (this.onBuildingDamage) {
-            // Pass high damage value to trigger full building destruction
             this.onBuildingDamage(rayResult.mesh, hitPoint, this.damageAccumulator * 2);
           }
           this.damageAccumulator = 0;
         }
       }
-    } else {
+    }
+
+    if (!hitBuilding) {
       Diag.count('HeatVision', 'miss');
     }
 

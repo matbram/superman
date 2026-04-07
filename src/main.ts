@@ -184,7 +184,9 @@ class Game {
       this.voxelWorld.applyDamage(buildingMesh, impactPosition, speed);
     });
 
-    // Heat vision - explosive impact with force
+    // Heat vision - give it direct VoxelWorld access for DDA accuracy
+    this.player.setHeatVisionVoxelWorld(this.voxelWorld);
+    // Fallback callback for non-voxelized buildings hit by mesh raycast
     this.player.setOnHeatVisionDamage((building, position, damage) => {
       this.voxelWorld.applyExplosiveDamage(building as Mesh, position, damage);
     });

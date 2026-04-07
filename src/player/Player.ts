@@ -920,6 +920,10 @@ export class Player {
     this.heatVision.setOnBuildingDamage(callback);
   }
 
+  public setHeatVisionVoxelWorld(voxelWorld: any): void {
+    this.heatVision.voxelWorld = voxelWorld;
+  }
+
   /**
    * Updates heat vision based on input
    * When active, left stick controls beam direction instead of movement
