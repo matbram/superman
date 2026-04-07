@@ -7,6 +7,7 @@ import { Scene } from '@babylonjs/core/scene';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { PointLight } from '@babylonjs/core/Lights/pointLight';
 import { Diag } from '../core/DiagnosticLog';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
@@ -387,24 +388,23 @@ export class City {
   }
 
   /**
-   * Add street light poles along avenues in a chunk.
-   * Just emissive meshes - no actual light sources (performance safe).
+   * Add street furniture: lamp posts with REAL lights, sidewalk strips, billboards.
    */
   private addStreetLights(worldX: number, worldZ: number, collisionMeshes: Mesh[]): void {
-    const LIGHT_SPACING = 40; // One light every 40 units along streets
-    const POLE_HEIGHT = 10;
+    const LIGHT_SPACING = 60;
+    const POLE_HEIGHT = 12;
+    let lightCount = 0;
+    const MAX_LIGHTS_PER_CHUNK = 4; // Real PointLights are expensive - limit strictly
 
-    // Place lights along the chunk edges (where streets are)
     for (let x = worldX + AVENUE_WIDTH / 2; x < worldX + CHUNK_SIZE; x += LIGHT_SPACING) {
       for (let z = worldZ + STREET_WIDTH / 2; z < worldZ + CHUNK_SIZE; z += LIGHT_SPACING) {
-        // Only place at street-adjacent positions (skip building interiors)
         const inStreetX = (x - worldX) % (BLOCK_WIDTH + AVENUE_WIDTH) < AVENUE_WIDTH;
         const inStreetZ = (z - worldZ) % (BLOCK_DEPTH_MIN + STREET_WIDTH) < STREET_WIDTH;
         if (!inStreetX && !inStreetZ) continue;
 
         // Pole
-        const pole = MeshBuilder.CreateCylinder(`lamp_pole`, {
-          diameter: 0.4, height: POLE_HEIGHT, tessellation: 6
+        const pole = MeshBuilder.CreateCylinder('lamp_pole', {
+          diameter: 0.5, height: POLE_HEIGHT, tessellation: 6
         }, this.scene);
         pole.position = new Vector3(x, POLE_HEIGHT / 2 + SIDEWALK_HEIGHT, z);
         pole.material = this.lampPoleMat;
@@ -412,16 +412,80 @@ export class City {
         pole.freezeWorldMatrix();
         collisionMeshes.push(pole);
 
-        // Light globe on top
-        const globe = MeshBuilder.CreateSphere(`lamp_light`, {
-          diameter: 1.5, segments: 4
+        // Globe
+        const globe = MeshBuilder.CreateSphere('lamp_light', {
+          diameter: 2, segments: 4
         }, this.scene);
-        globe.position = new Vector3(x, POLE_HEIGHT + 1 + SIDEWALK_HEIGHT, z);
+        globe.position = new Vector3(x, POLE_HEIGHT + 1.5 + SIDEWALK_HEIGHT, z);
         globe.material = this.streetLightMat;
         globe.isPickable = false;
         globe.freezeWorldMatrix();
         collisionMeshes.push(globe);
+
+        // REAL PointLight (limited per chunk for performance)
+        if (lightCount < MAX_LIGHTS_PER_CHUNK) {
+          const light = new PointLight(
+            `streetLight_${x}_${z}`,
+            new Vector3(x, POLE_HEIGHT + 1.5 + SIDEWALK_HEIGHT, z),
+            this.scene
+          );
+          light.intensity = 0.6;
+          light.range = 50;
+          light.diffuse = new Color3(1.0, 0.9, 0.6); // Warm sodium lamp
+          light.specular = new Color3(0.5, 0.4, 0.2);
+          lightCount++;
+        }
       }
+    }
+
+    // Add a billboard on the first avenue of each chunk (if downtown-ish)
+    const distFromCenter = Math.sqrt(
+      (worldX + CHUNK_SIZE / 2) ** 2 + (worldZ + CHUNK_SIZE / 2) ** 2
+    );
+    if (distFromCenter < 1500 && Math.random() > 0.4) {
+      const bbX = worldX + AVENUE_WIDTH / 2 + 5;
+      const bbZ = worldZ + CHUNK_SIZE * 0.3 + Math.random() * CHUNK_SIZE * 0.4;
+      const bbHeight = 25 + Math.random() * 15;
+
+      // Billboard frame
+      const billboard = MeshBuilder.CreateBox('billboard', {
+        width: 20, height: 10, depth: 1
+      }, this.scene);
+      billboard.position = new Vector3(bbX, bbHeight, bbZ);
+      billboard.isPickable = false;
+      billboard.freezeWorldMatrix();
+
+      // Bright emissive ad (glows at night)
+      const adMat = new StandardMaterial('adMat', this.scene);
+      const adColors = [
+        new Color3(0.9, 0.2, 0.1),  // Red ad
+        new Color3(0.1, 0.5, 0.9),  // Blue ad
+        new Color3(0.9, 0.8, 0.1),  // Yellow ad
+        new Color3(0.1, 0.9, 0.3),  // Green ad
+      ];
+      adMat.emissiveColor = adColors[Math.floor(Math.random() * adColors.length)];
+      adMat.diffuseColor = adMat.emissiveColor;
+      billboard.material = adMat;
+      collisionMeshes.push(billboard);
+
+      // Billboard support poles
+      const supportL = MeshBuilder.CreateCylinder('bb_support', {
+        diameter: 0.8, height: bbHeight - 5, tessellation: 6
+      }, this.scene);
+      supportL.position = new Vector3(bbX - 8, (bbHeight - 5) / 2, bbZ);
+      supportL.material = this.lampPoleMat;
+      supportL.isPickable = false;
+      supportL.freezeWorldMatrix();
+      collisionMeshes.push(supportL);
+
+      const supportR = MeshBuilder.CreateCylinder('bb_support2', {
+        diameter: 0.8, height: bbHeight - 5, tessellation: 6
+      }, this.scene);
+      supportR.position = new Vector3(bbX + 8, (bbHeight - 5) / 2, bbZ);
+      supportR.material = this.lampPoleMat;
+      supportR.isPickable = false;
+      supportR.freezeWorldMatrix();
+      collisionMeshes.push(supportR);
     }
   }
 
@@ -573,18 +637,32 @@ export class City {
     createCollisionBox(chunkGround, this.physicsManager);
     collisionMeshes.push(chunkGround);
 
-    // Create sidewalk (raised slightly)
-    const sidewalk = MeshBuilder.CreateBox(
-      `sidewalk_${key}`,
-      { width: CHUNK_SIZE - 15, height: SIDEWALK_HEIGHT, depth: CHUNK_SIZE - 15 },
-      this.scene
-    );
-    sidewalk.position = new Vector3(worldX + halfChunk, SIDEWALK_HEIGHT / 2, worldZ + halfChunk);
-    sidewalk.material = this.sidewalkMaterial;
-    sidewalk.receiveShadows = true;
-    sidewalk.freezeWorldMatrix();  // Static - never moves
-    createCollisionBox(sidewalk, this.physicsManager);
-    collisionMeshes.push(sidewalk);
+    // Create sidewalk strips along street edges (not covering whole chunk)
+    const SIDEWALK_W = 3; // Narrow sidewalk strip width
+    // Sidewalks along avenues (N-S)
+    for (let ax = worldX + AVENUE_WIDTH * 0.5; ax < worldX + CHUNK_SIZE; ax += BLOCK_WIDTH + AVENUE_WIDTH) {
+      // Left sidewalk of avenue
+      const swL = MeshBuilder.CreateBox(`sidewalk_${key}_L${ax}`, {
+        width: SIDEWALK_W, height: SIDEWALK_HEIGHT * 2, depth: CHUNK_SIZE
+      }, this.scene);
+      swL.position = new Vector3(ax - AVENUE_WIDTH * 0.5 + SIDEWALK_W * 0.5, SIDEWALK_HEIGHT, worldZ + halfChunk);
+      swL.material = this.sidewalkMaterial;
+      swL.receiveShadows = true;
+      swL.isPickable = false;
+      swL.freezeWorldMatrix();
+      collisionMeshes.push(swL);
+
+      // Right sidewalk of avenue
+      const swR = MeshBuilder.CreateBox(`sidewalk_${key}_R${ax}`, {
+        width: SIDEWALK_W, height: SIDEWALK_HEIGHT * 2, depth: CHUNK_SIZE
+      }, this.scene);
+      swR.position = new Vector3(ax + AVENUE_WIDTH * 0.5 - SIDEWALK_W * 0.5, SIDEWALK_HEIGHT, worldZ + halfChunk);
+      swR.material = this.sidewalkMaterial;
+      swR.receiveShadows = true;
+      swR.isPickable = false;
+      swR.freezeWorldMatrix();
+      collisionMeshes.push(swR);
+    }
 
     // ── NYC-STYLE STREET GRID ──
     // Avenues run N-S (along Z), streets run E-W (along X).

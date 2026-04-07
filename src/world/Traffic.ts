@@ -66,7 +66,8 @@ export class TrafficSystem {
     carMat.freeze();
     this.carMesh.material = carMat;
     this.carMesh.isPickable = false;
-    this.carMesh.isVisible = false; // Base mesh hidden, instances render
+    // Start visible - thin instances need the base mesh visible to render
+    this.carMesh.thinInstanceSetBuffer('matrix', new Float32Array(0), 16, false);
 
     this.matrices = new Float32Array(MAX_CARS * 16);
   }
@@ -162,17 +163,13 @@ export class TrafficSystem {
       this.matrices[offset + 15] = 1;
     }
 
-    if (count > 0) {
-      this.carMesh.thinInstanceSetBuffer(
-        'matrix',
-        this.matrices.subarray(0, count * 16),
-        16,
-        false
-      );
-      this.carMesh.isVisible = true;
-    } else {
-      this.carMesh.isVisible = false;
-    }
+    // Always update buffer - Babylon renders however many instances are in it
+    this.carMesh.thinInstanceSetBuffer(
+      'matrix',
+      count > 0 ? this.matrices.subarray(0, count * 16) : new Float32Array(0),
+      16,
+      false
+    );
   }
 
   public dispose(): void {

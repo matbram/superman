@@ -149,22 +149,21 @@ export class DayNightCycle {
 
     // Sun mesh position - massive sun on the horizon
     if (this.sunMesh) {
-      const sunVis = sunHeight > -0.15;
+      const sunVis = sunHeight > -0.05; // Only visible above horizon
       this.sunMesh.setEnabled(sunVis);
       if (this.sunGlowMesh) this.sunGlowMesh.setEnabled(sunVis);
       if (sunVis) {
-        // Sun sits near the horizon line, moves across the sky
         this.sunMesh.position.set(
           -sunHoriz * 1500,
-          Math.max(10, sunHeight * 800), // Stays LOW - near horizon at sunrise/sunset
+          Math.max(10, sunHeight * 800),
           -0.3 * 1500
         );
         if (this.sunGlowMesh) this.sunGlowMesh.position.copyFrom(this.sunMesh.position);
       }
     }
 
-    // ── Moon position ── (opposite the sun)
-    const moonVisible = sunHeight < 0.1;
+    // ── Moon position ── (ONLY when sun is fully below horizon - never both)
+    const moonVisible = sunHeight < -0.1;
     this.moonMesh.setEnabled(moonVisible);
     if (moonVisible) {
       const moonAngle = sunAngle + Math.PI;
@@ -201,8 +200,8 @@ export class DayNightCycle {
       0.5 + 0.5 * (1 - sunColorT)
     );
 
-    // ── Moon light ──
-    this.moonLight.intensity = moonVisible ? 0.15 * Math.max(0, -sunHeight) : 0;
+    // ── Moon light (only light source at night besides street lights) ──
+    this.moonLight.intensity = moonVisible ? 0.2 * Math.min(1, Math.abs(sunHeight) * 3) : 0;
 
     // ── Ambient light - kept LOW so sun dominates ──
     // Day: subtle sky fill. Night: almost nothing (moonlight only).

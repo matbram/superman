@@ -45,7 +45,7 @@ export function createScene(engine: Engine): SceneContext {
     new Vector3(0, 1, 0),
     scene
   );
-  ambientLight.intensity = 0.25;  // Low - sun should be primary
+  ambientLight.intensity = 0.1;  // Very low - sun is the ONLY real light source
   ambientLight.diffuse = new Color3(0.7, 0.75, 0.9);  // Subtle sky fill
   ambientLight.groundColor = new Color3(0.15, 0.12, 0.18); // Dark shadow areas
 
