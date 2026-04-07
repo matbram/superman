@@ -27,16 +27,15 @@ export interface SceneContext {
  */
 export function createScene(engine: Engine): SceneContext {
   const scene = new Scene(engine);
-  scene.autoClear = false;
   scene.autoAnimate = false;
 
-  // Set background color - warm sunset sky
-  scene.clearColor = new Color4(0.95, 0.6, 0.3, 1.0);
+  // Clear to blue sky - this is visible wherever sky domes don't cover
+  scene.clearColor = new Color4(0.35, 0.55, 0.85, 1.0);
 
-  // Atmospheric fog - golden sunset haze
+  // Atmospheric fog - subtle blue-gray haze for depth
   scene.fogMode = Scene.FOGMODE_EXP2;
-  scene.fogDensity = 0.00035;
-  scene.fogColor = new Color3(0.85, 0.65, 0.45); // Warm golden haze
+  scene.fogDensity = 0.0004;
+  scene.fogColor = new Color3(0.55, 0.65, 0.82);
 
   // Ambient light - VERY low so sun is the dominant light source
   // This creates realistic shadows - areas not hit by sun are dark
@@ -94,47 +93,18 @@ export function createScene(engine: Engine): SceneContext {
  * DayNightCycle controls their colors and positions over time.
  */
 function createSkyGradient(scene: Scene): void {
-  // Sky dome
-  const skybox = MeshBuilder.CreateSphere(
-    'skyDome',
-    { diameter: 3500, segments: 12 },
-    scene
-  );
-  skybox.infiniteDistance = true;
-  const skyMaterial = new StandardMaterial('skyMaterial', scene);
-  skyMaterial.backFaceCulling = false;
-  skyMaterial.disableLighting = true;
-  skyMaterial.emissiveColor = new Color3(0.3, 0.45, 0.75);
-  skybox.material = skyMaterial;
-  skybox.isPickable = false;
-
-  // Sun disc - MASSIVE, sits right on the horizon
+  // NO sky dome here - Atmosphere.ts provides the sky dome
+  // Only create the sun disc (DayNightCycle positions it)
   const sun = MeshBuilder.CreateSphere(
     'sunDisc',
-    { diameter: 400, segments: 16 },
+    { diameter: 200, segments: 10 },
     scene
   );
   sun.infiniteDistance = true;
   const sunMat = new StandardMaterial('sunMat', scene);
   sunMat.disableLighting = true;
-  sunMat.emissiveColor = new Color3(1.0, 0.85, 0.4);
+  sunMat.emissiveColor = new Color3(1.0, 0.9, 0.5);
   sun.material = sunMat;
   sun.isPickable = false;
-  // Initial position - DayNightCycle will update this
-  sun.position = new Vector3(1500, 50, -500);
-
-  // Sun glow halo - subtle warm haze around the sun (NOT a second sun)
-  const sunGlow = MeshBuilder.CreateSphere(
-    'sunGlow',
-    { diameter: 600, segments: 8 },
-    scene
-  );
-  sunGlow.infiniteDistance = true;
-  const glowMat = new StandardMaterial('sunGlowMat', scene);
-  glowMat.disableLighting = true;
-  glowMat.emissiveColor = new Color3(1.0, 0.75, 0.4);
-  glowMat.alpha = 0.06; // Very subtle - just a warm haze, not a visible sphere
-  sunGlow.material = glowMat;
-  sunGlow.isPickable = false;
-  sunGlow.position = sun.position.clone();
+  sun.position = new Vector3(1500, 400, -500);
 }
