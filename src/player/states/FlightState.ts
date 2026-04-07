@@ -57,6 +57,13 @@ export class FlightState extends BasePlayerState {
     // Enable flight effects
     player.setFlightMode(true);
     player.setBoostActive(false);
+
+    // Check if we entered Flight with a super dive request (from Hover double-tap LT)
+    if (player.consumeSuperDiveFlag()) {
+      console.log('[SuperDive] Flight entered with dive flag! Activating super dive immediately');
+      this.superDiving = true;
+      this.currentSpeed = Math.max(this.currentSpeed, MAX_SPEED * 0.6);
+    }
   }
 
   exit(player: Player): void {

@@ -897,6 +897,16 @@ export class Player {
     this.superDiveSpeed = speed;
   }
 
+  private superDiveFlag: boolean = false;
+  public setSuperDiveFlag(flag: boolean): void {
+    this.superDiveFlag = flag;
+  }
+  public consumeSuperDiveFlag(): boolean {
+    const val = this.superDiveFlag;
+    this.superDiveFlag = false;
+    return val;
+  }
+
   public consumeBoostTakeoff(): boolean {
     const val = this.boostTakeoff;
     this.boostTakeoff = false;
