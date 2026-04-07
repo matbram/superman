@@ -11,7 +11,7 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { Player } from './player/Player';
 import { City } from './world/City';
 import { Atmosphere } from './world/Atmosphere';
-import { BuildingDamage } from './world/BuildingDamage';
+import { VoxelWorld } from './world/VoxelWorld';
 import { AlienShip } from './world/AlienShip';
 import { Birds } from './world/Birds';
 import { Hud } from './ui/Hud';
@@ -34,7 +34,7 @@ class Game {
   private player: Player;
   private city: City;
   private atmosphere: Atmosphere;
-  private buildingDamage: BuildingDamage;
+  private voxelWorld: VoxelWorld;
   private alienShip: AlienShip;
   private birds: Birds;
   private hud: Hud;
@@ -54,7 +54,7 @@ class Game {
     city: 0,
     atmosphere: 0,
     wakeDamage: 0,
-    buildingDamage: 0,
+    voxelWorld: 0,
     alienShip: 0,
     birds: 0,
     render: 0,
@@ -94,18 +94,21 @@ class Game {
     this.atmosphere = new Atmosphere(this.sceneContext.scene);
 
     // Initialize building damage system
-    this.buildingDamage = new BuildingDamage(this.sceneContext.scene, this.physicsManager);
+    this.voxelWorld = new VoxelWorld(this.sceneContext.scene, this.physicsManager);
+
+    // Give physics direct access to VoxelWorld for grid-based collision
+    this.physicsManager.voxelWorld = this.voxelWorld;
 
     // Clean up voxelized buildings when chunks unload
     this.city.onChunkUnload = (chunkKey: string) => {
-      this.buildingDamage.cleanupChunk(chunkKey);
+      this.voxelWorld.cleanupChunk(chunkKey);
     };
 
     // Initialize alien ship (World Engine style gravity beam)
     this.alienShip = new AlienShip(this.sceneContext.scene);
 
     // Connect alien ship gravity zone to building damage system
-    this.buildingDamage.setGravityZone(
+    this.voxelWorld.setGravityZone(
       this.alienShip.getGravityZone(),
       (pos) => this.alienShip.getGravityAtPosition(pos)
     );
@@ -116,8 +119,8 @@ class Game {
       for (const building of buildings) {
         const dx = building.position.x - position.x;
         const dz = building.position.z - position.z;
-        if (dx * dx + dz * dz < radius * radius && this.buildingDamage.isVoxelized(building)) {
-          this.buildingDamage.applyDamage(building, building.position, damage);
+        if (dx * dx + dz * dz < radius * radius && this.voxelWorld.isVoxelized(building)) {
+          this.voxelWorld.applyDamage(building, building.position, damage);
         }
       }
     });
@@ -144,30 +147,19 @@ class Game {
         const dz = building.position.z - position.z;
         const dist = Math.sqrt(dx * dx + dz * dz);
         if (dist < radius) {
-          this.buildingDamage.applyDamage(building, position, force * (1 - dist / radius) * 30);
+          this.voxelWorld.applyDamage(building, position, force * (1 - dist / radius) * 30);
         }
       }
     });
 
-    // Player collision (backup raycast trigger - catches grazing hits)
+    // Player collision (backup for grazing hits physics might miss)
     this.player.setOnBuildingCollision((buildingMesh, impactPosition, speed) => {
-      this.buildingDamage.applyDamage(buildingMesh, impactPosition, speed);
+      this.voxelWorld.applyDamage(buildingMesh, impactPosition, speed);
     });
-
-    // Physics collision (primary trigger - fires BEFORE push, zero lag)
-    // Per-mesh 80ms cooldown in applyDamage prevents double-counting
-    this.physicsManager.onBuildingCollision = (mesh, point, speed) => {
-      this.buildingDamage.applyDamage(mesh as Mesh, point, speed);
-    };
-
-    // Voxel-aware collision check: lets Superman fly through holes
-    this.physicsManager.hasSolidBlocksAt = (mesh, point) => {
-      return this.buildingDamage.hasSolidBlocksAt(mesh as Mesh, point);
-    };
 
     // Heat vision
     this.player.setOnHeatVisionDamage((building, position, damage) => {
-      this.buildingDamage.applyDamage(building as Mesh, position, damage);
+      this.voxelWorld.applyDamage(building as Mesh, position, damage);
     });
 
     // Initialize UI
@@ -268,8 +260,8 @@ class Game {
         const dx = building.position.x - playerPos.x;
         const dz = building.position.z - playerPos.z;
         const distSq = dx * dx + dz * dz;
-        if (distSq < wakeRadiusSq && distSq > 64 && this.buildingDamage.isVoxelized(building)) {
-          this.buildingDamage.applyDamage(building, building.position, playerSpeed * 0.3);
+        if (distSq < wakeRadiusSq && distSq > 64 && this.voxelWorld.isVoxelized(building)) {
+          this.voxelWorld.applyDamage(building, building.position, playerSpeed * 0.3);
         }
       }
     }
@@ -278,9 +270,9 @@ class Game {
 
     // Update building damage (debris physics, distance-based cleanup)
     t0 = performance.now();
-    this.buildingDamage.update(deltaTime, playerPos);
+    this.voxelWorld.update(deltaTime, playerPos);
     t1 = performance.now();
-    this.perfTimings.buildingDamage += t1 - t0;
+    this.perfTimings.voxelWorld += t1 - t0;
 
     // Update alien ship (gravity beam, oscillating effects)
     t0 = performance.now();
@@ -346,7 +338,7 @@ class Game {
             city: (this.perfTimings.city / this.frameCount).toFixed(2) + 'ms',
             atmosphere: (this.perfTimings.atmosphere / this.frameCount).toFixed(2) + 'ms',
             wakeDamage: (this.perfTimings.wakeDamage / this.frameCount).toFixed(2) + 'ms',
-            buildingDamage: (this.perfTimings.buildingDamage / this.frameCount).toFixed(2) + 'ms',
+            voxelWorld: (this.perfTimings.voxelWorld / this.frameCount).toFixed(2) + 'ms',
             alienShip: (this.perfTimings.alienShip / this.frameCount).toFixed(2) + 'ms',
             birds: (this.perfTimings.birds / this.frameCount).toFixed(2) + 'ms',
             render: (this.perfTimings.render / this.frameCount).toFixed(2) + 'ms',
@@ -363,7 +355,7 @@ class Game {
           city: 0,
           atmosphere: 0,
           wakeDamage: 0,
-          buildingDamage: 0,
+          voxelWorld: 0,
           alienShip: 0,
           birds: 0,
           render: 0,

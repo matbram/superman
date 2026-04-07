@@ -1,16 +1,15 @@
 /**
- * VoxelBuilding - A destructible building made of small blocks.
+ * VoxelBuilding - A destructible building made of individual blocks.
  *
- * Uses Babylon.js thin instances for performance: all blocks of one material
- * render in a single draw call. Individual blocks can be removed by zeroing
- * their transform matrix in the instance buffer.
+ * Each building is a 3D boolean grid. Blocks can be individually removed.
+ * Rendering uses Babylon.js thin instances (one draw call per building).
+ * Collision uses direct grid queries (no Babylon.js raycasting needed).
  *
- * Buildings are represented as a 3D grid where each cell is either solid or empty.
- * Removing a cell:
- *   1. Marks grid cell as empty
- *   2. Updates the thin instance matrix to hide it (scale=0)
- *   3. Spawns rubble debris at that position
- *   4. Checks structural support - unsupported blocks above fall too
+ * Key algorithms:
+ * - Swap-and-shrink: O(1) block removal without GPU waste
+ * - DDA raycast: exact per-block collision at any angle
+ * - Flood-fill: structural integrity via connected-component analysis
+ * - Shell-only: only exterior faces rendered (~35% fewer instances)
  */
 
 import { Scene } from '@babylonjs/core/scene';
@@ -20,100 +19,153 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import '@babylonjs/core/Meshes/thinInstanceMesh';
 
-// Voxel size in world units - small enough to look like building detail,
-// big enough to keep instance count manageable
-const VOXEL_SIZE = 4;
-
-// Only build shell (exterior faces) - no interior voxels needed
-// This dramatically reduces instance count
+export const VOXEL_SIZE = 4;
 const SHELL_ONLY = true;
 
-// Structural constants
-const SUPPORT_CHECK_RADIUS = 1; // Check adjacent blocks for support
+// ── Interfaces ─────────────────────────────────────────────────────────
 
-/**
- * Represents a single destructible voxel building
- */
+export interface VoxelRayHit {
+  hit: boolean;
+  point: Vector3;
+  normal: Vector3;
+  distance: number;
+  gridX: number;
+  gridY: number;
+  gridZ: number;
+}
+
+const NO_HIT: VoxelRayHit = {
+  hit: false,
+  point: Vector3.Zero(),
+  normal: Vector3.Up(),
+  distance: Infinity,
+  gridX: -1, gridY: -1, gridZ: -1,
+};
+
+// ── VoxelBuilding ──────────────────────────────────────────────────────
+
 export class VoxelBuilding {
   private scene: Scene;
 
   // Grid state: true = solid, false = empty
-  private grid: boolean[][][]; // [x][y][z]
+  private grid: boolean[][][];
   readonly gridWidth: number;
   readonly gridHeight: number;
   readonly gridDepth: number;
 
-  // Thin instance rendering
-  private blockMesh: Mesh;         // Base mesh (one cube, many instances)
-  private instanceMatrices: Float32Array;
-  private instanceCount: number = 0;
+  // World-space axis-aligned bounding box
+  readonly minWorld: Vector3;
+  readonly maxWorld: Vector3;
 
-  // Map from grid coords to instance index (for hiding specific blocks)
-  private gridToInstance: Map<string, number> = new Map();
-
-  // World position of the building's bottom-center
+  // World position of building origin (bottom-center)
   readonly worldPosition: Vector3;
   readonly worldWidth: number;
   readonly worldHeight: number;
   readonly worldDepth: number;
 
-  // For damage callbacks
-  public onBlockRemoved: ((worldPos: Vector3, count: number) => void) | null = null;
+  // Thin instance rendering
+  private blockMesh: Mesh;
+  private instanceMatrices: Float32Array;
+  private instanceCount: number = 0;
 
-  // Dirty column tracking - only scan these columns for unsupported blocks
-  private dirtyColumns: Set<string> = new Set();
-
-  // Map from instance index back to grid key (for swap-and-shrink)
+  // Grid↔instance mapping for swap-and-shrink
+  private gridToInstance: Map<string, number> = new Map();
   private instanceToGrid: string[] = [];
 
-  // Reusable objects
+  // Dirty column tracking for structural support
+  private dirtyColumns: Set<string> = new Set();
+  private bufferDirty = false;
+
+  // Original meshes that were merged into this voxel building
+  readonly originalMeshes: Mesh[];
+
+  // Reusable statics
   private static _tmpMatrix = Matrix.Identity();
-  private static _tmpPosition = new Vector3();
 
   constructor(
     scene: Scene,
-    position: Vector3,
-    width: number,
-    height: number,
-    depth: number,
-    material: StandardMaterial,
-    buildingName: string = 'building_voxel'
+    meshes: Mesh[],
+    material: StandardMaterial
   ) {
     this.scene = scene;
-    this.worldPosition = position.clone();
-    this.worldWidth = width;
-    this.worldHeight = height;
-    this.worldDepth = depth;
+    this.originalMeshes = meshes;
 
-    // Calculate grid dimensions
-    this.gridWidth = Math.max(2, Math.round(width / VOXEL_SIZE));
-    this.gridHeight = Math.max(3, Math.round(height / VOXEL_SIZE));
-    this.gridDepth = Math.max(2, Math.round(depth / VOXEL_SIZE));
+    // Compute unified bounding box across ALL meshes
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
 
-    // Initialize grid - all solid
+    for (const mesh of meshes) {
+      const bounds = mesh.getBoundingInfo().boundingBox;
+      minX = Math.min(minX, bounds.minimumWorld.x);
+      minY = Math.min(minY, bounds.minimumWorld.y);
+      minZ = Math.min(minZ, bounds.minimumWorld.z);
+      maxX = Math.max(maxX, bounds.maximumWorld.x);
+      maxY = Math.max(maxY, bounds.maximumWorld.y);
+      maxZ = Math.max(maxZ, bounds.maximumWorld.z);
+    }
+
+    this.worldWidth = maxX - minX;
+    this.worldHeight = maxY - minY;
+    this.worldDepth = maxZ - minZ;
+
+    // Origin at bottom-center of unified bounds
+    this.worldPosition = new Vector3((minX + maxX) * 0.5, minY, (minZ + maxZ) * 0.5);
+    this.minWorld = new Vector3(minX, minY, minZ);
+    this.maxWorld = new Vector3(maxX, maxY, maxZ);
+
+    // Grid dimensions
+    this.gridWidth = Math.max(2, Math.round(this.worldWidth / VOXEL_SIZE));
+    this.gridHeight = Math.max(3, Math.round(this.worldHeight / VOXEL_SIZE));
+    this.gridDepth = Math.max(2, Math.round(this.worldDepth / VOXEL_SIZE));
+
+    // Initialize grid - mark cells that overlap with ANY original mesh as solid
     this.grid = [];
     for (let x = 0; x < this.gridWidth; x++) {
       this.grid[x] = [];
       for (let y = 0; y < this.gridHeight; y++) {
         this.grid[x][y] = [];
         for (let z = 0; z < this.gridDepth; z++) {
-          if (SHELL_ONLY) {
-            // Only create exterior faces (shell)
+          // World position of this grid cell center
+          const wx = minX + (x + 0.5) * VOXEL_SIZE;
+          const wy = minY + (y + 0.5) * VOXEL_SIZE;
+          const wz = minZ + (z + 0.5) * VOXEL_SIZE;
+
+          // Check if this cell is inside any of the original meshes
+          let inside = false;
+          for (const mesh of meshes) {
+            const b = mesh.getBoundingInfo().boundingBox;
+            if (wx >= b.minimumWorld.x && wx <= b.maximumWorld.x &&
+                wy >= b.minimumWorld.y && wy <= b.maximumWorld.y &&
+                wz >= b.minimumWorld.z && wz <= b.maximumWorld.z) {
+              inside = true;
+              break;
+            }
+          }
+
+          if (SHELL_ONLY && inside) {
+            // Only keep exterior faces of the unified shape
             const isExterior = x === 0 || x === this.gridWidth - 1
               || y === 0 || y === this.gridHeight - 1
-              || z === 0 || z === this.gridDepth - 1;
+              || z === 0 || z === this.gridDepth - 1
+              // Also keep faces at the boundary of each individual mesh
+              || !this.isInsideAnyMesh(meshes, minX + (x - 0.5) * VOXEL_SIZE, wy, wz)
+              || !this.isInsideAnyMesh(meshes, minX + (x + 1.5) * VOXEL_SIZE, wy, wz)
+              || !this.isInsideAnyMesh(meshes, wx, minY + (y - 0.5) * VOXEL_SIZE, wz)
+              || !this.isInsideAnyMesh(meshes, wx, minY + (y + 1.5) * VOXEL_SIZE, wz)
+              || !this.isInsideAnyMesh(meshes, wx, wy, minZ + (z - 0.5) * VOXEL_SIZE)
+              || !this.isInsideAnyMesh(meshes, wx, wy, minZ + (z + 1.5) * VOXEL_SIZE);
             this.grid[x][y][z] = isExterior;
           } else {
-            this.grid[x][y][z] = true;
+            this.grid[x][y][z] = inside;
           }
         }
       }
     }
 
-    // Create thin instance mesh - named with building_ prefix so all systems
-    // (heat vision, collision, damage) recognize it as a building
+    // Create thin instance mesh
+    const name = meshes[0]?.name || 'building_voxel';
     this.blockMesh = MeshBuilder.CreateBox(
-      buildingName + '_voxels',
+      name + '_voxels',
       { size: VOXEL_SIZE * 1.01 },
       scene
     );
@@ -121,44 +173,49 @@ export class VoxelBuilding {
     this.blockMesh.isPickable = false;
     this.blockMesh.receiveShadows = true;
 
-    // Build instance buffer
     this.buildInstances();
   }
 
-  /**
-   * Builds the thin instance buffer from the grid state.
-   * Called once at creation and can be called to rebuild after bulk changes.
-   */
-  private buildInstances(): void {
-    // Count solid blocks
-    let count = 0;
-    for (let x = 0; x < this.gridWidth; x++) {
-      for (let y = 0; y < this.gridHeight; y++) {
-        for (let z = 0; z < this.gridDepth; z++) {
-          if (this.grid[x][y][z]) count++;
-        }
+  private isInsideAnyMesh(meshes: Mesh[], wx: number, wy: number, wz: number): boolean {
+    for (const mesh of meshes) {
+      const b = mesh.getBoundingInfo().boundingBox;
+      if (wx >= b.minimumWorld.x && wx <= b.maximumWorld.x &&
+          wy >= b.minimumWorld.y && wy <= b.maximumWorld.y &&
+          wz >= b.minimumWorld.z && wz <= b.maximumWorld.z) {
+        return true;
       }
     }
+    return false;
+  }
+
+  // ── Instance Buffer Management ─────────────────────────────────────
+
+  private buildInstances(): void {
+    let count = 0;
+    for (let x = 0; x < this.gridWidth; x++)
+      for (let y = 0; y < this.gridHeight; y++)
+        for (let z = 0; z < this.gridDepth; z++)
+          if (this.grid[x][y][z]) count++;
 
     this.instanceCount = count;
-    // 16 floats per 4x4 matrix
     this.instanceMatrices = new Float32Array(count * 16);
     this.gridToInstance.clear();
     this.instanceToGrid = [];
 
     let idx = 0;
+    const minX = this.minWorld.x;
+    const minY = this.minWorld.y;
+    const minZ = this.minWorld.z;
+
     for (let x = 0; x < this.gridWidth; x++) {
       for (let y = 0; y < this.gridHeight; y++) {
         for (let z = 0; z < this.gridDepth; z++) {
           if (!this.grid[x][y][z]) continue;
-
-          const worldX = this.worldPosition.x - this.worldWidth * 0.5 + (x + 0.5) * VOXEL_SIZE;
-          const worldY = this.worldPosition.y + (y + 0.5) * VOXEL_SIZE;
-          const worldZ = this.worldPosition.z - this.worldDepth * 0.5 + (z + 0.5) * VOXEL_SIZE;
-
-          Matrix.TranslationToRef(worldX, worldY, worldZ, VoxelBuilding._tmpMatrix);
+          const wx = minX + (x + 0.5) * VOXEL_SIZE;
+          const wy = minY + (y + 0.5) * VOXEL_SIZE;
+          const wz = minZ + (z + 0.5) * VOXEL_SIZE;
+          Matrix.TranslationToRef(wx, wy, wz, VoxelBuilding._tmpMatrix);
           VoxelBuilding._tmpMatrix.copyToArray(this.instanceMatrices, idx * 16);
-
           const key = `${x},${y},${z}`;
           this.gridToInstance.set(key, idx);
           this.instanceToGrid[idx] = key;
@@ -167,289 +224,327 @@ export class VoxelBuilding {
       }
     }
 
-    // Apply to mesh
     this.blockMesh.thinInstanceSetBuffer('matrix', this.instanceMatrices, 16, false);
   }
 
-  /**
-   * Converts a world position to grid coordinates
-   */
+  // ── World ↔ Grid Conversion ────────────────────────────────────────
+
   public worldToGrid(worldPos: Vector3): { x: number; y: number; z: number } | null {
-    const localX = worldPos.x - (this.worldPosition.x - this.worldWidth * 0.5);
-    const localY = worldPos.y - this.worldPosition.y;
-    const localZ = worldPos.z - (this.worldPosition.z - this.worldDepth * 0.5);
-
-    const gx = Math.floor(localX / VOXEL_SIZE);
-    const gy = Math.floor(localY / VOXEL_SIZE);
-    const gz = Math.floor(localZ / VOXEL_SIZE);
-
+    const gx = Math.floor((worldPos.x - this.minWorld.x) / VOXEL_SIZE);
+    const gy = Math.floor((worldPos.y - this.minWorld.y) / VOXEL_SIZE);
+    const gz = Math.floor((worldPos.z - this.minWorld.z) / VOXEL_SIZE);
     if (gx < 0 || gx >= this.gridWidth || gy < 0 || gy >= this.gridHeight || gz < 0 || gz >= this.gridDepth) {
       return null;
     }
-
     return { x: gx, y: gy, z: gz };
   }
 
-  /**
-   * Converts grid coordinates to world position (center of block)
-   */
-  public gridToWorld(gx: number, gy: number, gz: number): Vector3 {
+  public gridToWorldPos(gx: number, gy: number, gz: number): Vector3 {
     return new Vector3(
-      this.worldPosition.x - this.worldWidth * 0.5 + (gx + 0.5) * VOXEL_SIZE,
-      this.worldPosition.y + (gy + 0.5) * VOXEL_SIZE,
-      this.worldPosition.z - this.worldDepth * 0.5 + (gz + 0.5) * VOXEL_SIZE
+      this.minWorld.x + (gx + 0.5) * VOXEL_SIZE,
+      this.minWorld.y + (gy + 0.5) * VOXEL_SIZE,
+      this.minWorld.z + (gz + 0.5) * VOXEL_SIZE
     );
   }
 
-  /**
-   * Checks if a grid cell is solid
-   */
+  // ── Direct Collision Queries ───────────────────────────────────────
+
+  /** Is the world-space point inside this building's bounding box? */
+  public containsPoint(p: Vector3): boolean {
+    return p.x >= this.minWorld.x && p.x <= this.maxWorld.x
+      && p.y >= this.minWorld.y && p.y <= this.maxWorld.y
+      && p.z >= this.minWorld.z && p.z <= this.maxWorld.z;
+  }
+
+  /** Is there a solid block at this world position? */
+  public isSolidAtWorld(p: Vector3): boolean {
+    const g = this.worldToGrid(p);
+    return g !== null && this.grid[g.x][g.y][g.z];
+  }
+
+  /** Grid-level solid check */
   public isSolid(x: number, y: number, z: number): boolean {
-    if (x < 0 || x >= this.gridWidth || y < 0 || y >= this.gridHeight || z < 0 || z >= this.gridDepth) {
-      return false;
-    }
+    if (x < 0 || x >= this.gridWidth || y < 0 || y >= this.gridHeight || z < 0 || z >= this.gridDepth) return false;
     return this.grid[x][y][z];
   }
 
+  // ── DDA Raycast Through Voxel Grid ─────────────────────────────────
+
   /**
-   * Removes a single block at grid coordinates.
-   * Returns the world position of the removed block, or null if already empty.
+   * Cast a ray through the voxel grid using DDA (Digital Differential Analyzer).
+   * Returns the first solid block hit with exact position and face normal.
+   * This is how Minecraft does raycasting - O(distance/voxelSize) steps.
    */
-  // Track whether buffer needs updating (batch multiple removes per frame)
-  private bufferDirty = false;
+  public raycast(origin: Vector3, direction: Vector3, maxDist: number = 500): VoxelRayHit {
+    // Ray-AABB intersection to find entry point
+    let tMin = 0;
+    let tMax = maxDist;
 
-  public removeBlock(x: number, y: number, z: number): Vector3 | null {
-    if (!this.isSolid(x, y, z)) return null;
+    const invDirX = direction.x !== 0 ? 1 / direction.x : (direction.x >= 0 ? 1e30 : -1e30);
+    const invDirY = direction.y !== 0 ? 1 / direction.y : (direction.y >= 0 ? 1e30 : -1e30);
+    const invDirZ = direction.z !== 0 ? 1 / direction.z : (direction.z >= 0 ? 1e30 : -1e30);
 
-    this.grid[x][y][z] = false;
+    const t1x = (this.minWorld.x - origin.x) * invDirX;
+    const t2x = (this.maxWorld.x - origin.x) * invDirX;
+    tMin = Math.max(tMin, Math.min(t1x, t2x));
+    tMax = Math.min(tMax, Math.max(t1x, t2x));
 
-    // Mark this column and neighbors as dirty for structural support check
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dz = -1; dz <= 1; dz++) {
-        this.dirtyColumns.add(`${x + dx},${z + dz}`);
+    const t1y = (this.minWorld.y - origin.y) * invDirY;
+    const t2y = (this.maxWorld.y - origin.y) * invDirY;
+    tMin = Math.max(tMin, Math.min(t1y, t2y));
+    tMax = Math.min(tMax, Math.max(t1y, t2y));
+
+    const t1z = (this.minWorld.z - origin.z) * invDirZ;
+    const t2z = (this.maxWorld.z - origin.z) * invDirZ;
+    tMin = Math.max(tMin, Math.min(t1z, t2z));
+    tMax = Math.min(tMax, Math.max(t1z, t2z));
+
+    if (tMin > tMax || tMax < 0) return NO_HIT;
+
+    // Start position (clamp to entry point if outside)
+    const startT = Math.max(0, tMin - 0.01);
+    const sx = origin.x + direction.x * startT;
+    const sy = origin.y + direction.y * startT;
+    const sz = origin.z + direction.z * startT;
+
+    // Current grid cell
+    let gx = Math.floor((sx - this.minWorld.x) / VOXEL_SIZE);
+    let gy = Math.floor((sy - this.minWorld.y) / VOXEL_SIZE);
+    let gz = Math.floor((sz - this.minWorld.z) / VOXEL_SIZE);
+
+    // Clamp to grid bounds
+    gx = Math.max(0, Math.min(gx, this.gridWidth - 1));
+    gy = Math.max(0, Math.min(gy, this.gridHeight - 1));
+    gz = Math.max(0, Math.min(gz, this.gridDepth - 1));
+
+    // DDA step direction
+    const stepX = direction.x >= 0 ? 1 : -1;
+    const stepY = direction.y >= 0 ? 1 : -1;
+    const stepZ = direction.z >= 0 ? 1 : -1;
+
+    // Distance to next grid boundary for each axis
+    const cellMinX = this.minWorld.x + gx * VOXEL_SIZE;
+    const cellMinY = this.minWorld.y + gy * VOXEL_SIZE;
+    const cellMinZ = this.minWorld.z + gz * VOXEL_SIZE;
+
+    let tMaxX = invDirX * ((stepX > 0 ? cellMinX + VOXEL_SIZE : cellMinX) - sx);
+    let tMaxY = invDirY * ((stepY > 0 ? cellMinY + VOXEL_SIZE : cellMinY) - sy);
+    let tMaxZ = invDirZ * ((stepZ > 0 ? cellMinZ + VOXEL_SIZE : cellMinZ) - sz);
+
+    const tDeltaX = Math.abs(VOXEL_SIZE * invDirX);
+    const tDeltaY = Math.abs(VOXEL_SIZE * invDirY);
+    const tDeltaZ = Math.abs(VOXEL_SIZE * invDirZ);
+
+    // If direction component is zero, set tMax to infinity (never step that axis)
+    if (direction.x === 0) tMaxX = Infinity;
+    if (direction.y === 0) tMaxY = Infinity;
+    if (direction.z === 0) tMaxZ = Infinity;
+
+    // Walk through grid
+    const maxSteps = this.gridWidth + this.gridHeight + this.gridDepth;
+    let lastStepAxis = -1; // 0=X, 1=Y, 2=Z
+
+    for (let step = 0; step < maxSteps; step++) {
+      // Check current cell
+      if (gx >= 0 && gx < this.gridWidth && gy >= 0 && gy < this.gridHeight && gz >= 0 && gz < this.gridDepth) {
+        if (this.grid[gx][gy][gz]) {
+          // HIT! Calculate exact hit point and normal
+          const hitPoint = this.gridToWorldPos(gx, gy, gz);
+          const dist = Vector3.Distance(origin, hitPoint);
+
+          // Normal based on which face we entered from
+          let normal: Vector3;
+          if (lastStepAxis === 0) normal = new Vector3(-stepX, 0, 0);
+          else if (lastStepAxis === 1) normal = new Vector3(0, -stepY, 0);
+          else if (lastStepAxis === 2) normal = new Vector3(0, 0, -stepZ);
+          else normal = direction.scale(-1).normalize();
+
+          return { hit: true, point: hitPoint, normal, distance: dist, gridX: gx, gridY: gy, gridZ: gz };
+        }
+      }
+
+      // Step to next cell (DDA)
+      if (tMaxX < tMaxY) {
+        if (tMaxX < tMaxZ) {
+          gx += stepX;
+          tMaxX += tDeltaX;
+          lastStepAxis = 0;
+        } else {
+          gz += stepZ;
+          tMaxZ += tDeltaZ;
+          lastStepAxis = 2;
+        }
+      } else {
+        if (tMaxY < tMaxZ) {
+          gy += stepY;
+          tMaxY += tDeltaY;
+          lastStepAxis = 1;
+        } else {
+          gz += stepZ;
+          tMaxZ += tDeltaZ;
+          lastStepAxis = 2;
+        }
+      }
+
+      // Out of bounds?
+      if (gx < 0 || gx >= this.gridWidth || gy < 0 || gy >= this.gridHeight || gz < 0 || gz >= this.gridDepth) {
+        break;
       }
     }
 
-    // Swap-and-shrink: move the last instance into this slot, then shrink count.
-    // This avoids zero-scale matrices which break hardware instancing in Babylon.js.
+    return NO_HIT;
+  }
+
+  // ── Block Removal (Swap-and-Shrink) ────────────────────────────────
+
+  public removeBlock(x: number, y: number, z: number): Vector3 | null {
+    if (!this.isSolid(x, y, z)) return null;
+    this.grid[x][y][z] = false;
+
+    // Dirty columns for structural check
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dz = -1; dz <= 1; dz++)
+        this.dirtyColumns.add(`${x + dx},${z + dz}`);
+
+    // Swap-and-shrink: move last instance into removed slot
     const key = `${x},${y},${z}`;
     const removeIdx = this.gridToInstance.get(key);
     if (removeIdx !== undefined) {
       const lastIdx = this.instanceCount - 1;
-
       if (removeIdx !== lastIdx) {
-        // Copy last instance's matrix into the removed slot
-        const srcOffset = lastIdx * 16;
-        const dstOffset = removeIdx * 16;
-        for (let i = 0; i < 16; i++) {
-          this.instanceMatrices[dstOffset + i] = this.instanceMatrices[srcOffset + i];
-        }
-
-        // Update the maps: the grid key that was at lastIdx is now at removeIdx
+        const srcOff = lastIdx * 16;
+        const dstOff = removeIdx * 16;
+        for (let i = 0; i < 16; i++)
+          this.instanceMatrices[dstOff + i] = this.instanceMatrices[srcOff + i];
         const lastKey = this.instanceToGrid[lastIdx];
         this.gridToInstance.set(lastKey, removeIdx);
         this.instanceToGrid[removeIdx] = lastKey;
       }
-
-      // Remove from maps
       this.gridToInstance.delete(key);
       this.instanceCount--;
-
       this.bufferDirty = true;
     }
 
-    return this.gridToWorld(x, y, z);
+    return this.gridToWorldPos(x, y, z);
   }
 
-  /**
-   * Flushes pending instance buffer changes to the GPU.
-   * Call after a batch of removeBlock calls for efficiency.
-   */
   public flushChanges(): void {
     if (!this.bufferDirty) return;
     this.bufferDirty = false;
-
-    // Update the thin instance buffer with new count
     this.blockMesh.thinInstanceSetBuffer(
       'matrix',
       this.instanceMatrices.subarray(0, this.instanceCount * 16),
-      16,
-      false
+      16, false
     );
   }
 
-  /**
-   * Removes blocks in a sphere around a world position.
-   * Returns array of world positions of removed blocks.
-   */
   public removeBlocksInRadius(worldPos: Vector3, radius: number): Vector3[] {
     const removed: Vector3[] = [];
     const gridRadius = Math.ceil(radius / VOXEL_SIZE);
     const center = this.worldToGrid(worldPos);
     if (!center) return removed;
-
     const radiusSq = radius * radius;
 
-    for (let dx = -gridRadius; dx <= gridRadius; dx++) {
-      for (let dy = -gridRadius; dy <= gridRadius; dy++) {
+    for (let dx = -gridRadius; dx <= gridRadius; dx++)
+      for (let dy = -gridRadius; dy <= gridRadius; dy++)
         for (let dz = -gridRadius; dz <= gridRadius; dz++) {
-          const gx = center.x + dx;
-          const gy = center.y + dy;
-          const gz = center.z + dz;
-
-          if (!this.isSolid(gx, gy, gz)) continue;
-
-          // Check sphere distance
-          const wx = (dx * VOXEL_SIZE);
-          const wy = (dy * VOXEL_SIZE);
-          const wz = (dz * VOXEL_SIZE);
+          const wx = dx * VOXEL_SIZE, wy = dy * VOXEL_SIZE, wz = dz * VOXEL_SIZE;
           if (wx * wx + wy * wy + wz * wz > radiusSq) continue;
-
-          const pos = this.removeBlock(gx, gy, gz);
+          const pos = this.removeBlock(center.x + dx, center.y + dy, center.z + dz);
           if (pos) removed.push(pos);
         }
-      }
-    }
 
     this.flushChanges();
     return removed;
   }
 
+  // ── Structural Integrity ───────────────────────────────────────────
+
   /**
-   * Removes blocks along a ray (for Superman punch-through).
-   * Returns array of world positions of removed blocks.
+   * Flood-fill from ground level to find blocks NOT connected to ground.
+   * Returns disconnected clusters as arrays of grid positions.
+   * Much more robust than column-check - handles overhangs, arches, etc.
    */
-  public removeBlocksAlongRay(origin: Vector3, direction: Vector3, radius: number): Vector3[] {
-    const removed: Vector3[] = [];
-    const gridRadius = Math.ceil(radius / VOXEL_SIZE);
+  public findDisconnectedBlocks(): { x: number; y: number; z: number }[] {
+    if (this.dirtyColumns.size === 0) return [];
 
-    // Step along the ray through the building
-    const step = VOXEL_SIZE * 0.5;
-    const maxDist = Math.sqrt(this.worldWidth * this.worldWidth + this.worldDepth * this.worldDepth) + VOXEL_SIZE;
+    // BFS from all ground-level blocks to mark connected blocks
+    const connected = new Uint8Array(this.gridWidth * this.gridHeight * this.gridDepth);
+    const queue: number[] = []; // packed as x + y*gw + z*gw*gh
 
-    for (let d = -VOXEL_SIZE; d < maxDist; d += step) {
-      const px = origin.x + direction.x * d;
-      const py = origin.y + direction.y * d;
-      const pz = origin.z + direction.z * d;
+    const gw = this.gridWidth;
+    const gh = this.gridHeight;
+    const pack = (x: number, y: number, z: number) => x + y * gw + z * gw * gh;
 
-      VoxelBuilding._tmpPosition.set(px, py, pz);
-      const center = this.worldToGrid(VoxelBuilding._tmpPosition);
-      if (!center) continue;
-
-      // Remove blocks in cylinder around ray
-      for (let dx = -gridRadius; dx <= gridRadius; dx++) {
-        for (let dz = -gridRadius; dz <= gridRadius; dz++) {
-          if (dx * dx + dz * dz > gridRadius * gridRadius) continue;
-
-          for (let dy = -1; dy <= 1; dy++) {
-            const gx = center.x + dx;
-            const gy = center.y + dy;
-            const gz = center.z + dz;
-            const pos = this.removeBlock(gx, gy, gz);
-            if (pos) removed.push(pos);
-          }
+    // Seed: all solid blocks at ground level (y=0)
+    for (let x = 0; x < gw; x++) {
+      for (let z = 0; z < this.gridDepth; z++) {
+        if (this.grid[x][0][z]) {
+          const idx = pack(x, 0, z);
+          connected[idx] = 1;
+          queue.push(idx);
         }
       }
     }
 
-    this.flushChanges();
-    return removed;
-  }
+    // BFS flood fill upward/outward
+    const dirs = [
+      [1, 0, 0], [-1, 0, 0],
+      [0, 1, 0], [0, -1, 0],
+      [0, 0, 1], [0, 0, -1],
+    ];
 
-  /**
-   * Checks structural support and returns list of unsupported blocks.
-   * A block is unsupported if there's no solid block directly below it
-   * and it's not on the ground floor.
-   */
-  /**
-   * Finds unsupported blocks, but ONLY in columns that were recently modified.
-   * O(height × dirtyColumns) instead of O(width × height × depth).
-   */
-  public findUnsupportedBlocks(): { x: number; y: number; z: number }[] {
-    const unsupported: { x: number; y: number; z: number }[] = [];
+    let head = 0;
+    while (head < queue.length) {
+      const packed = queue[head++];
+      const z = Math.floor(packed / (gw * gh));
+      const y = Math.floor((packed - z * gw * gh) / gw);
+      const x = packed - z * gw * gh - y * gw;
 
-    if (this.dirtyColumns.size === 0) return unsupported;
+      for (const [dx, dy, dz] of dirs) {
+        const nx = x + dx, ny = y + dy, nz = z + dz;
+        if (nx < 0 || nx >= gw || ny < 0 || ny >= gh || nz < 0 || nz >= this.gridDepth) continue;
+        const ni = pack(nx, ny, nz);
+        if (connected[ni] || !this.grid[nx][ny][nz]) continue;
+        connected[ni] = 1;
+        queue.push(ni);
+      }
+    }
 
-    // Only scan columns that had blocks removed recently
+    // Any solid block NOT in connected set is disconnected
+    const disconnected: { x: number; y: number; z: number }[] = [];
+    // Only check dirty columns for efficiency
     for (const colKey of this.dirtyColumns) {
       const parts = colKey.split(',');
       const cx = parseInt(parts[0]);
       const cz = parseInt(parts[1]);
+      if (cx < 0 || cx >= gw || cz < 0 || cz >= this.gridDepth) continue;
 
-      if (cx < 0 || cx >= this.gridWidth || cz < 0 || cz >= this.gridDepth) continue;
-
-      // Scan this column from bottom up
-      for (let y = 1; y < this.gridHeight; y++) {
-        if (!this.grid[cx][y][cz]) continue;
-
-        // Check if any adjacent block below supports this one
-        let supported = false;
-        for (let dx = -1; dx <= 1 && !supported; dx++) {
-          for (let dz = -1; dz <= 1 && !supported; dz++) {
-            if (this.isSolid(cx + dx, y - 1, cz + dz)) {
-              supported = true;
-            }
-          }
-        }
-
-        if (!supported) {
-          unsupported.push({ x: cx, y, z: cz });
+      for (let y = 1; y < gh; y++) {
+        if (this.grid[cx][y][cz] && !connected[pack(cx, y, cz)]) {
+          disconnected.push({ x: cx, y, z: cz });
         }
       }
     }
 
-    // Clear dirty columns after processing
     this.dirtyColumns.clear();
-
-    return unsupported;
+    return disconnected;
   }
 
-  /**
-   * Returns the total number of solid blocks remaining
-   */
-  public getSolidCount(): number {
-    let count = 0;
-    for (let x = 0; x < this.gridWidth; x++) {
-      for (let y = 0; y < this.gridHeight; y++) {
-        for (let z = 0; z < this.gridDepth; z++) {
-          if (this.grid[x][y][z]) count++;
-        }
-      }
-    }
-    return count;
-  }
+  // ── Queries ────────────────────────────────────────────────────────
 
-  /**
-   * Returns what fraction of blocks remain (0.0 = empty, 1.0 = full)
-   */
   public getPercentRemaining(): number {
     return this.instanceCount / Math.max(1, this.gridWidth * this.gridHeight * this.gridDepth);
   }
 
-  /**
-   * Returns the highest Y level that still has solid blocks
-   */
-  public getTopLevel(): number {
-    for (let y = this.gridHeight - 1; y >= 0; y--) {
-      for (let x = 0; x < this.gridWidth; x++) {
-        for (let z = 0; z < this.gridDepth; z++) {
-          if (this.grid[x][y][z]) return y;
-        }
-      }
-    }
-    return -1;
+  public getInstanceCount(): number {
+    return this.instanceCount;
   }
 
-  /**
-   * Gets the underlying mesh for scene integration (collision, shadows, etc.)
-   */
   public getMesh(): Mesh {
     return this.blockMesh;
   }
 
-  /**
-   * Disposes all resources
-   */
   public dispose(): void {
     this.blockMesh.dispose();
     this.gridToInstance.clear();

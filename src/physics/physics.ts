@@ -9,6 +9,7 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Ray } from '@babylonjs/core/Culling/ray';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { Diag } from '../core/DiagnosticLog';
+import { VOXEL_SIZE } from '../world/VoxelBuilding';
 import { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh';
 import '@babylonjs/core/Collisions/collisionCoordinator';
 
@@ -59,10 +60,8 @@ export class PhysicsManager {
   private accumulator: number = 0;
   private collisionMeshes: Set<AbstractMesh> = new Set();
 
-  // Building collision: triggers damage at collision point, returns whether blocks were solid
-  public onBuildingCollision: ((mesh: AbstractMesh, point: Vector3, speed: number) => void) | null = null;
-  // Voxel check: returns true if solid blocks exist at this position (should stop Superman)
-  public hasSolidBlocksAt: ((mesh: AbstractMesh, point: Vector3) => boolean) | null = null;
+  // VoxelWorld reference for direct grid-based building collision
+  public voxelWorld: import('../world/VoxelWorld').VoxelWorld | null = null;
 
   constructor(scene: Scene, config?: Partial<PhysicsConfig>) {
     this.scene = scene;
@@ -287,46 +286,45 @@ export class PhysicsManager {
       character.position = character.position.add(movementDir.scale(safeDistance));
 
       if (character.isFlying) {
-        // In flight mode: Superman hits the surface and is stopped.
-        // The building damage callback will break blocks at the impact point.
-        // Next frame, the broken blocks are gone and Superman pushes through.
-        // Speed is preserved so momentum carries him through the hole.
-        //
-        // Speed reduction based on what was hit:
         const meshName = sweepResult.mesh?.name || '';
         const isBuilding = meshName.startsWith('building_');
-        if (isBuilding && sweepResult.mesh) {
+
+        if (isBuilding && this.voxelWorld) {
+          // ── VOXEL-BASED BUILDING COLLISION ──
+          // DDA raycast through voxel grid for exact per-block collision.
+          // No more invisible proxy meshes or probe-point hacks.
           const speed = velocity.length();
+          const voxelHit = this.voxelWorld.collideRay(
+            character.position, movementDir, movement.length() + character.radius + 5
+          );
 
-          // Probe INTO the building to check for solid voxel blocks.
-          // character.position is 0.05 units BEFORE the surface (safe buffer).
-          // We must check 1-2 units INTO the building along movement direction
-          // to actually hit the voxel grid, not the empty space outside it.
-          const probePoint = character.position.add(movementDir.scale(2));
-          const hasSolid = this.hasSolidBlocksAt
-            ? this.hasSolidBlocksAt(sweepResult.mesh, probePoint)
-            : true;
-
-          if (hasSolid) {
-            // Solid blocks exist: STOP Superman, break the blocks.
+          if (voxelHit.hit && voxelHit.building) {
+            // Solid block found: stop Superman, break blocks, push through
             const keepRatio = speed > 80 ? 0.92 : speed > 40 ? 0.85 : 0.75;
-            Diag.log('PhysicsHit', `${meshName.substring(0, 25)} spd=${speed.toFixed(0)} SOLID`);
+            Diag.log('PhysicsHit', `SOLID spd=${speed.toFixed(0)} grid=(${voxelHit.gridX},${voxelHit.gridY},${voxelHit.gridZ})`);
+
             character.velocity = velocity.scale(keepRatio);
 
-            // Apply damage at the probe point (where blocks actually are)
-            if (this.onBuildingCollision) {
-              this.onBuildingCollision(sweepResult.mesh, probePoint, speed);
-            }
+            // Apply damage at the exact block that was hit
+            this.voxelWorld.applyDamageAtGrid(
+              voxelHit.building, voxelHit.gridX, voxelHit.gridY, voxelHit.gridZ, speed
+            );
 
-            // Push forward past the broken surface
-            character.position.addInPlace(movementDir.scale(5));
+            // Push past the broken blocks
+            character.position.addInPlace(movementDir.scale(VOXEL_SIZE + 1));
           } else {
-            // No solid blocks at probe point: it's a hole, fly through freely.
-            Diag.log('PhysicsHit', `${meshName.substring(0, 25)} spd=${speed.toFixed(0)} HOLE`);
+            // No solid blocks along path: fly through (it's a hole)
+            Diag.log('PhysicsHit', `HOLE spd=${speed.toFixed(0)}`);
             character.position = targetPosition;
             character.velocity = velocity;
           }
-        } else if (!isBuilding) {
+        } else if (isBuilding && !this.voxelWorld) {
+          // Fallback: no VoxelWorld yet (shouldn't happen but be safe)
+          const speed = velocity.length();
+          const keepRatio = speed > 80 ? 0.92 : speed > 40 ? 0.85 : 0.75;
+          character.velocity = velocity.scale(keepRatio);
+          character.position.addInPlace(movementDir.scale(5));
+        } else {
           // Non-building (ground, sidewalk): deflect away
           const pushForce = sweepResult.normal.scale(2);
           character.position.addInPlace(pushForce.scale(deltaTime * 10));
