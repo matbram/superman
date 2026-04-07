@@ -684,7 +684,7 @@ export class VoxelWorld {
       return;
     }
 
-    if (lean.intensity > 0.3 && !this.leaningBuildings.has(vb)) {
+    if (lean.intensity > 0.6 && !this.leaningBuildings.has(vb)) {
       // Building starts leaning
       this.leaningBuildings.set(vb, {
         angle: 0,

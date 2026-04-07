@@ -570,12 +570,13 @@ export class VoxelBuilding {
     const leanZ = -asymZ;
     const leanMag = Math.sqrt(leanX * leanX + leanZ * leanZ);
 
-    if (leanMag < 0.15) return null; // Balanced enough, no lean
+    if (leanMag < 0.3) return null; // Need significant asymmetry to lean
 
     // Intensity: how much of the base is destroyed
     const fullBase = this.gridWidth * baseHeight * this.gridDepth;
     const baseDamage = 1 - (totalBase / Math.max(1, fullBase));
-    const intensity = Math.min(1, baseDamage * 2 + leanMag * 0.5);
+    // Need >50% base damage to start leaning significantly
+    const intensity = Math.min(1, baseDamage * 1.2 + leanMag * 0.3);
 
     return {
       direction: new Vector3(leanX / leanMag, 0, leanZ / leanMag),

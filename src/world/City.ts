@@ -15,22 +15,22 @@ import { PhysicsManager, createCollisionBox } from '../physics/physics';
 
 // Chunk and city generation constants
 const CHUNK_SIZE = 200;
-const LOAD_RADIUS = 6;       // See more of the city from high altitude
-const UNLOAD_DISTANCE = 7;   // Keep loaded longer (match load radius + buffer)
-const CHUNKS_PER_FRAME = 3;  // Generate faster to keep up with flight speed
+const LOAD_RADIUS = 5;       // Balanced view distance vs performance
+const UNLOAD_DISTANCE = 6;   // Unload slightly past load radius
+const CHUNKS_PER_FRAME = 2;  // Don't hog frame budget on generation
 
 // Performance logging
 const ENABLE_CITY_PERF_LOGGING = false;
 const CITY_PERF_LOG_INTERVAL = 2000;
 
-// Building generation - dense metropolis
+// Building generation - dense but performant metropolis
 const SIDEWALK_HEIGHT = 0.15;
 const MIN_BUILDING_HEIGHT = 40;
-const MAX_BUILDING_HEIGHT = 160;
-const MIN_BUILDING_WIDTH = 10;
+const MAX_BUILDING_HEIGHT = 150;
+const MIN_BUILDING_WIDTH = 12;
 const MAX_BUILDING_WIDTH = 28;
-const BUILDING_SPACING = 4;   // Tight urban spacing - buildings close together
-const BUILDINGS_PER_CHUNK = 18; // Dense city block
+const BUILDING_SPACING = 6;    // Tight but not cramped
+const BUILDINGS_PER_CHUNK = 14; // Dense without killing framerate
 
 // Building style types
 enum BuildingStyle {
