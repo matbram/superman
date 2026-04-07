@@ -42,6 +42,22 @@ const DEBRIS_SPAWN_COOLDOWN = 500;  // ms between debris spawns per building
 const ENABLE_PERF_LOGGING = false;
 const PERF_LOG_INTERVAL = 2000;  // Log every 2 seconds
 
+// Structural integrity constants
+const FLOOR_COLLAPSE_THRESHOLD = 0.45;  // Floor collapses when <45% integrity remains
+const BUILDING_LEAN_THRESHOLD = 0.6;    // Building starts leaning when weakest floor <60%
+const LEAN_SPEED = 0.15;                // How fast building leans (radians/sec)
+const MAX_LEAN_BEFORE_COLLAPSE = 0.08;  // ~4.5 degrees before full collapse triggers
+const PANCAKE_DAMAGE_MULT = 1.5;        // Damage multiplier when upper floor pancakes onto lower
+
+/**
+ * Debris type for varied destruction pieces
+ */
+const enum DebrisType {
+  Concrete = 0,  // Medium box chunks
+  Steel = 1,     // Long thin beams
+  Glass = 2,     // Small fast shards
+}
+
 /**
  * Structural breakpoint - defines where a building can break
  */
@@ -50,6 +66,18 @@ interface BreakPoint {
   size: Vector3;              // Size of the chunk that breaks off
   broken: boolean;            // Whether this breakpoint has been triggered
   threshold: number;          // Damage threshold to break this point (0-1)
+  floor: number;              // Which floor this breakpoint belongs to
+  isLoadBearing: boolean;     // Center columns are load-bearing
+}
+
+/**
+ * Per-floor structural data
+ */
+interface FloorData {
+  totalPoints: number;    // Total breakpoints on this floor
+  brokenPoints: number;   // How many are broken
+  collapsed: boolean;     // Has this floor pancaked
+  floorY: number;         // Normalized Y position (0-1)
 }
 
 /**
@@ -58,10 +86,15 @@ interface BreakPoint {
 interface BuildingStructure {
   mesh: Mesh;
   breakPoints: BreakPoint[];
+  floors: FloorData[];        // Per-floor structural tracking
   originalPosition: Vector3;
   bounds: { min: Vector3; max: Vector3 };
   shakeTime: number;
   shakeOffset: Vector3;
+  leanAngle: number;          // Current lean in radians
+  leanDirection: Vector3;     // Direction building is leaning
+  isLeaning: boolean;         // Whether structural weakness detected
+  weakestFloor: number;       // Index of most damaged floor
 }
 
 /**
@@ -71,9 +104,10 @@ interface DebrisPiece {
   mesh: Mesh;
   velocity: Vector3;
   angularVelocity: Vector3;
-  isChunk: boolean;  // Large structural chunk vs small debris
-  settled: boolean;  // Has come to rest on ground
-  settleTime: number;  // When debris settled (for time-based cleanup)
+  isChunk: boolean;       // Large structural chunk vs small debris
+  settled: boolean;       // Has come to rest on ground
+  settleTime: number;     // When debris settled (for time-based cleanup)
+  debrisType: DebrisType; // What kind of material
 }
 
 /**
@@ -160,18 +194,19 @@ export class BuildingDamage {
 
   /**
    * Generates structural breakpoints for a building using a 3D grid
-   * Creates a dense grid of chunks that buildings can fragment into
+   * Creates a dense grid with floor-level structural tracking
+   * Center columns are load-bearing - breaking them weakens the whole floor
    */
-  private generateBreakPoints(building: Mesh): BreakPoint[] {
+  private generateBreakPoints(building: Mesh): { breakPoints: BreakPoint[], floors: FloorData[] } {
     const bounds = building.getBoundingInfo().boundingBox;
     const size = bounds.maximumWorld.subtract(bounds.minimumWorld);
     const breakPoints: BreakPoint[] = [];
+    const floors: FloorData[] = [];
 
-    // Vertical sections (floors) - more floors for taller buildings
-    const numFloors = Math.max(3, Math.floor(size.y / 10));
+    // More floors for taller buildings - roughly every 8 units
+    const numFloors = Math.max(3, Math.floor(size.y / 8));
 
-    // 4x4 horizontal grid covers the full building face
-    // Grid positions from -0.4 to 0.4 (leaving edges for structural integrity)
+    // 4x4 horizontal grid
     const gridX = [-0.38, -0.13, 0.13, 0.38];
     const gridZ = [-0.38, -0.13, 0.13, 0.38];
 
@@ -179,43 +214,70 @@ export class BuildingDamage {
 
     for (let floor = 0; floor < numFloors; floor++) {
       const floorY = (floor + 0.5) / numFloors;
+      let pointsOnFloor = 0;
 
       for (const gx of gridX) {
         for (const gz of gridZ) {
-          // Chunk size with slight random variation for natural look
           const chunkWidth = size.x * (0.22 + Math.random() * 0.08);
           const chunkHeight = floorHeight * (0.75 + Math.random() * 0.2);
           const chunkDepth = size.z * (0.22 + Math.random() * 0.08);
 
-          // Edge/corner chunks break easier, center is stronger
+          // Center 2x2 grid positions are load-bearing structural columns
+          const isCenter = Math.abs(gx) < 0.2 && Math.abs(gz) < 0.2;
           const isEdge = Math.abs(gx) > 0.3 || Math.abs(gz) > 0.3;
           const isTop = floor >= numFloors - 1;
+          const isBottom = floor === 0;
+
+          // Bottom floors are stronger, top floors are weaker
+          // Load-bearing center columns are much stronger
+          let threshold: number;
+          if (isCenter) {
+            threshold = isBottom ? 0.8 : 0.5 + Math.random() * 0.2; // Hard to break
+          } else if (isEdge) {
+            threshold = isTop ? 0.12 : 0.2 + Math.random() * 0.15; // Easy to break
+          } else {
+            threshold = 0.3 + Math.random() * 0.2; // Medium
+          }
 
           breakPoints.push({
             relativePosition: new Vector3(gx, floorY, gz),
             size: new Vector3(chunkWidth, chunkHeight, chunkDepth),
             broken: false,
-            threshold: isTop ? 0.15 : isEdge ? 0.25 : 0.4 + Math.random() * 0.3,
+            threshold,
+            floor,
+            isLoadBearing: isCenter,
           });
+          pointsOnFloor++;
         }
       }
+
+      floors.push({
+        totalPoints: pointsOnFloor,
+        brokenPoints: 0,
+        collapsed: false,
+        floorY,
+      });
     }
 
-    // Add rooftop chunks - antenna, water tank, etc.
+    // Rooftop chunks
     breakPoints.push({
       relativePosition: new Vector3(0, 0.95, 0),
       size: new Vector3(size.x * 0.4, size.y * 0.08, size.z * 0.4),
       broken: false,
       threshold: 0.1,
+      floor: numFloors - 1,
+      isLoadBearing: false,
     });
     breakPoints.push({
       relativePosition: new Vector3(-0.25, 0.95, 0.25),
       size: new Vector3(size.x * 0.2, size.y * 0.06, size.z * 0.2),
       broken: false,
       threshold: 0.1,
+      floor: numFloors - 1,
+      isLoadBearing: false,
     });
 
-    return breakPoints;
+    return { breakPoints, floors };
   }
 
   /**
@@ -226,9 +288,11 @@ export class BuildingDamage {
 
     if (!structure) {
       const bounds = building.getBoundingInfo().boundingBox;
+      const { breakPoints, floors } = this.generateBreakPoints(building);
       structure = {
         mesh: building,
-        breakPoints: this.generateBreakPoints(building),
+        breakPoints,
+        floors,
         originalPosition: building.position.clone(),
         bounds: {
           min: bounds.minimumWorld.clone(),
@@ -236,6 +300,10 @@ export class BuildingDamage {
         },
         shakeTime: 0,
         shakeOffset: Vector3.Zero(),
+        leanAngle: 0,
+        leanDirection: Vector3.Zero(),
+        isLeaning: false,
+        weakestFloor: -1,
       };
       this.buildingStructures.set(building, structure);
     }
@@ -245,102 +313,199 @@ export class BuildingDamage {
 
   /**
    * Applies impact damage from player collision
-   * At high speed: fully destroys building
-   * At lower speed: tears chunks off
+   * Realistic punch-through: breaks chunks along flight path, exit-side debris
+   * Building only collapses if structurally compromised, not from speed alone
    */
   public applyImpactDamage(building: Mesh, impactPosition: Vector3, speed: number): void {
     const structure = this.getOrCreateStructure(building);
 
-    // At high speeds (50+), fully destroy the building on impact
-    if (speed > 50) {
-      this.destroyBuilding(structure, impactPosition, speed);
-      return;
-    }
-
-    // At moderate speeds (30+), destroy most of the building
-    if (speed > 30) {
-      this.heavyDamageBuilding(structure, impactPosition, speed);
-      return;
-    }
-
-    // Lower speeds: break chunks near impact
-    const damage = speed / 10;  // More damage per speed unit
-    structure.shakeTime = Math.min(1.5, structure.shakeTime + damage * 0.3);
+    structure.shakeTime = Math.min(2, speed / 20);
 
     const bounds = structure.bounds;
     const buildingCenter = structure.originalPosition;
     const buildingSize = bounds.max.subtract(bounds.min);
 
-    const relativeImpact = new Vector3(
-      (impactPosition.x - buildingCenter.x) / buildingSize.x,
-      (impactPosition.y - bounds.min.y) / buildingSize.y,
-      (impactPosition.z - buildingCenter.z) / buildingSize.z
-    );
+    // Calculate relative impact position within building
+    const relImpactX = (impactPosition.x - buildingCenter.x) / buildingSize.x;
+    const relImpactY = (impactPosition.y - bounds.min.y) / buildingSize.y;
+    const relImpactZ = (impactPosition.z - buildingCenter.z) / buildingSize.z;
 
-    relativeImpact.x = Math.max(-0.5, Math.min(0.5, relativeImpact.x));
-    relativeImpact.y = Math.max(0, Math.min(1, relativeImpact.y));
-    relativeImpact.z = Math.max(-0.5, Math.min(0.5, relativeImpact.z));
+    // Punch-through radius scales with speed - faster = bigger hole
+    const punchRadius = 0.15 + Math.min(0.3, speed / 200);
 
-    // Break multiple chunks - more chunks for a satisfying crumble
-    const maxChunks = Math.min(10, 3 + Math.floor(damage * 1.5));
-
-    const allBreakpoints: { bp: BreakPoint; dist: number }[] = [];
-    for (const breakPoint of structure.breakPoints) {
-      if (breakPoint.broken) continue;
-      const dx = breakPoint.relativePosition.x - relativeImpact.x;
-      const dy = breakPoint.relativePosition.y - relativeImpact.y;
-      const dz = breakPoint.relativePosition.z - relativeImpact.z;
-      allBreakpoints.push({ bp: breakPoint, dist: Math.sqrt(dx * dx + dy * dy + dz * dz) });
-    }
-
-    allBreakpoints.sort((a, b) => a.dist - b.dist);
-
+    // Break breakpoints near the flight path (cylindrical selection)
     let chunksCreated = 0;
-    for (const { bp } of allBreakpoints) {
-      if (chunksCreated >= maxChunks) break;
-      this.breakChunk(structure, bp, impactPosition, speed);
-      chunksCreated++;
-    }
+    const maxChunks = Math.min(16, 4 + Math.floor(speed / 15));
 
-    this.spawnImpactDebris(impactPosition, speed, 5 + chunksCreated * 2);
-  }
-
-  /**
-   * Heavily damages a building - breaks most chunks
-   */
-  private heavyDamageBuilding(structure: BuildingStructure, impactPosition: Vector3, speed: number): void {
-    structure.shakeTime = 2;
-
-    // Break 60-80% of breakpoints
-    const breakCount = Math.floor(structure.breakPoints.length * (0.6 + Math.random() * 0.2));
-    let broken = 0;
-
+    // Sort by proximity to impact for natural break pattern
+    const candidates: { bp: BreakPoint; dist: number }[] = [];
     for (const bp of structure.breakPoints) {
       if (bp.broken) continue;
-      if (broken >= breakCount) break;
-      this.breakChunk(structure, bp, impactPosition, speed);
-      broken++;
+      const dx = bp.relativePosition.x - relImpactX;
+      const dy = bp.relativePosition.y - relImpactY;
+      const dz = bp.relativePosition.z - relImpactZ;
+      // Use cylindrical distance (XZ plane) so we punch through all Z depths at this height
+      const cylDist = Math.sqrt(dx * dx + dy * dy * 4); // Weight Y distance more
+      candidates.push({ bp, dist: cylDist });
     }
 
-    this.spawnImpactDebris(impactPosition, speed, 15);
-  }
+    candidates.sort((a, b) => a.dist - b.dist);
 
-  /**
-   * Completely destroys a building - starts collapse animation
-   */
-  private destroyBuilding(structure: BuildingStructure, impactPosition: Vector3, speed: number): void {
-    // Break ALL breakpoints
-    for (const bp of structure.breakPoints) {
-      if (!bp.broken) {
-        this.breakChunk(structure, bp, impactPosition, speed);
+    for (const { bp, dist } of candidates) {
+      if (chunksCreated >= maxChunks) break;
+      // Break chunks within punch radius, and load-bearing columns need more force
+      const effectiveRadius = bp.isLoadBearing ? punchRadius * 0.6 : punchRadius;
+      if (dist < effectiveRadius || (speed > 60 && dist < punchRadius * 1.5)) {
+        this.breakChunkWithType(structure, bp, impactPosition, speed);
+        chunksCreated++;
       }
     }
 
-    // Lots of debris
-    this.spawnImpactDebris(impactPosition, speed, 20);
+    // Spawn exit-side debris (chunks fly out the far side)
+    if (chunksCreated > 0) {
+      this.spawnImpactDebris(impactPosition, speed, 3 + chunksCreated);
+    }
 
-    // Calculate fall direction (away from impact)
-    const fallDir = structure.originalPosition.subtract(impactPosition);
+    // Check structural integrity after damage
+    this.checkStructuralIntegrity(structure, impactPosition);
+  }
+
+  /**
+   * Checks structural integrity per floor and triggers progressive collapse
+   * when load-bearing capacity is exceeded
+   */
+  private checkStructuralIntegrity(structure: BuildingStructure, damageOrigin: Vector3): void {
+    // Recalculate floor integrity
+    for (const floor of structure.floors) {
+      floor.brokenPoints = 0;
+    }
+    for (const bp of structure.breakPoints) {
+      if (bp.broken && bp.floor < structure.floors.length) {
+        structure.floors[bp.floor].brokenPoints++;
+      }
+    }
+
+    let weakestIntegrity = 1;
+    let weakestFloorIdx = -1;
+    let collapseTriggered = false;
+
+    for (let i = 0; i < structure.floors.length; i++) {
+      const floor = structure.floors[i];
+      if (floor.collapsed) continue;
+
+      const integrity = 1 - (floor.brokenPoints / floor.totalPoints);
+
+      // Count broken load-bearing columns on this floor
+      let loadBearingBroken = 0;
+      let loadBearingTotal = 0;
+      for (const bp of structure.breakPoints) {
+        if (bp.floor === i && bp.isLoadBearing) {
+          loadBearingTotal++;
+          if (bp.broken) loadBearingBroken++;
+        }
+      }
+
+      // Load-bearing damage counts double for structural assessment
+      const structuralIntegrity = loadBearingTotal > 0
+        ? integrity * (1 - (loadBearingBroken / loadBearingTotal) * 0.5)
+        : integrity;
+
+      if (structuralIntegrity < weakestIntegrity) {
+        weakestIntegrity = structuralIntegrity;
+        weakestFloorIdx = i;
+      }
+
+      // Floor collapses when integrity drops below threshold
+      if (structuralIntegrity < FLOOR_COLLAPSE_THRESHOLD && !floor.collapsed) {
+        this.collapseFloor(structure, i, damageOrigin);
+        collapseTriggered = true;
+      }
+    }
+
+    structure.weakestFloor = weakestFloorIdx;
+
+    // Building starts leaning when structurally weak
+    if (weakestIntegrity < BUILDING_LEAN_THRESHOLD && !structure.isLeaning && !collapseTriggered) {
+      structure.isLeaning = true;
+      // Lean away from the most damaged side
+      const dmgDx = structure.originalPosition.x - damageOrigin.x;
+      const dmgDz = structure.originalPosition.z - damageOrigin.z;
+      const len = Math.sqrt(dmgDx * dmgDx + dmgDz * dmgDz) || 1;
+      structure.leanDirection.set(dmgDx / len, 0, dmgDz / len);
+    }
+  }
+
+  /**
+   * Collapses a single floor - upper floors pancake down onto it
+   * This can cascade: pancaking damage can break the floor below
+   */
+  private collapseFloor(structure: BuildingStructure, floorIndex: number, damageOrigin: Vector3): void {
+    const floor = structure.floors[floorIndex];
+    floor.collapsed = true;
+
+    const bounds = structure.bounds;
+    const buildingSize = bounds.max.subtract(bounds.min);
+
+    // Break ALL remaining breakpoints on this floor
+    for (const bp of structure.breakPoints) {
+      if (bp.floor === floorIndex && !bp.broken) {
+        this.breakChunkWithType(structure, bp, damageOrigin, 30);
+      }
+    }
+
+    // Dust cloud at floor level
+    this._impactPos.set(
+      structure.originalPosition.x,
+      bounds.min.y + floor.floorY * buildingSize.y,
+      structure.originalPosition.z
+    );
+    this.spawnDustCloud(this._impactPos, 6, 1.5);
+
+    // Cascading damage: upper floors pancake down
+    // Each collapsed floor damages the one below it
+    if (floorIndex > 0) {
+      const floorBelow = structure.floors[floorIndex - 1];
+      if (!floorBelow.collapsed) {
+        // Pancake damage - break some breakpoints on the floor below
+        const cascadeDamage = Math.floor(floorBelow.totalPoints * 0.4 * PANCAKE_DAMAGE_MULT);
+        let damaged = 0;
+        for (const bp of structure.breakPoints) {
+          if (bp.floor === floorIndex - 1 && !bp.broken && damaged < cascadeDamage) {
+            this.breakChunkWithType(structure, bp, damageOrigin, 25);
+            damaged++;
+          }
+        }
+      }
+    }
+
+    // Check if enough floors are gone that the building should fully collapse
+    let collapsedFloors = 0;
+    for (const f of structure.floors) {
+      if (f.collapsed) collapsedFloors++;
+    }
+
+    if (collapsedFloors >= structure.floors.length * 0.5) {
+      this.triggerFullCollapse(structure, damageOrigin);
+    }
+  }
+
+  /**
+   * Triggers full building collapse when structural integrity is completely gone
+   */
+  private triggerFullCollapse(structure: BuildingStructure, damageOrigin: Vector3): void {
+    // Break all remaining breakpoints
+    for (const bp of structure.breakPoints) {
+      if (!bp.broken) {
+        this.breakChunkWithType(structure, bp, damageOrigin, 40);
+      }
+    }
+
+    this.spawnImpactDebris(damageOrigin, 30, 12);
+
+    // Calculate fall direction from lean or damage
+    const fallDir = structure.isLeaning
+      ? structure.leanDirection.clone()
+      : structure.originalPosition.subtract(damageOrigin);
     fallDir.y = 0;
     if (fallDir.length() < 0.1) {
       fallDir.x = Math.random() - 0.5;
@@ -348,25 +513,24 @@ export class BuildingDamage {
     }
     fallDir.normalize();
 
-    // Get building height
     const height = structure.bounds.max.y - structure.bounds.min.y;
 
-    // Start collapse animation
+    // Use existing lean angle as starting tilt
     this.collapsingBuildings.push({
       mesh: structure.mesh,
       originalPosition: structure.originalPosition.clone(),
       fallDirection: fallDir,
-      tiltAngle: 0,
+      tiltAngle: structure.leanAngle,
       fallProgress: 0,
-      height: height,
+      height,
       dustSpawned: false,
       lastDustTime: 0,
       debrisSpawned: 0,
     });
 
-    // Initial dust cloud at impact - bigger and longer lasting
-    this.spawnDustCloud(impactPosition, 8, 2);
-    this.spawnDustCloud(impactPosition.add(new Vector3(0, height * 0.3, 0)), 6, 1.5);
+    this.spawnDustCloud(damageOrigin, 8, 2);
+    this._impactPos.set(damageOrigin.x, damageOrigin.y + height * 0.3, damageOrigin.z);
+    this.spawnDustCloud(this._impactPos, 6, 1.5);
 
     this.buildingStructures.delete(structure.mesh);
   }
@@ -430,7 +594,7 @@ export class BuildingDamage {
             this._chunkToPlayer.set(ctpX / ctpLen, 0, ctpZ / ctpLen);
 
             if (Vector3.Dot(this._chunkToPlayer, this._toBuilding) > 0.3) {
-              this.breakChunk(structure, bp, playerPosition, speed * 0.5);
+              this.breakChunkWithType(structure, bp, playerPosition, speed * 0.5);
               broken++;
             }
           }
@@ -439,6 +603,8 @@ export class BuildingDamage {
             structure.shakeTime = Math.min(0.8, structure.shakeTime + 0.3);
             this._impactPos.set(buildingPos.x, buildingPos.y + 15, buildingPos.z);
             this.spawnImpactDebris(this._impactPos, speed * 0.3, broken * 2);
+            // Check if wake damage compromised the structure
+            this.checkStructuralIntegrity(structure, playerPosition);
           }
         }
       }
@@ -521,10 +687,128 @@ export class BuildingDamage {
       isChunk: true,
       settled: false,
       settleTime: 0,
+      debrisType: DebrisType.Concrete,
     });
 
     // Spawn small dust puff at break point
     this.spawnDustCloud(chunkPos, 3, 0.5);
+  }
+
+  /**
+   * Enhanced chunk breaking with varied debris types (concrete, steel, glass)
+   * Creates more realistic destruction with different physics per material
+   */
+  private breakChunkWithType(
+    structure: BuildingStructure,
+    breakPoint: BreakPoint,
+    impactPosition: Vector3,
+    speed: number
+  ): void {
+    if (this.debris.length >= MAX_DEBRIS_PIECES) {
+      breakPoint.broken = true;
+      return;
+    }
+
+    breakPoint.broken = true;
+
+    const bounds = structure.bounds;
+    const buildingSize = bounds.max.subtract(bounds.min);
+
+    const chunkPos = new Vector3(
+      structure.originalPosition.x + breakPoint.relativePosition.x * buildingSize.x,
+      bounds.min.y + breakPoint.relativePosition.y * buildingSize.y,
+      structure.originalPosition.z + breakPoint.relativePosition.z * buildingSize.z
+    );
+
+    // Direction away from impact
+    const dirX = chunkPos.x - impactPosition.x;
+    const dirZ = chunkPos.z - impactPosition.z;
+    const dirLen = Math.sqrt(dirX * dirX + dirZ * dirZ) || 1;
+    const normDirX = dirX / dirLen;
+    const normDirZ = dirZ / dirLen;
+
+    // Choose debris type based on breakpoint characteristics
+    let debrisType: DebrisType;
+    if (breakPoint.isLoadBearing) {
+      debrisType = DebrisType.Steel;  // Structural columns = steel
+    } else if (Math.abs(breakPoint.relativePosition.x) > 0.3 || Math.abs(breakPoint.relativePosition.z) > 0.3) {
+      debrisType = Math.random() < 0.4 ? DebrisType.Glass : DebrisType.Concrete; // Outer walls = glass/concrete mix
+    } else {
+      debrisType = DebrisType.Concrete; // Interior = concrete
+    }
+
+    // Create mesh shape based on debris type
+    let chunk: Mesh;
+    const horizontalPush = Math.min(speed * 0.08, 8);
+    let vx: number, vy: number, vz: number;
+    let avx: number, avy: number, avz: number;
+
+    switch (debrisType) {
+      case DebrisType.Steel: {
+        // Steel beams - long, thin, tumble slowly
+        const beamLength = breakPoint.size.y * (0.8 + Math.random() * 0.4);
+        chunk = MeshBuilder.CreateBox(`steel_${this.debris.length}`, {
+          width: breakPoint.size.x * 0.15,
+          height: beamLength,
+          depth: breakPoint.size.z * 0.15,
+        }, this.scene);
+        chunk.material = this.debrisMaterials[1]; // Darker material
+        vx = normDirX * horizontalPush * 0.5 + (Math.random() - 0.5) * 2;
+        vy = 1 + Math.random() * 2;
+        vz = normDirZ * horizontalPush * 0.5 + (Math.random() - 0.5) * 2;
+        avx = (Math.random() - 0.5) * 1.5;
+        avy = (Math.random() - 0.5) * 0.5;
+        avz = (Math.random() - 0.5) * 1.5;
+        break;
+      }
+      case DebrisType.Glass: {
+        // Glass shards - small, flat, fast, spin quickly
+        const shardSize = Math.random() * 0.8 + 0.3;
+        chunk = MeshBuilder.CreateBox(`glass_${this.debris.length}`, {
+          width: shardSize,
+          height: shardSize * 0.1,
+          depth: shardSize * (0.5 + Math.random() * 0.5),
+        }, this.scene);
+        // Use a slightly different material for glass
+        chunk.material = this.debrisMaterials[3];
+        vx = normDirX * horizontalPush * 2 + (Math.random() - 0.5) * 8;
+        vy = (Math.random() - 0.5) * 5;
+        vz = normDirZ * horizontalPush * 2 + (Math.random() - 0.5) * 8;
+        avx = (Math.random() - 0.5) * 10;
+        avy = (Math.random() - 0.5) * 10;
+        avz = (Math.random() - 0.5) * 10;
+        break;
+      }
+      default: { // Concrete
+        chunk = MeshBuilder.CreateBox(`chunk_${this.debris.length}`, {
+          width: breakPoint.size.x,
+          height: breakPoint.size.y,
+          depth: breakPoint.size.z,
+        }, this.scene);
+        chunk.material = this.debrisMaterials[Math.floor(Math.random() * this.debrisMaterials.length)];
+        vx = normDirX * horizontalPush + (Math.random() - 0.5) * 3;
+        vy = 2 + Math.random() * 3;
+        vz = normDirZ * horizontalPush + (Math.random() - 0.5) * 3;
+        avx = (Math.random() - 0.5) * 2;
+        avy = (Math.random() - 0.5) * 1;
+        avz = (Math.random() - 0.5) * 2;
+        break;
+      }
+    }
+
+    chunk.position.copyFrom(chunkPos);
+    chunk.isPickable = false;
+    chunk.rotation.set(Math.random() * 0.3, Math.random() * Math.PI * 2, Math.random() * 0.3);
+
+    this.debris.push({
+      mesh: chunk,
+      velocity: new Vector3(vx, vy, vz),
+      angularVelocity: new Vector3(avx, avy, avz),
+      isChunk: debrisType === DebrisType.Concrete || debrisType === DebrisType.Steel,
+      settled: false,
+      settleTime: 0,
+      debrisType,
+    });
   }
 
   /**
@@ -740,6 +1024,7 @@ export class BuildingDamage {
         isChunk: false,
         settled: false,
         settleTime: 0,
+        debrisType: DebrisType.Concrete,
       });
     }
   }
@@ -1042,15 +1327,35 @@ export class BuildingDamage {
       }
     }
 
-    // Update building shake effects - reuse vectors
+    // Update building shake effects and structural lean
     for (const [building, structure] of this.buildingStructures) {
+      // Progressive lean - building visibly tilts before collapsing
+      if (structure.isLeaning) {
+        structure.leanAngle += LEAN_SPEED * deltaTime;
+
+        // Apply lean rotation
+        building.rotationQuaternion = null;
+        building.rotation.x = Math.sin(Math.atan2(structure.leanDirection.x, structure.leanDirection.z)) * structure.leanAngle;
+        building.rotation.z = Math.cos(Math.atan2(structure.leanDirection.x, structure.leanDirection.z)) * structure.leanAngle;
+
+        // Add creaking shake while leaning
+        structure.shakeTime = Math.max(structure.shakeTime, 0.1);
+
+        // Trigger full collapse when lean exceeds threshold
+        if (structure.leanAngle > MAX_LEAN_BEFORE_COLLAPSE) {
+          this.triggerFullCollapse(structure, structure.originalPosition.add(structure.leanDirection.scale(10)));
+          continue; // Structure deleted, skip further processing
+        }
+      }
+
+      // Shake effect
       if (structure.shakeTime > 0) {
         structure.shakeTime -= deltaTime;
 
-        if (structure.shakeTime <= 0) {
+        if (structure.shakeTime <= 0 && !structure.isLeaning) {
           building.position.copyFrom(structure.originalPosition);
         } else {
-          const shakeIntensity = structure.shakeTime * 0.4;
+          const shakeIntensity = Math.min(structure.shakeTime, 1) * 0.4;
           building.position.x = structure.originalPosition.x + (Math.random() - 0.5) * shakeIntensity;
           building.position.y = structure.originalPosition.y;
           building.position.z = structure.originalPosition.z + (Math.random() - 0.5) * shakeIntensity;
