@@ -13,10 +13,10 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 
 // Debris constants - balanced for destruction quality and performance
-const MAX_DEBRIS_PIECES = 80;  // Higher cap for more satisfying destruction
+const MAX_DEBRIS_PIECES = 100; // Higher cap for more rubble persistence
 const MAX_SMALL_DEBRIS = 40;   // Sub-cap for small debris (within MAX_DEBRIS_PIECES)
-const DEBRIS_CLEANUP_DISTANCE = 120;  // Cleanup sooner to make room for new debris
-const DEBRIS_SETTLE_CLEANUP_TIME = 8000;  // Remove settled debris after 8 seconds
+const DEBRIS_CLEANUP_DISTANCE = 200;  // Keep rubble visible longer
+const DEBRIS_SETTLE_CLEANUP_TIME = 30000;  // Remove settled debris after 30 seconds
 const GRAVITY = -30;  // Normal gravity for performance
 const SECONDARY_FRAG_SPEED = 12;  // Min impact speed to trigger secondary fragmentation
 
@@ -223,45 +223,46 @@ export class BuildingDamage {
     const breakPoints: BreakPoint[] = [];
     const floors: FloorData[] = [];
 
-    // More floors for taller buildings - roughly every 8 units
-    const numFloors = Math.max(3, Math.floor(size.y / 8));
+    // Grid dimensions - segments tile exactly to fill the building volume
+    const gridCols = 4;
+    const gridRows = 4;
+    const numFloors = Math.max(3, Math.floor(size.y / 10));
 
-    // 4x4 horizontal grid
-    const gridX = [-0.38, -0.13, 0.13, 0.38];
-    const gridZ = [-0.38, -0.13, 0.13, 0.38];
-
+    // Each segment is exactly 1/4 of the building width/depth (no gaps)
+    const segWidth = size.x / gridCols;
+    const segDepth = size.z / gridRows;
     const floorHeight = size.y / numFloors;
 
     for (let floor = 0; floor < numFloors; floor++) {
+      // Y position: center of this floor's segment
       const floorY = (floor + 0.5) / numFloors;
       let pointsOnFloor = 0;
 
-      for (const gx of gridX) {
-        for (const gz of gridZ) {
-          const chunkWidth = size.x * (0.22 + Math.random() * 0.08);
-          const chunkHeight = floorHeight * (0.75 + Math.random() * 0.2);
-          const chunkDepth = size.z * (0.22 + Math.random() * 0.08);
+      for (let col = 0; col < gridCols; col++) {
+        for (let row = 0; row < gridRows; row++) {
+          // Relative position: center of this cell, mapped to -0.5..0.5 range
+          const relX = (col + 0.5) / gridCols - 0.5;
+          const relZ = (row + 0.5) / gridRows - 0.5;
 
-          // Center 2x2 grid positions are load-bearing structural columns
-          const isCenter = Math.abs(gx) < 0.2 && Math.abs(gz) < 0.2;
-          const isEdge = Math.abs(gx) > 0.3 || Math.abs(gz) > 0.3;
+          // Center 2x2 cells are load-bearing
+          const isCenter = col >= 1 && col <= 2 && row >= 1 && row <= 2;
+          const isEdge = col === 0 || col === gridCols - 1 || row === 0 || row === gridRows - 1;
           const isTop = floor >= numFloors - 1;
           const isBottom = floor === 0;
 
-          // Bottom floors are stronger, top floors are weaker
-          // Load-bearing center columns are much stronger
           let threshold: number;
           if (isCenter) {
-            threshold = isBottom ? 0.8 : 0.5 + Math.random() * 0.2; // Hard to break
+            threshold = isBottom ? 0.8 : 0.5 + Math.random() * 0.2;
           } else if (isEdge) {
-            threshold = isTop ? 0.12 : 0.2 + Math.random() * 0.15; // Easy to break
+            threshold = isTop ? 0.12 : 0.2 + Math.random() * 0.15;
           } else {
-            threshold = 0.3 + Math.random() * 0.2; // Medium
+            threshold = 0.3 + Math.random() * 0.2;
           }
 
           breakPoints.push({
-            relativePosition: new Vector3(gx, floorY, gz),
-            size: new Vector3(chunkWidth, chunkHeight, chunkDepth),
+            relativePosition: new Vector3(relX, floorY, relZ),
+            // Segments tile exactly - full cell size with tiny margin for visual seam
+            size: new Vector3(segWidth - 0.1, floorHeight - 0.1, segDepth - 0.1),
             broken: false,
             threshold,
             floor,
@@ -1325,9 +1326,9 @@ export class BuildingDamage {
       }
     }
 
-    // If near debris cap, aggressively clean up oldest settled small debris first
-    if (this.debris.length > MAX_DEBRIS_PIECES * 0.7) {
-      for (let i = this.debris.length - 1; i >= 0 && this.debris.length > MAX_DEBRIS_PIECES * 0.5; i--) {
+    // Only clean up small settled debris when truly near the cap
+    if (this.debris.length > MAX_DEBRIS_PIECES * 0.9) {
+      for (let i = this.debris.length - 1; i >= 0 && this.debris.length > MAX_DEBRIS_PIECES * 0.75; i--) {
         const p = this.debris[i];
         if (p.settled && !p.isChunk) {
           p.mesh.dispose();
@@ -1499,6 +1500,64 @@ export class BuildingDamage {
       if (inGravityZone && piece.mesh.position.y > 180) {
         piece.mesh.position.y = 180;
         piece.velocity.y = -Math.abs(piece.velocity.y) * 0.3;
+      }
+    }
+
+    // Check for unsupported segments - segments above broken ones should fall
+    for (const [, structure] of this.buildingStructures) {
+      if (!structure.fragmented) continue;
+
+      const buildingSize = structure.bounds.max.subtract(structure.bounds.min);
+
+      for (const bp of structure.breakPoints) {
+        if (bp.broken || !bp.segmentMesh) continue;
+
+        // Check if any breakpoint directly below this one is broken
+        // "Below" = same column (similar relX, relZ), one floor lower
+        const myFloor = bp.floor;
+        if (myFloor === 0) continue; // Ground floor always supported
+
+        let hasSupport = false;
+        for (const other of structure.breakPoints) {
+          if (other.floor !== myFloor - 1) continue;
+          // Same column? Check if X and Z positions match within tolerance
+          const dx = Math.abs(other.relativePosition.x - bp.relativePosition.x);
+          const dz = Math.abs(other.relativePosition.z - bp.relativePosition.z);
+          if (dx < 0.05 && dz < 0.05) {
+            // This is our support column
+            if (!other.broken) {
+              hasSupport = true;
+            }
+            break;
+          }
+        }
+
+        if (!hasSupport) {
+          // Detach this segment as falling debris
+          const seg = bp.segmentMesh;
+          seg.unfreezeWorldMatrix();
+          bp.segmentMesh = null;
+          bp.broken = true;
+
+          // Update floor tracking
+          if (bp.floor < structure.floors.length) {
+            structure.floors[bp.floor].brokenPoints++;
+          }
+
+          if (this.debris.length < MAX_DEBRIS_PIECES) {
+            this.debris.push({
+              mesh: seg,
+              velocity: new Vector3((Math.random() - 0.5) * 1, -1, (Math.random() - 0.5) * 1),
+              angularVelocity: new Vector3((Math.random() - 0.5) * 0.5, 0, (Math.random() - 0.5) * 0.5),
+              isChunk: true,
+              settled: false,
+              settleTime: 0,
+              debrisType: DebrisType.Concrete,
+            });
+          } else {
+            seg.dispose();
+          }
+        }
       }
     }
 
