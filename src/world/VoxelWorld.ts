@@ -90,6 +90,9 @@ export class VoxelWorld {
   private gravityZone: GravityZone | null = null;
   private getGravityAtPosition: ((pos: Vector3) => number) | null = null;
 
+  // Camera shake callback - set by main.ts to trigger screen shake on impacts
+  public onCameraShake: ((intensity: number) => void) | null = null;
+
   constructor(scene: Scene, physicsManager?: PhysicsManager) {
     this.scene = scene;
     this.physicsManager = physicsManager || null;
@@ -523,6 +526,12 @@ export class VoxelWorld {
       }
     }
 
+    // Camera shake proportional to collapse size
+    if (this.onCameraShake) {
+      const shakeIntensity = Math.min(6, 1 + collapseSize * 0.1);
+      this.onCameraShake(shakeIntensity);
+    }
+
     Diag.log('Collapse', `${collapseSize} blocks falling, ${maxBlocks} debris spawned`);
   }
 
@@ -621,9 +630,21 @@ export class VoxelWorld {
       p.mesh.rotation.z += p.angularVelocity.z * deltaTime;
 
       if (p.mesh.position.y < 0.3) {
+        const impactSpeed = Math.abs(p.velocity.y);
         p.mesh.position.y = 0.3;
         p.velocity.y *= -0.3; p.velocity.x *= 0.6; p.velocity.z *= 0.6;
         p.angularVelocity.scaleInPlace(0.4);
+
+        // Camera shake on heavy impacts
+        if (p.isChunk && impactSpeed > 10 && this.onCameraShake) {
+          this.onCameraShake(Math.min(3, impactSpeed * 0.15));
+        }
+
+        // Dust puff on impact
+        if (p.isChunk && impactSpeed > 8) {
+          this.spawnDust(p.mesh.position.clone(), 2 + impactSpeed * 0.1, 0.5);
+        }
+
         if (p.velocity.lengthSquared() < 1) {
           p.settled = true; p.settleTime = now;
           p.velocity.setAll(0); p.angularVelocity.setAll(0);

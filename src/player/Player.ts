@@ -764,6 +764,13 @@ export class Player {
   }
 
   /**
+   * Gets the camera controller for external effects (camera shake, etc.)
+   */
+  public getCameraController() {
+    return this.cameraController;
+  }
+
+  /**
    * Sets callback for building collision damage
    */
   public setOnBuildingCollision(callback: (buildingMesh: any, impactPosition: Vector3, speed: number) => void): void {

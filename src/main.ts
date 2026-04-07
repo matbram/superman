@@ -162,6 +162,11 @@ class Game {
       this.voxelWorld.applyDamage(building as Mesh, position, damage);
     });
 
+    // Camera shake from building destruction (collapses, debris impacts)
+    this.voxelWorld.onCameraShake = (intensity: number) => {
+      this.player.getCameraController().addShake(intensity);
+    };
+
     // Initialize UI
     this.hud = new Hud();
     this.debugOverlay = new DebugOverlay();
