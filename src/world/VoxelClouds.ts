@@ -15,11 +15,11 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import '@babylonjs/core/Meshes/thinInstanceMesh';
 
-const CLOUD_HEIGHT_MIN = 300;
-const CLOUD_HEIGHT_MAX = 450;
-const NUM_CLOUDS = 30;
-const VOXELS_PER_CLOUD = 80;
-const VOXEL_SIZE = 5;           // Bigger cubes so they're actually visible
+const CLOUD_HEIGHT_MIN = 280;
+const CLOUD_HEIGHT_MAX = 420;
+const NUM_CLOUDS = 25;
+const VOXELS_PER_CLOUD = 150;   // Lots of voxels packed tight = solid mass
+const VOXEL_SIZE = 6;           // Bigger cubes that overlap = solid look
 const DISPERSE_RADIUS = 50;
 const DISPERSE_FORCE = 120;
 const RECOVER_SPEED = 4;       // Slow recovery = floaty feel
@@ -72,20 +72,29 @@ export class VoxelClouds {
       const cy = CLOUD_HEIGHT_MIN + Math.random() * (CLOUD_HEIGHT_MAX - CLOUD_HEIGHT_MIN);
       const cz = (Math.random() - 0.5) * CLOUD_SPREAD * 2;
 
-      // Clouds are WIDE and FLAT with some vertical volume
-      const cloudWidth = 100 + Math.random() * 150;
-      const cloudDepth = 80 + Math.random() * 120;
-      const cloudHeight = 15 + Math.random() * 25; // Some vertical mass
+      // Cloud dimensions - wide and flat like real cumulus
+      const cloudWidth = 60 + Math.random() * 80;
+      const cloudDepth = 50 + Math.random() * 70;
+      const cloudHeight = 10 + Math.random() * 15;
 
       for (let v = 0; v < VOXELS_PER_CLOUD; v++) {
+        // GAUSSIAN distribution: most voxels near center, fewer at edges
+        // This creates a dense solid core with wispy edges
+        const gx = (Math.random() + Math.random() + Math.random()) / 3 - 0.5; // Bell curve -0.5 to 0.5
+        const gy = (Math.random() + Math.random() + Math.random()) / 3 - 0.5;
+        const gz = (Math.random() + Math.random() + Math.random()) / 3 - 0.5;
+
+        // Distance from center determines scale - bigger at core, smaller at edges
+        const distFromCenter = Math.sqrt(gx * gx + gy * gy + gz * gz) * 2;
+        const coreScale = Math.max(0.4, 1.5 - distFromCenter); // Bigger near center
+
         this.voxels.push({
-          homeX: cx + (Math.random() - 0.5) * cloudWidth,
-          homeY: cy + (Math.random() - 0.5) * cloudHeight,
-          homeZ: cz + (Math.random() - 0.5) * cloudDepth,
+          homeX: cx + gx * cloudWidth,
+          homeY: cy + gy * cloudHeight,
+          homeZ: cz + gz * cloudDepth,
           offsetX: 0, offsetY: 0, offsetZ: 0,
           velX: 0, velY: 0, velZ: 0,
-          // Vary scale: wider than tall for puffy look
-          scale: 0.5 + Math.random() * 1.0,
+          scale: coreScale * (0.8 + Math.random() * 0.4),
         });
       }
     }
