@@ -357,12 +357,12 @@ export class Atmosphere {
       cluster.basePosition.z += cluster.driftSpeed.z * deltaTime;
 
       // Wrap clouds that drift too far from player (infinite sky)
-      const cdx = cluster.basePosition.x - playerPosition.x;
-      const cdz = cluster.basePosition.z - playerPosition.z;
-      if (cdx > CLOUD_RENDER_DISTANCE) cluster.basePosition.x -= CLOUD_RENDER_DISTANCE * 2;
-      if (cdx < -CLOUD_RENDER_DISTANCE) cluster.basePosition.x += CLOUD_RENDER_DISTANCE * 2;
-      if (cdz > CLOUD_RENDER_DISTANCE) cluster.basePosition.z -= CLOUD_RENDER_DISTANCE * 2;
-      if (cdz < -CLOUD_RENDER_DISTANCE) cluster.basePosition.z += CLOUD_RENDER_DISTANCE * 2;
+      const wdx = cluster.basePosition.x - playerPosition.x;
+      const wdz = cluster.basePosition.z - playerPosition.z;
+      if (wdx > CLOUD_RENDER_DISTANCE) cluster.basePosition.x -= CLOUD_RENDER_DISTANCE * 2;
+      if (wdx < -CLOUD_RENDER_DISTANCE) cluster.basePosition.x += CLOUD_RENDER_DISTANCE * 2;
+      if (wdz > CLOUD_RENDER_DISTANCE) cluster.basePosition.z -= CLOUD_RENDER_DISTANCE * 2;
+      if (wdz < -CLOUD_RENDER_DISTANCE) cluster.basePosition.z += CLOUD_RENDER_DISTANCE * 2;
       // Keep at cloud height
       if (cluster.basePosition.y < CLOUD_HEIGHT_MIN) cluster.basePosition.y = CLOUD_HEIGHT_MIN;
       if (cluster.basePosition.y > CLOUD_HEIGHT_MAX) cluster.basePosition.y = CLOUD_HEIGHT_MAX;
