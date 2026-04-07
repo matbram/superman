@@ -30,10 +30,10 @@ export function createScene(engine: Engine): SceneContext {
   // Set background color (sky blue gradient effect)
   scene.clearColor = new Color4(0.4, 0.6, 0.9, 1.0);
 
-  // Enable fog for depth perception and speed sensation
+  // Atmospheric fog - gives depth and haze to the city skyline
   scene.fogMode = Scene.FOGMODE_EXP2;
-  scene.fogDensity = 0.0008;
-  scene.fogColor = new Color3(0.6, 0.7, 0.9);
+  scene.fogDensity = 0.0004; // Subtle haze, visible at distance but not close
+  scene.fogColor = new Color3(0.65, 0.75, 0.92); // Blue-gray atmospheric haze
 
   // Create ambient light (hemisphere light)
   const ambientLight = new HemisphericLight(
@@ -61,8 +61,8 @@ export function createScene(engine: Engine): SceneContext {
 
   // Create main camera (will be controlled by CameraController)
   const camera = new FreeCamera('mainCamera', new Vector3(0, 10, -20), scene);
-  camera.minZ = 0.5;  // Increased to reduce z-fighting
-  camera.maxZ = 2000;
+  camera.minZ = 0.5;
+  camera.maxZ = 4000; // See the whole city from high altitude
   camera.fov = 1.0;
 
   // Create procedural sky gradient

@@ -14,23 +14,23 @@ import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator'
 import { PhysicsManager, createCollisionBox } from '../physics/physics';
 
 // Chunk and city generation constants
-const CHUNK_SIZE = 200; // Larger chunks = fewer total chunks
-const LOAD_RADIUS = 4;  // Increased for better render distance
-const UNLOAD_DISTANCE = 5;  // Keep loaded a bit longer
-const CHUNKS_PER_FRAME = 2;  // Generate fewer chunks per frame
+const CHUNK_SIZE = 200;
+const LOAD_RADIUS = 6;       // See more of the city from high altitude
+const UNLOAD_DISTANCE = 7;   // Keep loaded longer (match load radius + buffer)
+const CHUNKS_PER_FRAME = 3;  // Generate faster to keep up with flight speed
 
 // Performance logging
 const ENABLE_CITY_PERF_LOGGING = false;
-const CITY_PERF_LOG_INTERVAL = 2000;  // Log every 2 seconds
+const CITY_PERF_LOG_INTERVAL = 2000;
 
-// Building generation - balanced density
+// Building generation - dense metropolis
 const SIDEWALK_HEIGHT = 0.15;
-const MIN_BUILDING_HEIGHT = 35;
-const MAX_BUILDING_HEIGHT = 140;
-const MIN_BUILDING_WIDTH = 12;
-const MAX_BUILDING_WIDTH = 32;
-const BUILDING_SPACING = 8;  // Tighter spacing for more buildings
-const BUILDINGS_PER_CHUNK = 12; // More buildings per chunk
+const MIN_BUILDING_HEIGHT = 40;
+const MAX_BUILDING_HEIGHT = 160;
+const MIN_BUILDING_WIDTH = 10;
+const MAX_BUILDING_WIDTH = 28;
+const BUILDING_SPACING = 4;   // Tight urban spacing - buildings close together
+const BUILDINGS_PER_CHUNK = 18; // Dense city block
 
 // Building style types
 enum BuildingStyle {
@@ -429,8 +429,8 @@ export class City {
           // Start buildings invisible - they will fade in
           mesh.visibility = 0;
 
-          // LOD: Hide mesh entirely at distance 600 to reduce draw calls
-          mesh.addLODLevel(600, null);
+          // LOD: Hide mesh at distance - fog hides the transition
+          mesh.addLODLevel(1500, null);
 
           createCollisionBox(mesh, this.physicsManager);
           collisionMeshes.push(mesh);
