@@ -12,6 +12,7 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import { VoxelBuilding } from './VoxelBuilding';
+import { PhysicsManager } from '../physics/physics';
 
 // Debris constants - balanced for destruction quality and performance
 const MAX_DEBRIS_PIECES = 100; // Higher cap for more rubble persistence
@@ -185,8 +186,11 @@ export class BuildingDamage {
   private frameCount: number = 0;
   private totalUpdateTime: number = 0;
 
-  constructor(scene: Scene) {
+  private physicsManager: PhysicsManager | null = null;
+
+  constructor(scene: Scene, physicsManager?: PhysicsManager) {
     this.scene = scene;
+    this.physicsManager = physicsManager || null;
     this.createDebrisMaterials();
   }
 
@@ -362,8 +366,14 @@ export class BuildingDamage {
         material
       );
 
-      // Hide the original building mesh
+      // Hide the original building mesh AND remove its collision
+      // so Superman can fly through holes in the voxelized version
       building.isVisible = false;
+      building.checkCollisions = false;
+      building.isPickable = false;
+      if (this.physicsManager) {
+        this.physicsManager.removeCollisionMesh(building);
+      }
 
       this.voxelBuildings.set(building, vb);
     }
@@ -438,59 +448,7 @@ export class BuildingDamage {
     structure.shakeTime = Math.min(2, speed / 20);
   }
 
-  /**
-   * Applies beam/area damage WITHOUT voxelizing the building.
-   * Used by alien ship beam and other continuous damage sources.
-   * Uses the legacy breakpoint/shrink system to avoid converting every
-   * building in range to expensive voxel grids.
-   *
-   * If the building was already voxelized (from a direct player hit),
-   * uses the voxel system instead.
-   */
-  public applyBeamDamage(building: Mesh, damagePosition: Vector3, speed: number): void {
-    // If already voxelized, use voxel removal
-    const existingVb = this.voxelBuildings.get(building);
-    if (existingVb) {
-      const radius = 2 + Math.min(4, speed / 30);
-      const removed = existingVb.removeBlocksInRadius(damagePosition, radius);
-      if (removed.length > 0) {
-        this.spawnVoxelDebris(removed, damagePosition, speed * 0.5);
-        this.processUnsupportedBlocks(existingVb, building, damagePosition);
-      }
-      return;
-    }
 
-    // Not voxelized - use legacy breakpoint system (cheap, no grid creation)
-    const structure = this.getOrCreateStructure(building);
-    structure.shakeTime = Math.min(1, speed / 30);
-
-    // Break breakpoints near damage position
-    const bounds = structure.bounds;
-    const buildingSize = new Vector3(
-      bounds.max.x - bounds.min.x,
-      structure.currentHeight,
-      bounds.max.z - bounds.min.z
-    );
-    const relX = (damagePosition.x - structure.originalPosition.x) / buildingSize.x;
-    const relY = (damagePosition.y - bounds.min.y) / structure.currentHeight;
-    const relZ = (damagePosition.z - structure.originalPosition.z) / buildingSize.z;
-
-    let broken = 0;
-    for (const bp of structure.breakPoints) {
-      if (bp.broken || broken >= 3) continue;
-      const dx = bp.relativePosition.x - relX;
-      const dy = bp.relativePosition.y - relY;
-      const dz = bp.relativePosition.z - relZ;
-      if (dx * dx + dy * dy + dz * dz < 0.15) {
-        this.breakChunkWithType(structure, bp, damagePosition, speed);
-        broken++;
-      }
-    }
-
-    if (broken > 0) {
-      this.checkStructuralIntegrity(structure, damagePosition);
-    }
-  }
 
   /**
    * Finds unsupported blocks in a voxel building, removes them, and spawns debris.
@@ -870,7 +828,7 @@ export class BuildingDamage {
             buildingPos.y + 10 + Math.random() * 20,
             buildingPos.z - this._toBuilding.z * (buildingPos.z - playerPosition.z) * 0.3
           );
-          this.applyBeamDamage(building, this._impactPos, speed * 0.3);
+          this.applyImpactDamage(building, this._impactPos, speed * 0.3);
         }
       }
     }
@@ -1320,7 +1278,7 @@ export class BuildingDamage {
         const damage = force * damageMultiplier;
 
         // Use beam damage (non-voxelizing) for area shockwave effects
-        this.applyBeamDamage(building, position, damage * 30);
+        this.applyImpactDamage(building, position, damage * 30);
       }
     }
   }

@@ -22,7 +22,7 @@ import '@babylonjs/core/Meshes/thinInstanceMesh';
 
 // Voxel size in world units - small enough to look like building detail,
 // big enough to keep instance count manageable
-const VOXEL_SIZE = 3;
+const VOXEL_SIZE = 4;
 
 // Only build shell (exterior faces) - no interior voxels needed
 // This dramatically reduces instance count

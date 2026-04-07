@@ -92,7 +92,7 @@ class Game {
     this.atmosphere = new Atmosphere(this.sceneContext.scene);
 
     // Initialize building damage system
-    this.buildingDamage = new BuildingDamage(this.sceneContext.scene);
+    this.buildingDamage = new BuildingDamage(this.sceneContext.scene, this.physicsManager);
 
     // Initialize alien ship (World Engine style gravity beam)
     this.alienShip = new AlienShip(this.sceneContext.scene);
@@ -113,9 +113,8 @@ class Game {
         const horizontalDist = Math.sqrt(dx * dx + dz * dz);
 
         if (horizontalDist < radius) {
-          // Use beam damage (non-voxelizing) for continuous alien beam
           const impactSpeed = 40 + damage * (1 - horizontalDist / radius);
-          this.buildingDamage.applyBeamDamage(building, position, impactSpeed);
+          this.buildingDamage.applyImpactDamage(building, position, impactSpeed);
         }
       }
     });
@@ -145,9 +144,9 @@ class Game {
       this.buildingDamage.applyImpactDamage(buildingMesh, impactPosition, speed);
     });
 
-    // Connect heat vision to damage system (beam, not direct collision)
+    // Connect heat vision to damage system - voxelizes and punches holes
     this.player.setOnHeatVisionDamage((building, position, damage) => {
-      this.buildingDamage.applyBeamDamage(building, position, damage);
+      this.buildingDamage.applyImpactDamage(building, position, damage);
     });
 
     // Initialize UI

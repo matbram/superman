@@ -274,20 +274,30 @@ export class PhysicsManager {
     );
 
     if (sweepResult.hit && sweepResult.distance < movement.length()) {
-      // Collision detected - stop at contact point with small buffer
-      const safeDistance = Math.max(0, sweepResult.distance - 0.05);
-      const movementDir = movement.length() > 0.001 ? movement.normalize() : Vector3.Zero();
+      const meshName = sweepResult.mesh?.name || '';
+      const isBuilding = meshName.startsWith('building_');
 
-      character.position = character.position.add(movementDir.scale(safeDistance));
+      if (character.isFlying && isBuilding) {
+        // MOMENTUM-BASED PENETRATION: Superman tears through buildings.
+        // Speed determines how much he slows down, not whether he stops.
+        // Faster = less slowdown (punches clean through).
+        // Slower = more slowdown (building absorbs more energy).
+        const speed = velocity.length();
+        const penetrationCost = Math.min(0.4, 10 / (speed + 1)); // Fast = low cost
+        const newSpeed = Math.max(10, speed * (1 - penetrationCost));
+        const speedRatio = speed > 0.1 ? newSpeed / speed : 1;
 
-      if (character.isFlying) {
-        // In flight mode: push away from surface, don't slide
-        // Keep most of the original velocity but deflect slightly away from surface
+        // Superman goes through - full movement applied
+        character.position = targetPosition;
+        character.velocity = velocity.scale(speedRatio);
+      } else if (character.isFlying) {
+        // Non-building collision (ground, sidewalk) - deflect normally
+        const safeDistance = Math.max(0, sweepResult.distance - 0.05);
+        const movementDir = movement.length() > 0.001 ? movement.normalize() : Vector3.Zero();
+        character.position = character.position.add(movementDir.scale(safeDistance));
+
         const pushForce = sweepResult.normal.scale(2);
         character.position.addInPlace(pushForce.scale(deltaTime * 10));
-
-        // Preserve velocity direction - player maintains control
-        // Just reduce speed slightly on impact
         character.velocity = velocity.scale(0.95);
       } else {
         // Ground mode: slide along surface

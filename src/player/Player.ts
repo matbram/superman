@@ -837,7 +837,7 @@ export class Player {
 
     // Prevent rapid-fire collision triggers (shorter cooldown for responsiveness)
     const now = performance.now();
-    if (now - this.lastBuildingCollisionTime < 150) return;
+    if (now - this.lastBuildingCollisionTime < 50) return;
 
     const velocity = this.physics.velocity;
     if (velocity.length() < 3) return;
