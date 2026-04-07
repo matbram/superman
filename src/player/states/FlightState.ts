@@ -9,7 +9,7 @@ import type { InputState } from '../../input/actionMap';
 
 // Flight physics constants - RT pressure controls speed directly
 const MIN_SPEED = 10; // m/s - minimum flight speed when RT barely pressed
-const MAX_SPEED = 220; // m/s - supersonic speed at full RT pressure
+const MAX_SPEED = 440; // m/s - doubled max speed, trigger sensitivity controls it
 const ACCELERATION = 60; // m/s^2 - how fast we reach target speed
 const DECELERATION = 30; // m/s^2 (natural air drag when releasing RT)
 const BRAKE_DECELERATION = 200; // m/s^2 - abrupt stop with LT
@@ -176,12 +176,14 @@ export class FlightState extends BasePlayerState {
     }
 
     // ── DOUBLE-TAP DESCEND (LT) → SUPER DIVE + SUPERHERO LAND ──
-    if (input.descendTrigger > 0.5) {
+    if (input.descendTrigger > 0.3) {
       if (this.descendWasReleased) {
         if (now - this.lastDescendPressTime < DOUBLE_TAP_WINDOW) {
           // DOUBLE TAP! Super dive straight down
           this.superDiving = true;
           this.lastDescendPressTime = 0;
+          // Immediately set high speed for dramatic dive
+          this.currentSpeed = Math.max(this.currentSpeed, MAX_SPEED * 0.5);
         } else {
           this.lastDescendPressTime = now;
         }
@@ -191,16 +193,13 @@ export class FlightState extends BasePlayerState {
       this.descendWasReleased = true;
     }
 
-    // Super dive mode: pitch straight down at max speed toward ground
+    // Super dive mode: pitch straight down, accelerate hard, ignore brakes
     if (this.superDiving) {
-      this.currentSpeed = Math.min(MAX_SPEED, this.currentSpeed + 300 * deltaTime);
-      player.setPitch(-Math.PI * 0.4); // Nose down ~72 degrees
-      // Check if near ground - transition to landing with speed for superhero land
-      if (player.getHeightAboveGround() < 8) {
-        this.superDiving = false;
-        // The state machine will transition to Landing, and the
-        // Landing→Grounded transition triggers triggerSuperheroLanding
-      }
+      this.currentSpeed = Math.min(MAX_SPEED, this.currentSpeed + 500 * deltaTime);
+      player.setPitch(-Math.PI * 0.45); // Nose down ~80 degrees - almost straight down
+      // Skip all other speed logic - dive overrides everything
+      player.setCurrentSpeed(this.currentSpeed);
+      return; // RETURN EARLY - don't let brake logic slow us down
     }
 
     // RT pressure directly controls target speed

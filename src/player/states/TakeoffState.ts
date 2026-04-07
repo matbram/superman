@@ -36,15 +36,15 @@ export class TakeoffState extends BasePlayerState {
     // Add forward boost if moving
     const forward = player.getForwardDirection();
     if (this.initialVelocity.length() > 1) {
-      velocity.addInPlace(forward.scale(isBoosted ? 220 : TAKEOFF_FORWARD_BOOST));
+      velocity.addInPlace(forward.scale(isBoosted ? 440 : TAKEOFF_FORWARD_BOOST));
     } else if (isBoosted) {
       // Even from standing, boost gives forward momentum
-      velocity.addInPlace(forward.scale(220));
+      velocity.addInPlace(forward.scale(440));
     }
 
     player.setVelocity(velocity);
     if (isBoosted) {
-      player.setCurrentSpeed(220); // Instant max speed
+      player.setCurrentSpeed(440); // Instant max speed
     }
 
     // Play takeoff effects
@@ -52,7 +52,7 @@ export class TakeoffState extends BasePlayerState {
 
     // Boost takeoff gets a shockwave
     if (isBoosted) {
-      player.triggerBrakeShockwave(220);
+      player.triggerBrakeShockwave(440);
     }
   }
 
