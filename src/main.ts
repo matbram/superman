@@ -7,17 +7,23 @@ import { createEngine, startRenderLoop } from './core/engine';
 import { createScene } from './core/scene';
 import { InputManager } from './input/inputManager';
 import { PhysicsManager } from './physics/physics';
+import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { Player } from './player/Player';
 import { City } from './world/City';
 import { Atmosphere } from './world/Atmosphere';
-import { BuildingDamage } from './world/BuildingDamage';
+import { VoxelWorld } from './world/VoxelWorld';
+import { DayNightCycle } from './world/DayNightCycle';
+import { TrafficSystem } from './world/Traffic';
+import { StreetLife } from './world/StreetLife';
+import { PedestrianSystem } from './world/Pedestrians';
 import { AlienShip } from './world/AlienShip';
 import { Birds } from './world/Birds';
 import { Hud } from './ui/Hud';
 import { DebugOverlay } from './ui/DebugOverlay';
+import { Diag } from './core/DiagnosticLog';
 
 // Performance logging
-const ENABLE_FRAME_PERF_LOGGING = true;
+const ENABLE_FRAME_PERF_LOGGING = false;
 const FRAME_PERF_LOG_INTERVAL = 2000;  // Log every 2 seconds
 
 /**
@@ -32,7 +38,11 @@ class Game {
   private player: Player;
   private city: City;
   private atmosphere: Atmosphere;
-  private buildingDamage: BuildingDamage;
+  private voxelWorld: VoxelWorld;
+  private dayNightCycle: DayNightCycle;
+  private traffic: TrafficSystem;
+  private streetLife: StreetLife;
+  private pedestrians: PedestrianSystem;
   private alienShip: AlienShip;
   private birds: Birds;
   private hud: Hud;
@@ -52,7 +62,7 @@ class Game {
     city: 0,
     atmosphere: 0,
     wakeDamage: 0,
-    buildingDamage: 0,
+    voxelWorld: 0,
     alienShip: 0,
     birds: 0,
     render: 0,
@@ -92,33 +102,61 @@ class Game {
     this.atmosphere = new Atmosphere(this.sceneContext.scene);
 
     // Initialize building damage system
-    this.buildingDamage = new BuildingDamage(this.sceneContext.scene);
+    this.voxelWorld = new VoxelWorld(this.sceneContext.scene, this.physicsManager);
+
+    // Give physics direct access to VoxelWorld for grid-based collision
+    this.physicsManager.voxelWorld = this.voxelWorld;
+
+    // Clean up voxelized buildings when chunks unload
+    this.city.onChunkUnload = (chunkKey: string) => {
+      this.voxelWorld.cleanupChunk(chunkKey);
+    };
 
     // Initialize alien ship (World Engine style gravity beam)
     this.alienShip = new AlienShip(this.sceneContext.scene);
 
     // Connect alien ship gravity zone to building damage system
-    this.buildingDamage.setGravityZone(
+    this.voxelWorld.setGravityZone(
       this.alienShip.getGravityZone(),
       (pos) => this.alienShip.getGravityAtPosition(pos)
     );
 
-    // Connect alien ship to damage buildings in beam zone
-    // Use horizontal distance check and direct impact damage for more reliable destruction
+    // Alien beam: only damages already-voxelized buildings (perf safety)
     this.alienShip.setOnBuildingDamage((position, radius, damage) => {
       const buildings = this.city.getBuildings();
       for (const building of buildings) {
         const dx = building.position.x - position.x;
         const dz = building.position.z - position.z;
-        const horizontalDist = Math.sqrt(dx * dx + dz * dz);
-
-        if (horizontalDist < radius) {
-          // Apply high-speed impact damage to tear chunks off
-          const impactSpeed = 40 + damage * (1 - horizontalDist / radius);
-          this.buildingDamage.applyImpactDamage(building, position, impactSpeed);
+        if (dx * dx + dz * dz < radius * radius && this.voxelWorld.isVoxelized(building)) {
+          this.voxelWorld.applyDamage(building, building.position, damage);
         }
       }
     });
+
+    // Initialize day/night cycle
+    this.dayNightCycle = new DayNightCycle(
+      this.sceneContext.scene,
+      this.sceneContext.sunLight,
+      this.sceneContext.ambientLight,
+      17.5 // Start at late afternoon approaching sunset
+    );
+    this.dayNightCycle.setBuildingMaterials(this.city.getBuildingMaterials());
+
+    // Initialize traffic
+    this.traffic = new TrafficSystem(this.sceneContext.scene);
+
+    // Street life (trees, crosswalks, hydrants) - thin instances
+    this.streetLife = new StreetLife(this.sceneContext.scene);
+    this.city.streetLife = this.streetLife;
+
+    // Pedestrians walking on sidewalks
+    this.pedestrians = new PedestrianSystem(this.sceneContext.scene);
+
+    // Give AlienShip access to NPCs so it can attack them
+    this.alienShip.pedestrianSystem = this.pedestrians;
+    this.alienShip.trafficSystem = this.traffic;
+    this.alienShip.voxelWorld = this.voxelWorld;
+    this.alienShip.physicsManager = this.physicsManager;
 
     // Initialize birds
     this.birds = new Birds(this.sceneContext.scene);
@@ -134,21 +172,41 @@ class Game {
     // Set player spawn position
     this.player.setPosition(this.city.getSpawnPosition());
 
-    // Connect player shockwave to building damage system
+    // Shockwave: damage nearby buildings
     this.player.setOnBuildingDamage((position, radius, force) => {
       const buildings = this.city.getBuildings();
-      this.buildingDamage.applyShockwaveDamage(position, radius, force, buildings);
+      for (const building of buildings) {
+        const dx = building.position.x - position.x;
+        const dz = building.position.z - position.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < radius) {
+          this.voxelWorld.applyDamage(building, position, force * (1 - dist / radius) * 30);
+        }
+      }
     });
 
-    // Connect player building collision to damage system
+    // Player collision (backup for grazing hits physics might miss)
     this.player.setOnBuildingCollision((buildingMesh, impactPosition, speed) => {
-      this.buildingDamage.applyImpactDamage(buildingMesh, impactPosition, speed);
+      this.voxelWorld.applyDamage(buildingMesh, impactPosition, speed);
     });
 
-    // Connect heat vision to damage system
+    // Heat vision - give it direct VoxelWorld access for DDA accuracy
+    this.player.setHeatVisionVoxelWorld(this.voxelWorld);
+    this.player.setHeatVisionTargetSystems(this.pedestrians, this.traffic);
+
+    // Super breath systems
+    this.player.superBreathVoxelWorld = this.voxelWorld;
+    this.player.superBreathPedestrians = this.pedestrians;
+    this.player.superBreathTraffic = this.traffic;
+    // Fallback callback for non-voxelized buildings hit by mesh raycast
     this.player.setOnHeatVisionDamage((building, position, damage) => {
-      this.buildingDamage.applyImpactDamage(building, position, damage);
+      this.voxelWorld.applyExplosiveDamage(building as Mesh, position, damage);
     });
+
+    // Camera shake from building destruction (collapses, debris impacts)
+    this.voxelWorld.onCameraShake = (intensity: number) => {
+      this.player.getCameraController().addShake(intensity);
+    };
 
     // Initialize UI
     this.hud = new Hud();
@@ -236,27 +294,31 @@ class Game {
     t1 = performance.now();
     this.perfTimings.atmosphere += t1 - t0;
 
-    // Apply supersonic wake damage to nearby buildings (damages buildings on the sides)
+    // Supersonic wake: damage already-voxelized buildings near flight path
     t0 = performance.now();
     const playerSpeed = this.player.getCurrentSpeed();
     const playerPos = this.player.getPosition();
     if (playerSpeed > 80) {
+      const wakeRadius = 40 + (playerSpeed - 80) * 0.3;
+      const wakeRadiusSq = wakeRadius * wakeRadius;
       const buildings = this.city.getBuildings();
-      this.buildingDamage.applySupersonicWakeDamage(
-        playerPos,
-        this.player.getVelocity(),
-        playerSpeed,
-        buildings
-      );
+      for (const building of buildings) {
+        const dx = building.position.x - playerPos.x;
+        const dz = building.position.z - playerPos.z;
+        const distSq = dx * dx + dz * dz;
+        if (distSq < wakeRadiusSq && distSq > 64 && this.voxelWorld.isVoxelized(building)) {
+          this.voxelWorld.applyDamage(building, building.position, playerSpeed * 0.3);
+        }
+      }
     }
     t1 = performance.now();
     this.perfTimings.wakeDamage += t1 - t0;
 
     // Update building damage (debris physics, distance-based cleanup)
     t0 = performance.now();
-    this.buildingDamage.update(deltaTime, playerPos);
+    this.voxelWorld.update(deltaTime, playerPos);
     t1 = performance.now();
-    this.perfTimings.buildingDamage += t1 - t0;
+    this.perfTimings.voxelWorld += t1 - t0;
 
     // Update alien ship (gravity beam, oscillating effects)
     t0 = performance.now();
@@ -264,11 +326,22 @@ class Game {
     t1 = performance.now();
     this.perfTimings.alienShip += t1 - t0;
 
+    // Update day/night cycle
+    this.dayNightCycle.update(deltaTime);
+
+    // Update traffic
+    const playerVel = this.player.getVelocity();
+    this.traffic.update(deltaTime, playerPos, playerSpeed, playerVel);
+    this.pedestrians.update(deltaTime, playerPos, playerSpeed, playerVel);
+
     // Update birds
     t0 = performance.now();
     this.birds.update(deltaTime, playerPos);
     t1 = performance.now();
     this.perfTimings.birds += t1 - t0;
+
+    // Log current time of day so user can find the lighting they want
+    Diag.track('DayNight', 'hour', this.dayNightCycle.getTimeOfDay());
 
     // Update HUD
     this.hud.update(
@@ -289,6 +362,11 @@ class Game {
         inputInfo
       );
     }
+
+    // Diagnostics
+    Diag.track('Frame', 'playerSpeed', this.player.getCurrentSpeed());
+    Diag.track('Frame', 'meshCount', this.sceneContext.scene.meshes.length);
+    Diag.update();
 
     // Render scene
     t0 = performance.now();
@@ -317,7 +395,7 @@ class Game {
             city: (this.perfTimings.city / this.frameCount).toFixed(2) + 'ms',
             atmosphere: (this.perfTimings.atmosphere / this.frameCount).toFixed(2) + 'ms',
             wakeDamage: (this.perfTimings.wakeDamage / this.frameCount).toFixed(2) + 'ms',
-            buildingDamage: (this.perfTimings.buildingDamage / this.frameCount).toFixed(2) + 'ms',
+            voxelWorld: (this.perfTimings.voxelWorld / this.frameCount).toFixed(2) + 'ms',
             alienShip: (this.perfTimings.alienShip / this.frameCount).toFixed(2) + 'ms',
             birds: (this.perfTimings.birds / this.frameCount).toFixed(2) + 'ms',
             render: (this.perfTimings.render / this.frameCount).toFixed(2) + 'ms',
@@ -334,7 +412,7 @@ class Game {
           city: 0,
           atmosphere: 0,
           wakeDamage: 0,
-          buildingDamage: 0,
+          voxelWorld: 0,
           alienShip: 0,
           birds: 0,
           render: 0,
@@ -381,6 +459,19 @@ document.addEventListener('DOMContentLoaded', () => {
     new Game();
   } catch (error) {
     console.error('Failed to initialize game:', error);
-    alert('Failed to initialize game. Check console for details.');
+    const message =
+      error instanceof Error ? error.message : 'Unknown error occurred.';
+
+    // Show error in the instructions overlay instead of a generic alert
+    const instructions = document.getElementById('instructions');
+    if (instructions) {
+      instructions.innerHTML =
+        '<h1 style="color:#ff4444">Failed to Start Game</h1>' +
+        '<p style="white-space:pre-line;margin:20px 0;text-align:left">' +
+        message +
+        '</p>';
+    } else {
+      alert(message);
+    }
   }
 });

@@ -8,11 +8,12 @@ import { Vector3, Quaternion } from '@babylonjs/core/Maths/math.vector';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
-import { Color3 } from '@babylonjs/core/Maths/math.color';
+import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera';
+import { Diag } from '../core/DiagnosticLog';
 import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator';
 
 import { PhysicsManager, CharacterPhysics } from '../physics/physics';
@@ -60,6 +61,8 @@ export class Player {
   // Flight effects
   private isFlightMode: boolean = false;
   private isBoostActive: boolean = false;
+  private boostTakeoff: boolean = false;
+  private superDiveSpeed: number = 0; // Stores speed at dive start for landing impact
   private currentSpeed: number = 0;
   private speedParticles: ParticleSystem | null = null;
   private takeoffParticles: ParticleSystem | null = null;
@@ -145,27 +148,33 @@ export class Player {
 
     // Emission from player position (use voxel character body as emitter)
     this.speedParticles.emitter = this.voxelCharacter.getEmitterMesh();
-    this.speedParticles.minEmitBox = new Vector3(-0.5, -0.5, -0.5);
-    this.speedParticles.maxEmitBox = new Vector3(0.5, 0.5, 0.5);
+    // Wide emit area - streaks appear all around Superman, not just center
+    this.speedParticles.minEmitBox = new Vector3(-4, -3, -2);
+    this.speedParticles.maxEmitBox = new Vector3(4, 3, 2);
 
-    // Particle properties
-    this.speedParticles.color1 = new Color3(1, 1, 1).toColor4(0.5);
-    this.speedParticles.color2 = new Color3(0.8, 0.9, 1).toColor4(0.3);
+    // Wind streak particles - long white lines that stream past
+    this.speedParticles.color1 = new Color3(1, 1, 1).toColor4(0.7);
+    this.speedParticles.color2 = new Color3(0.85, 0.9, 1).toColor4(0.5);
     this.speedParticles.colorDead = new Color3(1, 1, 1).toColor4(0);
 
-    this.speedParticles.minSize = 0.05;
-    this.speedParticles.maxSize = 0.15;
+    // Stretch particles into long streaks (width vs height ratio)
+    this.speedParticles.minSize = 0.1;
+    this.speedParticles.maxSize = 0.4;
+    this.speedParticles.minScaleX = 1;
+    this.speedParticles.maxScaleX = 3;
+    this.speedParticles.minScaleY = 8;  // Long streaks!
+    this.speedParticles.maxScaleY = 20;
 
-    this.speedParticles.minLifeTime = 0.1;
-    this.speedParticles.maxLifeTime = 0.3;
+    this.speedParticles.minLifeTime = 0.08;
+    this.speedParticles.maxLifeTime = 0.25;
 
-    this.speedParticles.emitRate = 0; // Start with no particles
+    this.speedParticles.emitRate = 0;
 
     this.speedParticles.blendMode = ParticleSystem.BLENDMODE_ADD;
 
-    // Direction (behind player)
-    this.speedParticles.direction1 = new Vector3(-1, -0.5, -1);
-    this.speedParticles.direction2 = new Vector3(1, 0.5, -1);
+    // Direction (stream backward past the player)
+    this.speedParticles.direction1 = new Vector3(-2, -1, -3);
+    this.speedParticles.direction2 = new Vector3(2, 1, -3);
     this.speedParticles.minEmitPower = 5;
     this.speedParticles.maxEmitPower = 10;
 
@@ -519,6 +528,7 @@ export class Player {
 
     // Update heat vision
     this.updateHeatVision(input, deltaTime);
+    this.updateSuperBreath(input, deltaTime);
 
     // Update camera
     this.cameraController.setTarget(this.physics.position, this.getForwardDirection());
@@ -560,6 +570,141 @@ export class Player {
         this.spawnStopShockwave(previousSpeed);
       }
     }
+
+    // ── SUPERHERO LANDING ──
+    // Triggers on ANY transition to Grounded with significant speed
+    if (newStateType === PlayerStateType.Grounded) {
+      const landingSpeed = Math.max(previousSpeed, this.superDiveSpeed, 0);
+      if (landingSpeed > 20) {
+        this.triggerSuperheroLanding(landingSpeed);
+      }
+      this.superDiveSpeed = 0;
+    }
+
+    // Store dive speed when entering Landing from Flight
+    if (previousStateType === PlayerStateType.Flight && newStateType === PlayerStateType.Landing) {
+      this.superDiveSpeed = previousSpeed;
+    }
+  }
+
+  /**
+   * SUPERHERO LANDING - the iconic three-point landing.
+   * Creates crater effect, ground shockwave, massive debris blast, dust cloud.
+   */
+  private triggerSuperheroLanding(speed: number): void {
+    const pos = this.physics.position.clone();
+    const impactForce = Math.max(3, speed / 10); // Bigger scale for more drama
+
+    // ── Camera effects ──
+    this.cameraController.addShake(Math.min(12, impactForce * 1.5));
+
+    // ── Ground crater shockwave rings ──
+    // Multiple expanding rings at ground level (flat, horizontal)
+    const ringCount = Math.min(5, Math.ceil(impactForce));
+    for (let i = 0; i < ringCount; i++) {
+      const ring = this.createStopShockwaveRing();
+      ring.position.set(pos.x, 0.3, pos.z);
+      ring.rotation.x = Math.PI / 2; // Flat on ground
+      ring.scaling.setAll(0.5 + i * 0.3);
+      this.shockwaveRings.push(ring);
+    }
+
+    // ── Ground crack / crater disc ──
+    const craterSize = 8 + impactForce * 3;
+    const crater = MeshBuilder.CreateDisc('crater', {
+      radius: craterSize, tessellation: 12
+    }, this.scene);
+    crater.position.set(pos.x, 0.2, pos.z);
+    crater.rotation.x = Math.PI / 2;
+    const craterMat = new StandardMaterial('craterMat', this.scene);
+    craterMat.diffuseColor = new Color3(0.1, 0.1, 0.1);
+    craterMat.emissiveColor = new Color3(0.05, 0.03, 0.0);
+    craterMat.alpha = 0.6;
+    crater.material = craterMat;
+    crater.isPickable = false;
+    // Fade and shrink the crater over time
+    this.shockwaveRings.push(crater); // Reuse the shockwave cleanup system
+
+    // ── Ground debris blast ──
+    // Chunks of ground/rubble fly outward from impact point
+    const debrisCount = Math.min(35, Math.floor(impactForce * 3));
+    for (let i = 0; i < debrisCount; i++) {
+      const angle = (i / debrisCount) * Math.PI * 2 + Math.random() * 0.5;
+      const dist = 2 + Math.random() * 5;
+      const size = 1 + Math.random() * 3;
+
+      const chunk = MeshBuilder.CreateBox(`landing_debris_${i}`, {
+        width: size * (0.5 + Math.random()),
+        height: size * 0.4,
+        depth: size * (0.5 + Math.random()),
+      }, this.scene);
+      chunk.position.set(
+        pos.x + Math.cos(angle) * dist,
+        0.5 + Math.random(),
+        pos.z + Math.sin(angle) * dist
+      );
+
+      const debrisMat = new StandardMaterial(`ldm_${i}`, this.scene);
+      debrisMat.diffuseColor = new Color3(0.35, 0.3, 0.25);
+      chunk.material = debrisMat;
+      chunk.isPickable = false;
+
+      // Animate debris flying outward + up then falling
+      // MASSIVE outward + upward velocity for cinematic debris blast
+      const outForce = 15 + impactForce * 2;
+      const velX = Math.cos(angle) * outForce + (Math.random() - 0.5) * 8;
+      const velY = 10 + Math.random() * impactForce * 3 + impactForce;
+      const velZ = Math.sin(angle) * outForce + (Math.random() - 0.5) * 8;
+      const angVel = (Math.random() - 0.5) * 15;
+
+      // Simple physics animation via scene observer
+      let lifetime = 0;
+      const obs = this.scene.onBeforeRenderObservable.add(() => {
+        const dt = this.scene.getEngine().getDeltaTime() / 1000;
+        lifetime += dt;
+        chunk.position.x += velX * dt;
+        chunk.position.y += (velY - 30 * lifetime) * dt; // Gravity
+        chunk.position.z += velZ * dt;
+        chunk.rotation.x += angVel * dt;
+        chunk.rotation.z += angVel * 0.7 * dt;
+
+        if (chunk.position.y < 0) chunk.position.y = 0;
+        if (lifetime > 3) {
+          chunk.dispose();
+          debrisMat.dispose();
+          this.scene.onBeforeRenderObservable.remove(obs);
+        }
+      });
+    }
+
+    // ── Dust cloud eruption ──
+    // Massive dust ring expanding outward from impact
+    const dustSystem = new ParticleSystem('landingDust', 400, this.scene);
+    dustSystem.createConeEmitter(craterSize, Math.PI / 2.5);
+    dustSystem.color1 = new Color4(0.6, 0.5, 0.35, 0.9);
+    dustSystem.color2 = new Color4(0.4, 0.35, 0.25, 0.7);
+    dustSystem.colorDead = new Color4(0.3, 0.25, 0.2, 0);
+    dustSystem.minSize = 5 + impactForce * 0.5;
+    dustSystem.maxSize = 15 + impactForce;
+    dustSystem.minLifeTime = 2;
+    dustSystem.maxLifeTime = 6;
+    dustSystem.direction1 = new Vector3(-craterSize, 3, -craterSize);
+    dustSystem.direction2 = new Vector3(craterSize, 10 + impactForce * 2, craterSize);
+    dustSystem.minEmitPower = 5 + impactForce * 2;
+    dustSystem.maxEmitPower = 15 + impactForce * 3;
+    dustSystem.emitter = new Vector3(pos.x, 0.5, pos.z);
+    dustSystem.emitRate = 150;
+    dustSystem.blendMode = ParticleSystem.BLENDMODE_STANDARD;
+    dustSystem.gravity = new Vector3(0, -3, 0);
+    dustSystem.start();
+    setTimeout(() => { dustSystem.emitRate = 0; }, 400);
+    setTimeout(() => { dustSystem.dispose(); }, 5000);
+
+    // ── Building damage from landing impact ──
+    if (this.onBuildingDamage) {
+      const radius = 30 + impactForce * 4;
+      this.onBuildingDamage(pos, radius, impactForce * 3);
+    }
   }
 
   /**
@@ -597,8 +742,13 @@ export class Player {
     // Speed particles (subtle at lower speeds)
     if (this.speedParticles) {
       if (this.currentSpeed > SPEED_PARTICLE_THRESHOLD && this.isFlightMode) {
-        const intensity = (this.currentSpeed - SPEED_PARTICLE_THRESHOLD) / 50;
-        this.speedParticles.emitRate = Math.min(100, intensity * 50);
+        const intensity = (this.currentSpeed - SPEED_PARTICLE_THRESHOLD) / 80;
+        this.speedParticles.emitRate = Math.min(200, intensity * 80);
+        // Scale streak length with speed
+        this.speedParticles.minScaleY = 8 + intensity * 10;
+        this.speedParticles.maxScaleY = 20 + intensity * 20;
+        this.speedParticles.minEmitPower = 5 + intensity * 20;
+        this.speedParticles.maxEmitPower = 15 + intensity * 30;
       } else {
         this.speedParticles.emitRate = 0;
       }
@@ -739,6 +889,30 @@ export class Player {
     this.isBoostActive = active;
   }
 
+  public setBoostTakeoff(boost: boolean): void {
+    this.boostTakeoff = boost;
+  }
+
+  public setSuperDiveSpeed(speed: number): void {
+    this.superDiveSpeed = speed;
+  }
+
+  private superDiveFlag: boolean = false;
+  public setSuperDiveFlag(flag: boolean): void {
+    this.superDiveFlag = flag;
+  }
+  public consumeSuperDiveFlag(): boolean {
+    const val = this.superDiveFlag;
+    this.superDiveFlag = false;
+    return val;
+  }
+
+  public consumeBoostTakeoff(): boolean {
+    const val = this.boostTakeoff;
+    this.boostTakeoff = false;
+    return val;
+  }
+
   public isBoost(): boolean {
     return this.isBoostActive;
   }
@@ -763,6 +937,13 @@ export class Player {
   }
 
   /**
+   * Gets the camera controller for external effects (camera shake, etc.)
+   */
+  public getCameraController() {
+    return this.cameraController;
+  }
+
+  /**
    * Sets callback for building collision damage
    */
   public setOnBuildingCollision(callback: (buildingMesh: any, impactPosition: Vector3, speed: number) => void): void {
@@ -774,6 +955,95 @@ export class Player {
    */
   public setOnHeatVisionDamage(callback: (building: any, position: Vector3, damage: number) => void): void {
     this.heatVision.setOnBuildingDamage(callback);
+  }
+
+  public setHeatVisionVoxelWorld(voxelWorld: any): void {
+    this.heatVision.voxelWorld = voxelWorld;
+  }
+
+  public setHeatVisionTargetSystems(pedestrians: any, traffic: any): void {
+    this.heatVision.pedestrianSystem = pedestrians;
+    this.heatVision.trafficSystem = traffic;
+  }
+
+  // Super breath references
+  private superBreathCooldown: number = 0;
+  public superBreathVoxelWorld: any = null;
+  public superBreathPedestrians: any = null;
+  public superBreathTraffic: any = null;
+
+  /**
+   * SUPER BREATH: Explosive cone of force in the facing direction.
+   * Pushes and damages everything in a wide cone.
+   */
+  private updateSuperBreath(input: InputState, deltaTime: number): void {
+    this.superBreathCooldown -= deltaTime;
+
+    if (input.superBreathHeld && this.superBreathCooldown <= 0) {
+      this.superBreathCooldown = 0.15; // Fire every 150ms while held
+
+      const forward = this.getForwardDirection();
+      const pos = this.physics.position.clone();
+      const breathRange = 60; // How far the breath reaches
+      const breathRadius = 25; // Cone width at max range
+
+      // Create wind particle burst
+      const windParticles = new ParticleSystem('superBreath', 100, this.scene);
+      windParticles.createConeEmitter(3, Math.PI / 6);
+      windParticles.color1 = new Color4(0.8, 0.9, 1.0, 0.5);
+      windParticles.color2 = new Color4(0.6, 0.8, 1.0, 0.3);
+      windParticles.colorDead = new Color4(1, 1, 1, 0);
+      windParticles.minSize = 2;
+      windParticles.maxSize = 6;
+      windParticles.minLifeTime = 0.3;
+      windParticles.maxLifeTime = 0.8;
+      windParticles.direction1 = forward.scale(breathRange * 0.5);
+      windParticles.direction2 = forward.scale(breathRange);
+      windParticles.minEmitPower = 30;
+      windParticles.maxEmitPower = 60;
+      windParticles.emitter = pos;
+      windParticles.emitRate = 80;
+      windParticles.blendMode = ParticleSystem.BLENDMODE_ADD;
+      windParticles.gravity = new Vector3(0, -5, 0);
+      windParticles.start();
+      setTimeout(() => { windParticles.emitRate = 0; }, 150);
+      setTimeout(() => { windParticles.dispose(); }, 1500);
+
+      // Camera shake
+      this.cameraController.addShake(2);
+
+      // Damage buildings along the breath direction using DDA
+      if (this.superBreathVoxelWorld) {
+        for (let spread = -2; spread <= 2; spread++) {
+          const right = Vector3.Cross(forward, Vector3.Up()).normalize();
+          const dir = forward.add(right.scale(spread * 0.3)).normalize();
+          const hit = this.superBreathVoxelWorld.collideRay(pos, dir, breathRange);
+          if (hit.hit && hit.building) {
+            this.superBreathVoxelWorld.applyDamageAtGrid(
+              hit.building, hit.gridX, hit.gridY, hit.gridZ, 300
+            );
+          }
+        }
+      }
+
+      // Push/kill pedestrians in cone
+      if (this.superBreathPedestrians) {
+        const impactPoint = pos.add(forward.scale(breathRange * 0.5));
+        this.superBreathPedestrians.killNear(impactPoint, breathRadius);
+      }
+
+      // Launch vehicles in cone
+      if (this.superBreathTraffic) {
+        const impactPoint = pos.add(forward.scale(breathRange * 0.5));
+        this.superBreathTraffic.destroyNear(impactPoint, breathRadius);
+      }
+
+      // Building damage callback for non-voxelized buildings
+      if (this.onBuildingDamage) {
+        const impactPoint = pos.add(forward.scale(breathRange * 0.5));
+        this.onBuildingDamage(impactPoint, breathRadius, 200);
+      }
+    }
   }
 
   /**
@@ -833,11 +1103,11 @@ export class Player {
    */
   private checkBuildingCollision(): void {
     // Only check when flying at significant speed
-    if (!this.isFlightMode || this.currentSpeed < 20) return;
+    if (!this.isFlightMode || this.currentSpeed < 10) return;
 
-    // Prevent rapid-fire collision triggers (shorter cooldown for responsiveness)
+    // Prevent rapid-fire collision triggers
     const now = performance.now();
-    if (now - this.lastBuildingCollisionTime < 150) return;
+    if (now - this.lastBuildingCollisionTime < 50) return;
 
     const velocity = this.physics.velocity;
     if (velocity.length() < 3) return;
@@ -846,7 +1116,7 @@ export class Player {
     const direction = velocity.clone().normalize();
 
     // Simple forward raycast - fast and reliable
-    const lookAhead = Math.max(4, this.currentSpeed * 0.1);
+    const lookAhead = Math.max(8, this.currentSpeed * 0.15);
 
     const result = this.physicsManager.raycast(
       this.physics.position,
@@ -854,28 +1124,26 @@ export class Player {
       lookAhead
     );
 
-    // Also cast rays slightly to the sides for wider detection
+    // Cast rays to sides AND vertically for wider detection
     let hitResult = result;
     if (!result.hit || result.distance > PLAYER_RADIUS * 4) {
-      // Try side rays
       const right = Vector3.Cross(direction, Vector3.Up()).normalize();
-      const leftRay = this.physicsManager.raycast(
-        this.physics.position.add(right.scale(-PLAYER_RADIUS)),
-        direction,
-        lookAhead
-      );
-      const rightRay = this.physicsManager.raycast(
-        this.physics.position.add(right.scale(PLAYER_RADIUS)),
-        direction,
-        lookAhead
-      );
+      const offsets = [
+        right.scale(-PLAYER_RADIUS),      // left
+        right.scale(PLAYER_RADIUS),       // right
+        new Vector3(0, PLAYER_RADIUS, 0),  // up
+        new Vector3(0, -PLAYER_RADIUS, 0), // down
+      ];
 
-      // Use closest hit
-      if (leftRay.hit && leftRay.distance < (hitResult.distance || Infinity)) {
-        hitResult = leftRay;
-      }
-      if (rightRay.hit && rightRay.distance < (hitResult.distance || Infinity)) {
-        hitResult = rightRay;
+      for (const offset of offsets) {
+        const ray = this.physicsManager.raycast(
+          this.physics.position.add(offset),
+          direction,
+          lookAhead
+        );
+        if (ray.hit && ray.distance < (hitResult.distance || Infinity)) {
+          hitResult = ray;
+        }
       }
     }
 
@@ -883,17 +1151,12 @@ export class Player {
     const hitThreshold = PLAYER_RADIUS * 4 + this.currentSpeed * 0.05;
 
     if (hitResult.hit && hitResult.mesh && hitResult.distance < hitThreshold) {
-      // Check mesh name - buildings start with "building_"
       const meshName = hitResult.mesh.name;
-
-      // Direct check without lowercase for speed
       const isBuilding = meshName.startsWith('building_');
 
-      // Exclude non-damageable parts
-      const isExcluded = meshName.includes('strip');
-
-      if (isBuilding && !isExcluded) {
-        // Trigger building collision damage
+      if (isBuilding) {
+        Diag.log('Collision', `${meshName.substring(0, 30)} speed=${this.currentSpeed.toFixed(0)} dist=${hitResult.distance.toFixed(1)}`);
+        Diag.count('Collision', 'buildingHits');
         if (this.onBuildingCollision) {
           this.onBuildingCollision(hitResult.mesh, hitResult.point, this.currentSpeed);
         }

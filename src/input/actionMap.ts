@@ -29,6 +29,7 @@ export interface InputState {
   jumpHeld: boolean;      // A button - held down
   boostHeld: boolean;     // RB - boost while flying
   heatVisionHeld: boolean; // LB - heat vision (laser eyes)
+  superBreathHeld: boolean; // Y button / F key - super breath
   debugPressed: boolean;  // Backtick - toggle debug
 }
 
@@ -47,6 +48,7 @@ export function createEmptyInputState(): InputState {
     jumpHeld: false,
     boostHeld: false,
     heatVisionHeld: false,
+    superBreathHeld: false,
     debugPressed: false,
   };
 }
@@ -64,6 +66,7 @@ export const KeyboardBindings = {
   descend: ['ControlLeft', 'ControlRight'],  // Ctrl to descend (like LT)
   boost: ['KeyQ'],  // Q for boost
   heatVision: ['KeyE'],  // E for heat vision (laser eyes)
+  superBreath: ['KeyF'],  // F for super breath
   toggleDebug: ['Backquote'],
 } as const;
 

@@ -19,6 +19,8 @@ export class GroundedState extends BasePlayerState {
 
   private moveVelocity: Vector3 = Vector3.Zero();
   private landingGracePeriod: number = 0;
+  private lastFlyPressTime: number = 0;
+  private flyWasReleased: boolean = true;
 
   enter(player: Player): void {
     // Reset flight-specific state when landing
@@ -38,10 +40,21 @@ export class GroundedState extends BasePlayerState {
       this.landingGracePeriod -= deltaTime;
     }
 
-    // Check for state transitions
-    // Jump or press RT (fly trigger) to take off
-    if (input.jumpPressed || input.flyTrigger > 0.3) {
+    // ── DOUBLE-TAP FLY → INSTANT MAX SPEED TAKEOFF ──
+    const now = performance.now();
+    if (input.flyTrigger > 0.3 || input.jumpPressed) {
+      if (this.flyWasReleased) {
+        if (now - this.lastFlyPressTime < 350) {
+          // Double tap! Set boost flag so TakeoffState applies max speed
+          player.setBoostTakeoff(true);
+        }
+        this.lastFlyPressTime = now;
+        this.flyWasReleased = false;
+      }
       return PlayerStateType.Takeoff;
+    }
+    if (input.flyTrigger < 0.1 && !input.jumpPressed) {
+      this.flyWasReleased = true;
     }
 
     // Check if we've fallen off something

@@ -9,7 +9,7 @@ import type { InputState } from '../../input/actionMap';
 
 // Flight physics constants - RT pressure controls speed directly
 const MIN_SPEED = 10; // m/s - minimum flight speed when RT barely pressed
-const MAX_SPEED = 220; // m/s - supersonic speed at full RT pressure
+const MAX_SPEED = 440; // m/s - doubled max speed, trigger sensitivity controls it
 const ACCELERATION = 60; // m/s^2 - how fast we reach target speed
 const DECELERATION = 30; // m/s^2 (natural air drag when releasing RT)
 const BRAKE_DECELERATION = 200; // m/s^2 - abrupt stop with LT
@@ -38,6 +38,13 @@ export class FlightState extends BasePlayerState {
   private wasAboveBrakeThreshold: boolean = false;
   private brakeShockwaveTriggered: boolean = false;
 
+  // Double-tap tracking
+  private lastFlyPressTime: number = 0;
+  private flyWasReleased: boolean = true;
+  private lastDescendPressTime: number = 0;
+  private descendWasReleased: boolean = true;
+  private superDiving: boolean = false;
+
   enter(player: Player): void {
     // Initialize speed from current velocity
     this.currentSpeed = player.getVelocity().length();
@@ -50,6 +57,12 @@ export class FlightState extends BasePlayerState {
     // Enable flight effects
     player.setFlightMode(true);
     player.setBoostActive(false);
+
+    // Check if we entered Flight with a super dive request (from Hover double-tap LT)
+    if (player.consumeSuperDiveFlag()) {
+      this.superDiving = true;
+      this.currentSpeed = Math.max(this.currentSpeed, MAX_SPEED * 0.6);
+    }
   }
 
   exit(player: Player): void {
@@ -77,6 +90,19 @@ export class FlightState extends BasePlayerState {
   }
 
   private checkTransitions(player: Player, input: InputState): PlayerStateType | null {
+    // SUPER DIVE: force landing at any speed when near ground
+    // SUPER DIVE: SLAM directly into ground - skip Landing state entirely
+    // Landing state gently decelerates. We want a violent impact.
+    if (this.superDiving) {
+      const height = player.getHeightAboveGround();
+      if (height < 5) {
+        this.superDiving = false;
+        // Store dive speed BEFORE transitioning (it will be used for impact force)
+        player.setSuperDiveSpeed(this.currentSpeed);
+        return PlayerStateType.Grounded; // Skip Landing → go straight to ground SLAM
+      }
+    }
+
     // Land if pressing LT (descend) near ground and moving slowly
     if (input.descendTrigger > 0.5) {
       const height = player.getHeightAboveGround();
@@ -108,10 +134,12 @@ export class FlightState extends BasePlayerState {
     const speedFactor = this.currentSpeed / MAX_SPEED;
     const turnRate = this.lerp(BASE_TURN_RATE, HIGH_SPEED_TURN_RATE, speedFactor);
 
-    // Pitch control - airplane style:
-    // Push stick forward (up) = dive down, pull back (down) = climb up
+    // Pitch control - airplane style (SKIP during super dive)
     let targetPitch = player.getPitch();
-    if (!heatVisionActive && Math.abs(input.moveY) > 0.1) {
+    if (this.superDiving) {
+      // POSITIVE pitch = nose down in our coordinate system
+      targetPitch = Math.PI * 0.45;
+    } else if (!heatVisionActive && Math.abs(input.moveY) > 0.1) {
       targetPitch += input.moveY * PITCH_RATE * deltaTime;
     } else {
       // Auto-level pitch gradually when no input or heat vision active
@@ -137,21 +165,71 @@ export class FlightState extends BasePlayerState {
 
   private updateSpeed(player: Player, input: InputState, deltaTime: number): void {
     const previousSpeed = this.currentSpeed;
+    const now = performance.now();
+    const DOUBLE_TAP_WINDOW = 350; // ms
 
-    // RT pressure directly controls target speed (procedural acceleration)
-    // More pressure = faster speed, proportional to trigger position
-    if (input.flyTrigger > 0.05) {
-      // Map trigger pressure to speed range
-      // Use a curve for better feel: slight press = slow, full press = max
-      const triggerCurve = Math.pow(input.flyTrigger, 1.5); // Slight exponential curve
-      this.targetSpeed = MIN_SPEED + (MAX_SPEED - MIN_SPEED) * triggerCurve;
+    // ── DOUBLE-TAP FLY (RT) → INSTANT MAX SPEED ──
+    if (input.flyTrigger > 0.5) {
+      if (this.flyWasReleased) {
+        // Trigger pressed fresh
+        if (now - this.lastFlyPressTime < DOUBLE_TAP_WINDOW) {
+          // DOUBLE TAP! Instant max speed + shockwave
+          this.currentSpeed = MAX_SPEED;
+          this.targetSpeed = MAX_SPEED;
+          player.triggerBrakeShockwave(MAX_SPEED); // Sonic boom effect
+          this.lastFlyPressTime = 0; // Reset so triple-tap doesn't re-trigger
+        } else {
+          this.lastFlyPressTime = now;
+        }
+        this.flyWasReleased = false;
+      }
     } else {
-      // No fly trigger = decelerate to hover
+      this.flyWasReleased = true;
+    }
+
+    // ── DOUBLE-TAP LT → SUPER DIVE (instant descent + superhero landing) ──
+    if (input.descendTrigger > 0.3) {
+      if (this.descendWasReleased) {
+        const timeSinceLastPress = now - this.lastDescendPressTime;
+        if (timeSinceLastPress < 400 && this.lastDescendPressTime > 0) {
+          this.superDiving = true;
+          this.lastDescendPressTime = 0;
+          this.currentSpeed = Math.max(this.currentSpeed, MAX_SPEED * 0.6);
+        } else {
+          this.lastDescendPressTime = now;
+        }
+        this.descendWasReleased = false;
+      }
+    } else if (input.descendTrigger < 0.15) {
+      this.descendWasReleased = true;
+    }
+
+    // Super dive: pitch down, accelerate, ignore brakes, cause destruction on landing
+    if (this.superDiving) {
+      this.currentSpeed = Math.min(MAX_SPEED, this.currentSpeed + 500 * deltaTime);
+      player.setPitch(Math.PI * 0.45);
+
+      const vel = player.getVelocity();
+      if (vel.y > 0) {
+        vel.y = -Math.abs(vel.y);
+        player.setVelocity(vel);
+      }
+
+      player.setCurrentSpeed(this.currentSpeed);
+      return;
+    }
+
+    // RT pressure directly controls target speed
+    if (input.flyTrigger > 0.05) {
+      const triggerCurve = Math.pow(input.flyTrigger, 1.5);
+      this.targetSpeed = MIN_SPEED + (MAX_SPEED - MIN_SPEED) * triggerCurve;
+    } else if (!this.superDiving) {
       this.targetSpeed = 0;
     }
 
-    // LT (descendTrigger) acts as HARD brake - abrupt stop
-    if (input.descendTrigger > 0.1) {
+    // LT as brake - delayed during double-tap window so first tap doesn't kill speed
+    const inDoubleTapWindow = this.lastDescendPressTime > 0 && (now - this.lastDescendPressTime) < 400;
+    if (input.descendTrigger > 0.1 && !this.superDiving && !inDoubleTapWindow) {
       this.currentSpeed -= BRAKE_DECELERATION * input.descendTrigger * deltaTime;
       this.currentSpeed = Math.max(0, this.currentSpeed);
 

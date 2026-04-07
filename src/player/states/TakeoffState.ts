@@ -26,20 +26,34 @@ export class TakeoffState extends BasePlayerState {
     // Enable flight physics immediately (prevents sliding on obstacles)
     player.setFlightMode(true);
 
+    // Check for double-tap boost takeoff
+    const isBoosted = player.consumeBoostTakeoff();
+
     // Apply initial takeoff impulse
     const velocity = player.getVelocity();
-    velocity.y = TAKEOFF_SPEED;
+    velocity.y = isBoosted ? TAKEOFF_SPEED * 3 : TAKEOFF_SPEED; // Triple height on boost
 
     // Add forward boost if moving
     const forward = player.getForwardDirection();
     if (this.initialVelocity.length() > 1) {
-      velocity.addInPlace(forward.scale(TAKEOFF_FORWARD_BOOST));
+      velocity.addInPlace(forward.scale(isBoosted ? 440 : TAKEOFF_FORWARD_BOOST));
+    } else if (isBoosted) {
+      // Even from standing, boost gives forward momentum
+      velocity.addInPlace(forward.scale(440));
     }
 
     player.setVelocity(velocity);
+    if (isBoosted) {
+      player.setCurrentSpeed(440); // Instant max speed
+    }
 
     // Play takeoff effects
     player.startTakeoffEffect();
+
+    // Boost takeoff gets a shockwave
+    if (isBoosted) {
+      player.triggerBrakeShockwave(440);
+    }
   }
 
   exit(_player: Player): void {

@@ -8,6 +8,8 @@ import { Scene } from '@babylonjs/core/scene';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Ray } from '@babylonjs/core/Culling/ray';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { Diag } from '../core/DiagnosticLog';
+import { VOXEL_SIZE } from '../world/VoxelBuilding';
 import { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh';
 import '@babylonjs/core/Collisions/collisionCoordinator';
 
@@ -57,6 +59,9 @@ export class PhysicsManager {
   private config: PhysicsConfig;
   private accumulator: number = 0;
   private collisionMeshes: Set<AbstractMesh> = new Set();
+
+  // VoxelWorld reference for direct grid-based building collision
+  public voxelWorld: import('../world/VoxelWorld').VoxelWorld | null = null;
 
   constructor(scene: Scene, config?: Partial<PhysicsConfig>) {
     this.scene = scene;
@@ -116,18 +121,15 @@ export class PhysicsManager {
     };
   }
 
+  // Reusable vector for ground check
+  private _groundOrigin = new Vector3();
+
   /**
    * Checks if a point is on/near the ground
    */
   public checkGrounded(position: Vector3, height: number, threshold: number = 0.3): RaycastResult {
-    // Cast ray downward from top of character to below feet
-    // Position is character CENTER, so we start from top (position + height/2)
-    // and cast down to below feet (total distance = height + threshold)
-    const origin = position.add(new Vector3(0, height * 0.5, 0));
-    const direction = Vector3.Down();
-    const maxDistance = height + threshold;
-
-    return this.raycast(origin, direction, maxDistance);
+    this._groundOrigin.set(position.x, position.y + height * 0.5, position.z);
+    return this.raycast(this._groundOrigin, Vector3.Down(), height + threshold);
   }
 
   /**
@@ -186,57 +188,52 @@ export class PhysicsManager {
     };
   }
 
+  // Reusable vectors for sphere sweep to avoid per-frame allocations
+  private _sweepOffset = new Vector3();
+  private _sweepOrigin = new Vector3();
+  private _noHitResult: RaycastResult = {
+    hit: false,
+    point: Vector3.Zero(),
+    normal: Vector3.Up(),
+    distance: 0,
+    mesh: null,
+  };
+
   /**
-   * Performs a single step of sphere sweep with comprehensive ray coverage
+   * Performs a single step of sphere sweep with ray coverage
+   * Reduced from 19 to 7 rays for performance (center + 6 cardinal)
    */
   private sphereSweepStep(
     start: Vector3,
-    end: Vector3,
+    _end: Vector3,
     radius: number,
     direction: Vector3,
     distance: number
   ): RaycastResult {
-    const results: RaycastResult[] = [];
     const checkDist = distance + radius;
 
-    // Center ray
-    results.push(this.raycast(start, direction, checkDist));
-
-    // Cardinal direction offsets
-    const offsets = [
-      new Vector3(radius, 0, 0),
-      new Vector3(-radius, 0, 0),
-      new Vector3(0, radius, 0),
-      new Vector3(0, -radius, 0),
-      new Vector3(0, 0, radius),
-      new Vector3(0, 0, -radius),
-    ];
-
-    // Diagonal offsets for better coverage
-    const diagRadius = radius * 0.707;
-    offsets.push(
-      new Vector3(diagRadius, diagRadius, 0),
-      new Vector3(-diagRadius, diagRadius, 0),
-      new Vector3(diagRadius, -diagRadius, 0),
-      new Vector3(-diagRadius, -diagRadius, 0),
-      new Vector3(0, diagRadius, diagRadius),
-      new Vector3(0, -diagRadius, diagRadius),
-      new Vector3(0, diagRadius, -diagRadius),
-      new Vector3(0, -diagRadius, -diagRadius),
-      new Vector3(diagRadius, 0, diagRadius),
-      new Vector3(-diagRadius, 0, diagRadius),
-      new Vector3(diagRadius, 0, -diagRadius),
-      new Vector3(-diagRadius, 0, -diagRadius)
-    );
-
-    for (const offset of offsets) {
-      const offsetStart = start.add(offset);
-      results.push(this.raycast(offsetStart, direction, checkDist));
+    // Center ray first - most likely to hit
+    const centerResult = this.raycast(start, direction, checkDist);
+    if (centerResult.hit && centerResult.distance < radius) {
+      centerResult.distance = Math.max(0, centerResult.distance - radius);
+      return centerResult;
     }
 
-    // Return closest hit
-    let closestHit: RaycastResult | null = null;
-    for (const result of results) {
+    let closestHit: RaycastResult | null = centerResult.hit ? centerResult : null;
+
+    // 6 cardinal direction offsets only (skip 12 diagonals)
+    const cardinalOffsets: [number, number, number][] = [
+      [radius, 0, 0], [-radius, 0, 0],
+      [0, radius, 0], [0, -radius, 0],
+      [0, 0, radius], [0, 0, -radius],
+    ];
+
+    for (const [ox, oy, oz] of cardinalOffsets) {
+      this._sweepOrigin.x = start.x + ox;
+      this._sweepOrigin.y = start.y + oy;
+      this._sweepOrigin.z = start.z + oz;
+
+      const result = this.raycast(this._sweepOrigin, direction, checkDist);
       if (result.hit && result.distance < checkDist) {
         if (!closestHit || result.distance < closestHit.distance) {
           closestHit = result;
@@ -246,15 +243,17 @@ export class PhysicsManager {
 
     if (closestHit) {
       closestHit.distance = Math.max(0, closestHit.distance - radius);
+      return closestHit;
     }
 
-    return closestHit ?? {
-      hit: false,
-      point: end.clone(),
-      normal: Vector3.Up(),
-      distance,
-      mesh: null,
-    };
+    this._noHitResult.point.copyFrom(start);
+    this._noHitResult.point.addInPlaceFromFloats(
+      direction.x * distance,
+      direction.y * distance,
+      direction.z * distance
+    );
+    this._noHitResult.distance = distance;
+    return this._noHitResult;
   }
 
   /**
@@ -287,14 +286,50 @@ export class PhysicsManager {
       character.position = character.position.add(movementDir.scale(safeDistance));
 
       if (character.isFlying) {
-        // In flight mode: push away from surface, don't slide
-        // Keep most of the original velocity but deflect slightly away from surface
-        const pushForce = sweepResult.normal.scale(2);
-        character.position.addInPlace(pushForce.scale(deltaTime * 10));
+        const meshName = sweepResult.mesh?.name || '';
+        const isBuilding = meshName.startsWith('building_');
 
-        // Preserve velocity direction - player maintains control
-        // Just reduce speed slightly on impact
-        character.velocity = velocity.scale(0.95);
+        if (isBuilding && this.voxelWorld) {
+          // ── VOXEL-BASED BUILDING COLLISION ──
+          // DDA raycast through voxel grid for exact per-block collision.
+          // No more invisible proxy meshes or probe-point hacks.
+          const speed = velocity.length();
+          const voxelHit = this.voxelWorld.collideRay(
+            character.position, movementDir, movement.length() + character.radius + 5
+          );
+
+          if (voxelHit.hit && voxelHit.building) {
+            // Solid block found: stop Superman, break blocks, push through
+            const keepRatio = speed > 80 ? 0.92 : speed > 40 ? 0.85 : 0.75;
+            Diag.log('PhysicsHit', `SOLID spd=${speed.toFixed(0)} grid=(${voxelHit.gridX},${voxelHit.gridY},${voxelHit.gridZ})`);
+
+            character.velocity = velocity.scale(keepRatio);
+
+            // Apply damage at the exact block that was hit
+            this.voxelWorld.applyDamageAtGrid(
+              voxelHit.building, voxelHit.gridX, voxelHit.gridY, voxelHit.gridZ, speed
+            );
+
+            // Push past the broken blocks
+            character.position.addInPlace(movementDir.scale(VOXEL_SIZE + 1));
+          } else {
+            // No solid blocks along path: fly through (it's a hole)
+            Diag.log('PhysicsHit', `HOLE spd=${speed.toFixed(0)}`);
+            character.position = targetPosition;
+            character.velocity = velocity;
+          }
+        } else if (isBuilding && !this.voxelWorld) {
+          // Fallback: no VoxelWorld yet (shouldn't happen but be safe)
+          const speed = velocity.length();
+          const keepRatio = speed > 80 ? 0.92 : speed > 40 ? 0.85 : 0.75;
+          character.velocity = velocity.scale(keepRatio);
+          character.position.addInPlace(movementDir.scale(5));
+        } else {
+          // Non-building (ground, sidewalk): deflect away
+          const pushForce = sweepResult.normal.scale(2);
+          character.position.addInPlace(pushForce.scale(deltaTime * 10));
+          character.velocity = velocity.scale(0.95);
+        }
       } else {
         // Ground mode: slide along surface
         const slideVelocity = this.calculateSlideVector(velocity, sweepResult.normal);
@@ -357,47 +392,44 @@ export class PhysicsManager {
     }
   }
 
+  // Reusable vectors for depenetration
+  private static readonly _depenetrationDirs: [number, number, number][] = [
+    [1, 0, 0], [-1, 0, 0],
+    [0, 1, 0], [0, -1, 0],
+    [0, 0, 1], [0, 0, -1],
+  ];
+  private _depenetrateDir = new Vector3();
+  private _pushOut = new Vector3();
+
   /**
    * Pushes character out of geometry if stuck inside
    */
   private depenetrateCharacter(character: CharacterPhysics): void {
-    // Cast rays in all directions to find penetration
-    const directions = [
-      new Vector3(1, 0, 0),
-      new Vector3(-1, 0, 0),
-      new Vector3(0, 1, 0),
-      new Vector3(0, -1, 0),
-      new Vector3(0, 0, 1),
-      new Vector3(0, 0, -1),
-    ];
-
-    let pushOut = Vector3.Zero();
+    this._pushOut.setAll(0);
     let maxPenetration = 0;
 
-    for (const dir of directions) {
-      // Cast ray from inside outward
-      const result = this.raycast(character.position, dir, character.radius * 2);
+    for (const [dx, dy, dz] of PhysicsManager._depenetrationDirs) {
+      this._depenetrateDir.set(dx, dy, dz);
+      const result = this.raycast(character.position, this._depenetrateDir, character.radius * 2);
 
       if (result.hit && result.distance < character.radius) {
-        // We're inside geometry in this direction
         const penetration = character.radius - result.distance;
         if (penetration > maxPenetration) {
           maxPenetration = penetration;
-          // Push in the direction of the surface normal
-          pushOut = result.normal.scale(penetration + 0.1);
+          this._pushOut.copyFrom(result.normal);
+          this._pushOut.scaleInPlace(penetration + 0.1);
         }
       }
     }
 
     if (maxPenetration > 0) {
-      character.position.addInPlace(pushOut);
+      character.position.addInPlace(this._pushOut);
 
-      // In flight mode: only push position, don't modify velocity (player keeps control)
-      // In ground mode: stop velocity in penetration direction
       if (!character.isFlying) {
-        const velocityDot = Vector3.Dot(character.velocity, pushOut.normalize());
+        this._pushOut.normalize();
+        const velocityDot = Vector3.Dot(character.velocity, this._pushOut);
         if (velocityDot < 0) {
-          character.velocity = character.velocity.subtract(pushOut.normalize().scale(velocityDot));
+          character.velocity.subtractInPlace(this._pushOut.scaleInPlace(velocityDot));
         }
       }
     }

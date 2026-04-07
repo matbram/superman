@@ -15,10 +15,11 @@ import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { GlowLayer } from '@babylonjs/core/Layers/glowLayer';
 
 // Ship constants
-const SHIP_HEIGHT = 250;  // Height above ground
-const SHIP_SIZE = 80;  // Diameter of ship
-const BEAM_RADIUS = 45;  // Radius of the gravity beam effect zone
-const BEAM_DAMAGE_RADIUS = 50;  // Buildings within this radius get damaged
+const SHIP_HEIGHT = 120;  // Lower - clips through tall buildings for destruction
+const SHIP_SIZE = 80;
+const BEAM_RADIUS = 45;
+const BEAM_DAMAGE_RADIUS = 50;
+const SHIP_COLLISION_RADIUS = 40; // Ship body destroys buildings it flies through
 
 // Gravity beam oscillation
 const GRAVITY_CYCLE_TIME = 2.5;  // Seconds for one up/down cycle
@@ -64,17 +65,37 @@ export class AlienShip {
   private beamPhase: number = 0;
   private time: number = 0;
 
+  // AI Movement - aggressive rampage through the city
+  private targetPosition: Vector3;
+  private moveSpeed: number = 60; // Fast - crashes through buildings
+  private attackTimer: number = 0;
+  private attackCooldown: number = 2; // Frequent target changes
+
   // Gravity zone (exported for BuildingDamage to use)
   public gravityZone: GravityZone;
 
   // Callbacks
   private onBuildingDamage: ((position: Vector3, radius: number, damage: number) => void) | null = null;
+  // External systems for attacks
+  public pedestrianSystem: any = null;
+  public trafficSystem: any = null;
+  public voxelWorld: any = null;
+  public physicsManager: any = null; // For fullCollideRay to find non-voxelized buildings
+
+  // Laser weapon state
+  private laserBeams: Mesh[] = [];
+  private laserMaterial!: StandardMaterial;
+  private laserTargetPos: Vector3 = Vector3.Zero();
+  private laserFiring: boolean = false;
+  private laserBurstTimer: number = 0;
+  private laserCooldownTimer: number = 0;
 
   constructor(scene: Scene, worldCenter: Vector3 = Vector3.Zero()) {
     this.scene = scene;
 
     // Position ship above world center
     this.shipPosition = new Vector3(worldCenter.x, SHIP_HEIGHT, worldCenter.z);
+    this.targetPosition = this.shipPosition.clone();
 
     // Initialize gravity zone
     this.gravityZone = {
@@ -97,8 +118,32 @@ export class AlienShip {
     this.createEngineGlows();
     this.createGravityBeam();
     this.createBeamParticles();
+    this.createLaserWeapons();
 
     console.log('[AlienShip] Created at position:', this.shipPosition);
+  }
+
+  /**
+   * Creates laser beam meshes for attack weapons
+   */
+  private createLaserWeapons(): void {
+    this.laserMaterial = new StandardMaterial('laserMat', this.scene);
+    this.laserMaterial.emissiveColor = new Color3(1.0, 0.2, 0.1); // Red-orange laser
+    this.laserMaterial.disableLighting = true;
+    this.laserMaterial.alpha = 0.8;
+
+    // Create 3 laser beam cylinders (reused, repositioned each frame)
+    for (let i = 0; i < 3; i++) {
+      const beam = MeshBuilder.CreateCylinder(`alienLaser_${i}`, {
+        diameter: 1.5,
+        height: 1,
+        tessellation: 6,
+      }, this.scene);
+      beam.material = this.laserMaterial;
+      beam.isPickable = false;
+      beam.setEnabled(false);
+      this.laserBeams.push(beam);
+    }
   }
 
   /**
@@ -403,74 +448,242 @@ export class AlienShip {
     return this.gravityZone.center.clone();
   }
 
+  // Reusable objects to avoid per-frame allocations
+  private _beamCoreColor = new Color3();
+  private _coreColor = new Color3();
+
   /**
    * Updates the alien ship and gravity beam effects
    */
   public update(deltaTime: number): void {
     this.time += deltaTime;
-
-    // Update beam oscillation phase
     this.beamPhase += (deltaTime / GRAVITY_CYCLE_TIME) * Math.PI * 2;
-    if (this.beamPhase > Math.PI * 2) {
-      this.beamPhase -= Math.PI * 2;
-    }
+    if (this.beamPhase > Math.PI * 2) this.beamPhase -= Math.PI * 2;
     this.gravityZone.phase = this.beamPhase;
 
-    // Animate beam pulsing
-    const beamPulse = 0.8 + Math.sin(this.time * 3) * 0.2;
-    this.beamMaterial.alpha = 0.12 + beamPulse * 0.08;
-    this.beamCoreMaterial.emissiveColor = new Color3(
-      0.4 + beamPulse * 0.2,
-      0.5 + beamPulse * 0.2,
-      1.0
-    );
+    // Hide gravity beam visuals (beam ditched, lasers only)
+    this.beamMaterial.alpha = 0;
+    this.beamCoreMaterial.alpha = 0;
+    this.risingDebrisParticles.emitRate = 0;
+    this.groundImpactParticles.emitRate = 0;
+    this.beamParticles.emitRate = 0;
 
     // Animate engine glows
     for (let i = 0; i < this.engineGlows.length; i++) {
-      const engine = this.engineGlows[i];
       const pulse = 0.8 + Math.sin(this.time * 4 + i * 0.5) * 0.2;
-      engine.scaling.setAll(pulse);
+      this.engineGlows[i].scaling.setAll(pulse);
     }
 
-    // Animate core glow
+    // Core glow
     const corePulse = 0.9 + Math.sin(this.time * 2) * 0.1;
-    const coreMat = this.hullCore.material as StandardMaterial;
-    coreMat.emissiveColor = new Color3(
-      0.3 * corePulse,
-      0.4 * corePulse,
-      1.0 * corePulse
-    );
+    this._coreColor.r = 0.8 * corePulse;
+    this._coreColor.g = 0.2 * corePulse;
+    this._coreColor.b = 0.1 * corePulse;
+    (this.hullCore.material as StandardMaterial).emissiveColor = this._coreColor;
 
-    // Subtle ship rotation
-    this.root.rotation.y += deltaTime * 0.05;
+    // ── ADVANCED UNPREDICTABLE AI ──
+    // Ship alternates between behaviors: patrol, charge, hover-strafe, dive-bomb
+    this.attackTimer += deltaTime;
+    if (this.attackTimer > this.attackCooldown) {
+      this.attackTimer = 0;
 
-    // Update rising debris particles gravity based on oscillation
-    const gravityOscillation = Math.sin(this.beamPhase);
-    // When gravity oscillation is positive (pushing down phase), particles go down
-    // When negative (pulling up phase), particles rise
-    this.risingDebrisParticles.gravity = new Vector3(0, -gravityOscillation * 25, 0);
-
-    // Also modulate particle direction
-    if (gravityOscillation < 0) {
-      // Pulling up - particles rise more
-      this.risingDebrisParticles.direction1 = new Vector3(-5, 20, -5);
-      this.risingDebrisParticles.direction2 = new Vector3(5, 50, 5);
-      this.risingDebrisParticles.emitRate = 60;
-    } else {
-      // Pushing down - particles fall
-      this.risingDebrisParticles.direction1 = new Vector3(-5, -10, -5);
-      this.risingDebrisParticles.direction2 = new Vector3(5, 10, 5);
-      this.risingDebrisParticles.emitRate = 30;
+      // Unpredictable behavior selection
+      const behavior = Math.random();
+      if (behavior < 0.3) {
+        // CHARGE: Pick a distant target and rush at high speed
+        this.attackCooldown = 1 + Math.random() * 2;
+        this.moveSpeed = 120 + Math.random() * 80; // 120-200 m/s burst
+        const range = 600;
+        this.targetPosition.set(
+          this.shipPosition.x + (Math.random() - 0.5) * range,
+          60 + Math.random() * 80, // Low pass - tears through buildings
+          this.shipPosition.z + (Math.random() - 0.5) * range
+        );
+      } else if (behavior < 0.55) {
+        // HOVER-STRAFE: Slow movement, concentrated laser fire on one area
+        this.attackCooldown = 3 + Math.random() * 4;
+        this.moveSpeed = 15 + Math.random() * 20; // Slow, deliberate
+        this.targetPosition.set(
+          this.shipPosition.x + (Math.random() - 0.5) * 150,
+          SHIP_HEIGHT + (Math.random() - 0.5) * 40,
+          this.shipPosition.z + (Math.random() - 0.5) * 150
+        );
+      } else if (behavior < 0.75) {
+        // DIVE BOMB: Drop low and fast, then pull up
+        this.attackCooldown = 1.5;
+        this.moveSpeed = 100;
+        this.targetPosition.set(
+          this.shipPosition.x + (Math.random() - 0.5) * 300,
+          30 + Math.random() * 30, // Very low - 30-60 height
+          this.shipPosition.z + (Math.random() - 0.5) * 300
+        );
+      } else {
+        // PATROL: Normal speed, medium height
+        this.attackCooldown = 2 + Math.random() * 3;
+        this.moveSpeed = 50 + Math.random() * 30;
+        this.targetPosition.set(
+          this.shipPosition.x + (Math.random() - 0.5) * 400,
+          SHIP_HEIGHT + (Math.random() - 0.5) * 50,
+          this.shipPosition.z + (Math.random() - 0.5) * 400
+        );
+      }
     }
 
-    // Apply continuous damage to buildings in beam zone
-    // Use high damage value to ensure buildings get destroyed
-    if (this.onBuildingDamage) {
-      this.onBuildingDamage(
-        this.gravityZone.center,
-        BEAM_DAMAGE_RADIUS,
-        200 * deltaTime  // High continuous damage to tear buildings apart
+    // Move toward target
+    const moveDx = this.targetPosition.x - this.shipPosition.x;
+    const moveDz = this.targetPosition.z - this.shipPosition.z;
+    const moveDist = Math.sqrt(moveDx * moveDx + moveDz * moveDz);
+    if (moveDist > 5) {
+      const moveAmt = Math.min(this.moveSpeed * deltaTime, moveDist);
+      this.shipPosition.x += (moveDx / moveDist) * moveAmt;
+      this.shipPosition.z += (moveDz / moveDist) * moveAmt;
+    }
+    // Smooth height change
+    this.shipPosition.y += (this.targetPosition.y - this.shipPosition.y) * deltaTime * 0.8;
+    this.root.position.copyFrom(this.shipPosition);
+    this.gravityZone.center.x = this.shipPosition.x;
+    this.gravityZone.center.z = this.shipPosition.z;
+
+    // Ship rotation - faster, more menacing
+    this.root.rotation.y += deltaTime * 0.15;
+
+    // ── COLLISION: Ship destroys buildings it flies through ──
+    // Dense ray coverage in all directions for reliable detection
+    if (this.voxelWorld) {
+      const angles = 12; // 12 horizontal directions = 30 degree coverage
+      for (let i = 0; i < angles; i++) {
+        const angle = (i / angles) * Math.PI * 2;
+        const dir = new Vector3(Math.cos(angle), 0, Math.sin(angle));
+        const hit = this.voxelWorld.fullCollideRay(this.shipPosition, dir, SHIP_COLLISION_RADIUS, this.physicsManager);
+        if (hit.hit && hit.building) {
+          // MASSIVE damage - same power as Superman at max speed
+          this.voxelWorld.applyDamageAtGrid(hit.building, hit.gridX, hit.gridY, hit.gridZ, 440);
+        }
+      }
+      // Downward collision
+      const downHit = this.voxelWorld.fullCollideRay(this.shipPosition, new Vector3(0, -1, 0), SHIP_COLLISION_RADIUS, this.physicsManager);
+      if (downHit.hit && downHit.building) {
+        this.voxelWorld.applyDamageAtGrid(downHit.building, downHit.gridX, downHit.gridY, downHit.gridZ, 440);
+      }
+    }
+
+    // Kill NPCs near the ship (collision/shockwave from flying over)
+    if (this.pedestrianSystem) {
+      this.pedestrianSystem.killNear(
+        new Vector3(this.shipPosition.x, 0, this.shipPosition.z), SHIP_COLLISION_RADIUS
       );
+    }
+    if (this.trafficSystem) {
+      this.trafficSystem.destroyNear(
+        new Vector3(this.shipPosition.x, 0, this.shipPosition.z), SHIP_COLLISION_RADIUS
+      );
+    }
+
+    // ── LASER WEAPONS: Constant barrage ──
+    this.updateLaserAttack(deltaTime);
+  }
+
+  /**
+   * Laser weapon AI: fires bursts of precise laser beams at the ground/buildings.
+   * Uses VoxelWorld DDA raycast for block-level accuracy.
+   */
+  private updateLaserAttack(deltaTime: number): void {
+    this.laserCooldownTimer -= deltaTime;
+
+    if (this.laserCooldownTimer <= 0 && !this.laserFiring) {
+      // Start a new laser burst
+      this.laserFiring = true;
+      this.laserBurstTimer = 1.5 + Math.random() * 2; // Fire for 1.5-3.5 seconds
+
+      // Target buildings below and around the ship
+      this.laserTargetPos.set(
+        this.shipPosition.x + (Math.random() - 0.5) * 150,
+        0,
+        this.shipPosition.z + (Math.random() - 0.5) * 120
+      );
+    }
+
+    if (this.laserFiring) {
+      this.laserBurstTimer -= deltaTime;
+      if (this.laserBurstTimer <= 0) {
+        // End burst
+        this.laserFiring = false;
+        this.laserCooldownTimer = 0.5 + Math.random() * 1.5; // Short cooldown - constant barrage
+        for (const beam of this.laserBeams) beam.setEnabled(false);
+        return;
+      }
+
+      // Sweep the target position slightly during burst
+      this.laserTargetPos.x += (Math.random() - 0.5) * 30 * deltaTime;
+      this.laserTargetPos.z += (Math.random() - 0.5) * 30 * deltaTime;
+
+      // Fire each laser beam from different points on the ship
+      for (let i = 0; i < this.laserBeams.length; i++) {
+        const beam = this.laserBeams[i];
+        const offset = (i - 1) * 15; // Spread beams
+
+        const startX = this.shipPosition.x + offset;
+        const startY = this.shipPosition.y - 10;
+        const startZ = this.shipPosition.z;
+        const endX = this.laserTargetPos.x + offset * 0.3;
+        const endZ = this.laserTargetPos.z;
+
+        // Position and orient the beam cylinder from ship to ground
+        const dx = endX - startX;
+        const dy = -startY; // Goes down to ground (y=0)
+        const dz = endZ - startZ;
+        const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+        beam.setEnabled(true);
+        beam.position.set(
+          (startX + endX) / 2,
+          startY / 2,
+          (startZ + endZ) / 2
+        );
+        beam.scaling.y = length;
+        // Point beam toward target
+        beam.lookAt(new Vector3(endX, 0, endZ));
+        beam.rotation.x += Math.PI / 2;
+
+        // Pulse the laser color
+        const pulse = 0.7 + Math.sin(this.time * 20 + i) * 0.3;
+        this.laserMaterial.alpha = 0.6 + pulse * 0.3;
+      }
+
+      // DDA raycast damage at laser impact point (like heat vision)
+      if (this.voxelWorld) {
+        const direction = new Vector3(
+          this.laserTargetPos.x - this.shipPosition.x,
+          -this.shipPosition.y,
+          this.laserTargetPos.z - this.shipPosition.z
+        ).normalize();
+
+        const hit = this.voxelWorld.fullCollideRay(this.shipPosition, direction, 500, this.physicsManager);
+        if (hit.hit && hit.building) {
+          // Massive laser damage - bigger radius than normal
+          this.voxelWorld.applyDamageAtGrid(hit.building, hit.gridX, hit.gridY, hit.gridZ, 600);
+          // Hit adjacent blocks too for wider destruction
+          for (let dx = -1; dx <= 1; dx++) {
+            for (let dz = -1; dz <= 1; dz++) {
+              if (dx === 0 && dz === 0) continue;
+              this.voxelWorld.applyDamageAtGrid(
+                hit.building, hit.gridX + dx * 2, hit.gridY, hit.gridZ + dz * 2, 400
+              );
+            }
+          }
+        }
+
+        // Ground impact: damage buildings near the laser target + visual effects
+        if (this.onBuildingDamage) {
+          this.onBuildingDamage(this.laserTargetPos, 20, 500);
+        }
+
+        // Kill NPCs at laser impact
+        if (this.pedestrianSystem) this.pedestrianSystem.killNear(this.laserTargetPos, 10);
+        if (this.trafficSystem) this.trafficSystem.destroyNear(this.laserTargetPos, 10);
+      }
+    } else {
+      for (const beam of this.laserBeams) beam.setEnabled(false);
     }
   }
 

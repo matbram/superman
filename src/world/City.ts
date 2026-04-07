@@ -7,38 +7,39 @@ import { Scene } from '@babylonjs/core/scene';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { Diag } from '../core/DiagnosticLog';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator';
 import { PhysicsManager, createCollisionBox } from '../physics/physics';
 
 // Chunk and city generation constants
-const CHUNK_SIZE = 200; // Larger chunks = fewer total chunks
-const LOAD_RADIUS = 4;  // Increased for better render distance
-const UNLOAD_DISTANCE = 5;  // Keep loaded a bit longer
-const CHUNKS_PER_FRAME = 2;  // Generate fewer chunks per frame
+const CHUNK_SIZE = 200;
+const LOAD_RADIUS = 4;
+const UNLOAD_DISTANCE = 5;
+const CHUNKS_PER_FRAME = 2;
 
-// Performance logging
-const ENABLE_CITY_PERF_LOGGING = true;
-const CITY_PERF_LOG_INTERVAL = 2000;  // Log every 2 seconds
+const ENABLE_CITY_PERF_LOGGING = false;
+const CITY_PERF_LOG_INTERVAL = 2000;
 
-// Building generation - balanced density
+// NYC-scale street grid (1 unit ≈ 1 meter)
+// Real NYC: avenues are ~30m wide, cross streets ~18m wide
+const AVENUE_WIDTH = 40;        // Wide avenues - Superman needs room to fly
+const STREET_WIDTH = 24;        // Cross streets - wide enough for street-level flight
 const SIDEWALK_HEIGHT = 0.15;
-const MIN_BUILDING_HEIGHT = 35;
-const MAX_BUILDING_HEIGHT = 140;
-const MIN_BUILDING_WIDTH = 12;
-const MAX_BUILDING_WIDTH = 32;
-const BUILDING_SPACING = 8;  // Tighter spacing for more buildings
-const BUILDINGS_PER_CHUNK = 12; // More buildings per chunk
+const BUILDING_GAP = 2;
 
-// Building style types
-enum BuildingStyle {
-  Tower = 0,      // Tall thin building
-  Tiered = 1,     // Stepped building with setbacks
-  LShape = 2,     // L-shaped footprint
-  Modern = 3,     // Modern with rooftop features
-  Classic = 4,    // Standard box building
-}
+// Manhattan-style blocks: LONG rectangles
+// Real Manhattan blocks are ~80m x 270m
+const BLOCK_WIDTH = 70;         // Short axis (between avenues)
+const BLOCK_DEPTH_MIN = 120;    // Long axis minimum (between streets)
+const BLOCK_DEPTH_MAX = 200;    // Long axis maximum
+
+// Building sizes
+const MIN_BUILDING_WIDTH = 15;
+const MAX_BUILDING_WIDTH = 55;
+
+// Building styles now chosen automatically based on lot size, height, and district
 
 /**
  * Seeded random for deterministic chunk generation
@@ -111,6 +112,12 @@ export class City {
   private groundMaterial!: StandardMaterial;
   private rooftopMaterial!: StandardMaterial;
   private windowMaterial!: StandardMaterial;
+  private streetLightMat!: StandardMaterial;
+  private lampPoleMat!: StandardMaterial;
+  private laneMaterial!: StandardMaterial;
+
+  // Street life system (trees, crosswalks, hydrants)
+  public streetLife: import('./StreetLife').StreetLife | null = null;
 
   constructor(
     scene: Scene,
@@ -128,6 +135,9 @@ export class City {
 
     // Create ground
     this.createGround();
+
+    // Create landmark buildings (Daily Planet, monuments)
+    this.createLandmarks();
 
     // Generate initial chunks immediately (not throttled) for spawn area
     this.generateInitialChunks();
@@ -201,12 +211,65 @@ export class City {
     this.rooftopMaterial.specularColor = new Color3(0.05, 0.05, 0.05);
     this.rooftopMaterial.freeze();
 
-    // Window strip material (dark reflective)
+    // Window / glass material (dark reflective)
     this.windowMaterial = new StandardMaterial('windowMat', this.scene);
-    this.windowMaterial.diffuseColor = new Color3(0.15, 0.18, 0.22);
-    this.windowMaterial.specularColor = new Color3(0.4, 0.4, 0.5);
-    this.windowMaterial.emissiveColor = new Color3(0.05, 0.08, 0.1);
+    this.windowMaterial.diffuseColor = new Color3(0.12, 0.16, 0.22);
+    this.windowMaterial.specularColor = new Color3(0.5, 0.5, 0.6);
+    this.windowMaterial.emissiveColor = new Color3(0.03, 0.06, 0.1);
     this.windowMaterial.freeze();
+
+    // Glass tower material (dark reflective steel-blue, NO alpha - causes render artifacts)
+    const glassMat = new StandardMaterial('glassMat', this.scene);
+    glassMat.diffuseColor = new Color3(0.22, 0.28, 0.38);
+    glassMat.specularColor = new Color3(0.5, 0.5, 0.6);
+    glassMat.emissiveColor = new Color3(0.04, 0.06, 0.1);
+    glassMat.freeze();
+    this.buildingMaterials.push(glassMat);
+
+    // Warm concrete
+    const warmConcrete = new StandardMaterial('warmConcreteMat', this.scene);
+    warmConcrete.diffuseColor = new Color3(0.72, 0.65, 0.55);
+    warmConcrete.specularColor = new Color3(0.1, 0.1, 0.1);
+    warmConcrete.freeze();
+    this.buildingMaterials.push(warmConcrete);
+
+    // Brick
+    const brick = new StandardMaterial('brickMat', this.scene);
+    brick.diffuseColor = new Color3(0.55, 0.3, 0.2);
+    brick.specularColor = new Color3(0.08, 0.05, 0.05);
+    brick.freeze();
+    this.buildingMaterials.push(brick);
+
+    // White modern
+    const whiteMod = new StandardMaterial('whiteModMat', this.scene);
+    whiteMod.diffuseColor = new Color3(0.85, 0.85, 0.88);
+    whiteMod.specularColor = new Color3(0.2, 0.2, 0.2);
+    whiteMod.freeze();
+    this.buildingMaterials.push(whiteMod);
+
+    // Street light materials
+    this.streetLightMat = new StandardMaterial('streetLightMat', this.scene);
+    this.streetLightMat.diffuseColor = new Color3(1.0, 0.95, 0.7);
+    this.streetLightMat.emissiveColor = new Color3(0.8, 0.7, 0.3); // Warm glow
+    this.streetLightMat.freeze();
+
+    this.lampPoleMat = new StandardMaterial('lampPoleMat', this.scene);
+    this.lampPoleMat.diffuseColor = new Color3(0.25, 0.25, 0.25);
+    this.lampPoleMat.specularColor = new Color3(0.1, 0.1, 0.1);
+    this.lampPoleMat.freeze();
+
+    // White lane marking material
+    this.laneMaterial = new StandardMaterial('laneMat', this.scene);
+    this.laneMaterial.diffuseColor = new Color3(0.9, 0.9, 0.85);
+    this.laneMaterial.emissiveColor = new Color3(0.1, 0.1, 0.08);
+    this.laneMaterial.freeze();
+  }
+
+  /**
+   * Get building materials for external systems (day/night cycle).
+   */
+  public getBuildingMaterials(): StandardMaterial[] {
+    return this.buildingMaterials;
   }
 
   /**
@@ -215,12 +278,13 @@ export class City {
    */
   private createGround(): void {
     // Create a large fallback ground that's slightly below chunk grounds
-    this.groundMesh = MeshBuilder.CreateGround(
+    // Thick fallback ground - prevents seeing the skybox below
+    this.groundMesh = MeshBuilder.CreateBox(
       'fallbackGround',
-      { width: 6000, height: 6000 },
+      { width: 8000, height: 20, depth: 8000 },
       this.scene
     );
-    this.groundMesh.position.y = -0.1; // Slightly below chunk grounds
+    this.groundMesh.position.y = -10.5; // Top surface at -0.5, below chunk grounds
 
     const fallbackMat = new StandardMaterial('fallbackGroundMat', this.scene);
     fallbackMat.diffuseColor = new Color3(0.15, 0.18, 0.12);
@@ -232,6 +296,169 @@ export class City {
     this.groundMesh.isPickable = true;
     this.groundMesh.freezeWorldMatrix();
     createCollisionBox(this.groundMesh, this.physicsManager);
+  }
+
+  /**
+   * Creates iconic landmark buildings that are always present near the city center.
+   */
+  private createLandmarks(): void {
+    // ── THE DAILY PLANET ──
+    // Iconic building with a globe on top, near the spawn point
+    const dpX = 50, dpZ = 80;
+    const dpHeight = 180;
+    const dpWidth = 35, dpDepth = 35;
+
+    // Main building - Art Deco style (warm concrete)
+    const dpMain = MeshBuilder.CreateBox('building_landmark_0_main', {
+      width: dpWidth, height: dpHeight, depth: dpDepth
+    }, this.scene);
+    dpMain.position = new Vector3(dpX, dpHeight / 2 + SIDEWALK_HEIGHT, dpZ);
+    dpMain.material = this.buildingMaterials[9]; // Warm concrete
+    dpMain.receiveShadows = true;
+    createCollisionBox(dpMain, this.physicsManager);
+    this.shadowGenerator.addShadowCaster(dpMain);
+
+    // Globe on top of the Daily Planet
+    const globe = MeshBuilder.CreateSphere('dailyPlanetGlobe', {
+      diameter: 18, segments: 16
+    }, this.scene);
+    globe.position = new Vector3(dpX, dpHeight + 12 + SIDEWALK_HEIGHT, dpZ);
+    const globeMat = new StandardMaterial('globeMat', this.scene);
+    globeMat.diffuseColor = new Color3(0.85, 0.75, 0.3);   // Gold
+    globeMat.specularColor = new Color3(1.0, 0.9, 0.5);
+    globeMat.emissiveColor = new Color3(0.15, 0.12, 0.02);  // Slight glow
+    globeMat.freeze();
+    globe.material = globeMat;
+    globe.isPickable = false;
+
+    // Globe ring (Saturn-like ring around the globe)
+    const ring = MeshBuilder.CreateTorus('dailyPlanetRing', {
+      diameter: 24, thickness: 1.5, tessellation: 24
+    }, this.scene);
+    ring.position = new Vector3(dpX, dpHeight + 12 + SIDEWALK_HEIGHT, dpZ);
+    ring.rotation.x = Math.PI / 6; // Tilted
+    ring.material = globeMat;
+    ring.isPickable = false;
+
+    // ── CITY HALL / GOVERNMENT BUILDING ──
+    // Wide classical building with columns (represented as a wide low building)
+    const chX = -60, chZ = 50;
+    const chHeight = 40, chWidth = 60, chDepth = 40;
+    const cityHall = MeshBuilder.CreateBox('building_landmark_1_main', {
+      width: chWidth, height: chHeight, depth: chDepth
+    }, this.scene);
+    cityHall.position = new Vector3(chX, chHeight / 2 + SIDEWALK_HEIGHT, chZ);
+    cityHall.material = this.buildingMaterials[11]; // White modern
+    cityHall.receiveShadows = true;
+    createCollisionBox(cityHall, this.physicsManager);
+
+    // Dome on top of city hall
+    const dome = MeshBuilder.CreateSphere('cityHallDome', {
+      diameter: 20, segments: 12, slice: 0.5
+    }, this.scene);
+    dome.position = new Vector3(chX, chHeight + SIDEWALK_HEIGHT, chZ);
+    dome.material = this.buildingMaterials[11];
+    dome.isPickable = false;
+
+    // ── METROPOLIS TOWER ──
+    // Tallest building in the city, a massive glass skyscraper
+    const mtX = 120, mtZ = 30;
+    const mtHeight = 350;
+    const mtWidth = 40, mtDepth = 40;
+    const metroTower = MeshBuilder.CreateBox('building_landmark_2_main', {
+      width: mtWidth, height: mtHeight, depth: mtDepth
+    }, this.scene);
+    metroTower.position = new Vector3(mtX, mtHeight / 2 + SIDEWALK_HEIGHT, mtZ);
+    metroTower.material = this.buildingMaterials[8]; // Glass
+    metroTower.receiveShadows = true;
+    createCollisionBox(metroTower, this.physicsManager);
+    this.shadowGenerator.addShadowCaster(metroTower);
+
+    // Antenna/spire on top
+    const spire = MeshBuilder.CreateCylinder('metroSpire', {
+      diameter: 3, height: 40, tessellation: 8
+    }, this.scene);
+    spire.position = new Vector3(mtX, mtHeight + 20 + SIDEWALK_HEIGHT, mtZ);
+    spire.material = this.rooftopMaterial;
+    spire.isPickable = false;
+
+    // ── CENTRAL PARK / PLAZA ──
+    // A green area near center (just a colored ground patch)
+    const parkGround = MeshBuilder.CreateGround('centralPark', {
+      width: 100, height: 80
+    }, this.scene);
+    parkGround.position = new Vector3(0, SIDEWALK_HEIGHT + 0.05, 150);
+    const parkMat = new StandardMaterial('parkMat', this.scene);
+    parkMat.diffuseColor = new Color3(0.2, 0.45, 0.15); // Green
+    parkMat.specularColor = new Color3(0.02, 0.02, 0.02);
+    parkMat.freeze();
+    parkGround.material = parkMat;
+    parkGround.receiveShadows = true;
+    parkGround.freezeWorldMatrix();
+  }
+
+  /**
+   * Add street furniture: lamp posts (emissive glow only - NO PointLights),
+   * and occasional billboards in downtown areas.
+   */
+  private addStreetLights(worldX: number, worldZ: number, collisionMeshes: Mesh[]): void {
+    const LIGHT_SPACING = 80; // Wider spacing for fewer meshes
+    const POLE_HEIGHT = 12;
+
+    for (let x = worldX + AVENUE_WIDTH / 2; x < worldX + CHUNK_SIZE; x += LIGHT_SPACING) {
+      for (let z = worldZ + STREET_WIDTH / 2; z < worldZ + CHUNK_SIZE; z += LIGHT_SPACING) {
+        const inStreetX = (x - worldX) % (BLOCK_WIDTH + AVENUE_WIDTH) < AVENUE_WIDTH;
+        const inStreetZ = (z - worldZ) % (BLOCK_DEPTH_MIN + STREET_WIDTH) < STREET_WIDTH;
+        if (!inStreetX && !inStreetZ) continue;
+
+        // Place pole on the sidewalk (offset 6 units from avenue center toward building)
+        const lampX = inStreetX ? x + (AVENUE_WIDTH * 0.5 - 3) * (Math.random() > 0.5 ? 1 : -1) : x;
+        const lampZ = inStreetZ ? z + (STREET_WIDTH * 0.5 - 3) * (Math.random() > 0.5 ? 1 : -1) : z;
+
+        // Pole
+        const pole = MeshBuilder.CreateCylinder('lamp_pole', {
+          diameter: 0.5, height: POLE_HEIGHT, tessellation: 4
+        }, this.scene);
+        pole.position = new Vector3(lampX, POLE_HEIGHT / 2 + SIDEWALK_HEIGHT, lampZ);
+        pole.material = this.lampPoleMat;
+        pole.isPickable = false;
+        pole.freezeWorldMatrix();
+        collisionMeshes.push(pole);
+
+        // Globe (emissive glow - no PointLight for performance)
+        const globe = MeshBuilder.CreateSphere('lamp_light', {
+          diameter: 2.5, segments: 4
+        }, this.scene);
+        globe.position = new Vector3(lampX, POLE_HEIGHT + 1.5 + SIDEWALK_HEIGHT, lampZ);
+        globe.material = this.streetLightMat;
+        globe.isPickable = false;
+        globe.freezeWorldMatrix();
+        collisionMeshes.push(globe);
+      }
+    }
+
+    // Billboard in downtown areas (40% chance)
+    const distFromCenter = Math.sqrt(
+      (worldX + CHUNK_SIZE / 2) ** 2 + (worldZ + CHUNK_SIZE / 2) ** 2
+    );
+    if (distFromCenter < 1500 && Math.random() > 0.6) {
+      const bbX = worldX + AVENUE_WIDTH / 2 + 5;
+      const bbZ = worldZ + CHUNK_SIZE * 0.3 + Math.random() * CHUNK_SIZE * 0.4;
+      const bbHeight = 25 + Math.random() * 15;
+
+      const billboard = MeshBuilder.CreateBox('billboard', {
+        width: 20, height: 10, depth: 1
+      }, this.scene);
+      billboard.position = new Vector3(bbX, bbHeight, bbZ);
+      billboard.isPickable = false;
+      billboard.freezeWorldMatrix();
+
+      // Use shared billboard materials (cheaper than creating new ones per chunk)
+      const adMats = this.buildingMaterials;
+      const adIdx = Math.floor(Math.random() * adMats.length);
+      billboard.material = adMats[adIdx];
+      collisionMeshes.push(billboard);
+    }
   }
 
   /**
@@ -279,7 +506,9 @@ export class City {
         const next = this.pendingChunks.shift()!;
         this.generateChunk(next.chunkX, next.chunkZ);
         this.chunksGeneratedSinceLog++;
+        Diag.count('City', 'chunksGenerated');
       }
+      Diag.track('City', 'pendingChunks', this.pendingChunks.length);
     }
 
     // Update fade-in for chunks and unload distant ones
@@ -288,11 +517,10 @@ export class City {
       const dx = Math.abs(chunk.chunkX - playerChunkX);
       const dz = Math.abs(chunk.chunkZ - playerChunkZ);
 
-      // Smooth fade-in for buildings
+      // Smooth fade-in for buildings - only iterate meshes for fading chunks
       if (!chunk.fullyVisible) {
-        chunk.fadeProgress = Math.min(1, chunk.fadeProgress + 0.03);  // Fade in over ~33 frames
+        chunk.fadeProgress = Math.min(1, chunk.fadeProgress + 0.03);
 
-        // Apply visibility to all building meshes
         for (const mesh of chunk.collisionMeshes) {
           if (mesh.name.startsWith('building_')) {
             mesh.visibility = chunk.fadeProgress;
@@ -301,16 +529,25 @@ export class City {
 
         if (chunk.fadeProgress >= 1) {
           chunk.fullyVisible = true;
+          // Freeze world matrices on fully visible buildings - they never move
+          for (const mesh of chunk.collisionMeshes) {
+            mesh.freezeWorldMatrix();
+          }
         }
       }
 
       // Unload distant chunks
       if (dx > UNLOAD_DISTANCE || dz > UNLOAD_DISTANCE) {
-        if (now - chunk.lastAccess > 5000) {  // Longer delay before unloading
+        if (now - chunk.lastAccess > 5000) {
           this.unloadChunk(key);
+          Diag.count('City', 'chunksUnloaded');
         }
       }
     }
+
+    // Diagnostics
+    Diag.track('City', 'loadedChunks', this.chunks.size);
+    Diag.track('City', 'updateMs', performance.now() - updateStart);
 
     // Performance logging
     if (ENABLE_CITY_PERF_LOGGING) {
@@ -358,78 +595,146 @@ export class City {
 
     const collisionMeshes: Mesh[] = [];
 
-    // Create chunk ground (asphalt/road)
-    const chunkGround = MeshBuilder.CreateGround(
+    // Create chunk ground (dark asphalt road surface)
+    // Thick ground box - can't see through it or break into nothingness
+    const GROUND_THICKNESS = 10;
+    const chunkGround = MeshBuilder.CreateBox(
       `ground_${key}`,
-      { width: CHUNK_SIZE, height: CHUNK_SIZE },
+      { width: CHUNK_SIZE, height: GROUND_THICKNESS, depth: CHUNK_SIZE },
       this.scene
     );
-    chunkGround.position = new Vector3(worldX + halfChunk, 0, worldZ + halfChunk);
+    chunkGround.position = new Vector3(worldX + halfChunk, -GROUND_THICKNESS / 2, worldZ + halfChunk);
     chunkGround.material = this.groundMaterial;
     chunkGround.receiveShadows = true;
     chunkGround.isPickable = true;
-    chunkGround.freezeWorldMatrix();  // Static - never moves
+    chunkGround.freezeWorldMatrix();
     createCollisionBox(chunkGround, this.physicsManager);
     collisionMeshes.push(chunkGround);
 
-    // Create sidewalk (raised slightly)
-    const sidewalk = MeshBuilder.CreateBox(
-      `sidewalk_${key}`,
-      { width: CHUNK_SIZE - 15, height: SIDEWALK_HEIGHT, depth: CHUNK_SIZE - 15 },
-      this.scene
+    // Road lane markings - white dashed center line on avenues
+    const avenueSpacing = BLOCK_WIDTH + AVENUE_WIDTH;
+    for (let ax = worldX + avenueSpacing * 0.5; ax < worldX + CHUNK_SIZE; ax += avenueSpacing) {
+      // Dashed white line down the center of each avenue
+      for (let lz = worldZ + 5; lz < worldZ + CHUNK_SIZE - 5; lz += 12) {
+        const lane = MeshBuilder.CreateBox(`lane_${key}`, {
+          width: 0.6, height: 0.05, depth: 5
+        }, this.scene);
+        lane.position = new Vector3(ax, 0.02, lz);
+        lane.material = this.laneMaterial;
+        lane.isPickable = false;
+        lane.freezeWorldMatrix();
+        collisionMeshes.push(lane);
+      }
+    }
+
+    // ── NYC-STYLE STREET GRID ──
+    // Avenues run N-S (along Z), streets run E-W (along X).
+    // Blocks are LONG rectangles between avenues, divided by cross streets.
+    // Downtown has skyscrapers, midtown is mixed, outer areas are shorter.
+
+    const distFromCenter = Math.sqrt(
+      (worldX + CHUNK_SIZE / 2) ** 2 + (worldZ + CHUNK_SIZE / 2) ** 2
     );
-    sidewalk.position = new Vector3(worldX + halfChunk, SIDEWALK_HEIGHT / 2, worldZ + halfChunk);
-    sidewalk.material = this.sidewalkMaterial;
-    sidewalk.receiveShadows = true;
-    sidewalk.freezeWorldMatrix();  // Static - never moves
-    createCollisionBox(sidewalk, this.physicsManager);
-    collisionMeshes.push(sidewalk);
+    // More generous district zones - downtown feels big
+    const isDowntown = distFromCenter < 800;
+    const isMidtown = distFromCenter < 1800;
 
-    // Generate buildings with varied styles
+    // Height distribution - everything is taller than you'd think.
+    // Superman is ~4 units tall. A 20-story building = 80 units = 20x Superman.
+    // Even "short" buildings should tower over Superman.
+    const heightForDistrict = (): number => {
+      if (isDowntown) {
+        // Manhattan Financial District / Midtown: 30-80+ stories
+        return random.next() < 0.35
+          ? random.range(200, 350)   // Skyscrapers (50-85 stories)
+          : random.range(60, 160);   // Medium towers (15-40 stories)
+      } else if (isMidtown) {
+        return random.next() < 0.2
+          ? random.range(120, 220)   // Occasional tall building
+          : random.range(40, 100);   // 10-25 story buildings
+      } else {
+        // Even outer areas have 5-15 story buildings, not houses
+        return random.range(25, 70);
+      }
+    };
+
     let buildingCount = 0;
-    let currentX = worldX + BUILDING_SPACING + 8;
-    const endX = worldX + CHUNK_SIZE - BUILDING_SPACING - 8;
-    const endZ = worldZ + CHUNK_SIZE - BUILDING_SPACING - 8;
 
-    while (currentX < endX && buildingCount < BUILDINGS_PER_CHUNK) {
-      let currentZ = worldZ + BUILDING_SPACING + 8;
+    // Lay out avenues (N-S, spaced by BLOCK_WIDTH + AVENUE_WIDTH)
+    let avenueX = worldX + AVENUE_WIDTH * 0.5;
 
-      while (currentZ < endZ && buildingCount < BUILDINGS_PER_CHUNK) {
-        const bWidth = random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH);
-        const bDepth = random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH);
-        const bHeight = random.range(MIN_BUILDING_HEIGHT, MAX_BUILDING_HEIGHT);
+    while (avenueX < worldX + CHUNK_SIZE - AVENUE_WIDTH - MIN_BUILDING_WIDTH) {
+      const blockW = BLOCK_WIDTH + random.range(-10, 10); // Slight variation
+      const blockEndX = Math.min(avenueX + blockW, worldX + CHUNK_SIZE - AVENUE_WIDTH);
+      const actualBlockW = blockEndX - avenueX;
 
-        const bx = currentX + bWidth / 2;
-        const bz = currentZ + bDepth / 2;
-
-        // Choose building style based on seed
-        const style = random.intRange(0, 4) as BuildingStyle;
-        const buildingMeshes = this.createBuilding(
-          key, buildingCount, style,
-          bx, bz, bWidth, bDepth, bHeight,
-          random, chunkX, chunkZ
-        );
-
-        for (const mesh of buildingMeshes) {
-          // Add to shadow caster (limit shadows for performance - only first building)
-          if (buildingCount < 1 && mesh.name.includes('main')) {
-            this.shadowGenerator.addShadowCaster(mesh);
-          }
-          // Start buildings invisible - they will fade in
-          mesh.visibility = 0;
-
-          // LOD: Hide mesh entirely at distance 600 to reduce draw calls
-          mesh.addLODLevel(600, null);
-
-          createCollisionBox(mesh, this.physicsManager);
-          collisionMeshes.push(mesh);
-        }
-
-        buildingCount++;
-        currentZ += bDepth + BUILDING_SPACING + random.range(2, 8);
+      if (actualBlockW < MIN_BUILDING_WIDTH) {
+        avenueX = blockEndX + AVENUE_WIDTH;
+        continue;
       }
 
-      currentX += random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH) + BUILDING_SPACING + random.range(2, 8);
+      // Within this avenue-to-avenue strip, lay out cross streets
+      let streetZ = worldZ + STREET_WIDTH * 0.5;
+
+      while (streetZ < worldZ + CHUNK_SIZE - STREET_WIDTH - MIN_BUILDING_WIDTH) {
+        const blockD = random.range(BLOCK_DEPTH_MIN, BLOCK_DEPTH_MAX);
+        const blockEndZ = Math.min(streetZ + blockD, worldZ + CHUNK_SIZE - STREET_WIDTH);
+        const actualBlockD = blockEndZ - streetZ;
+
+        if (actualBlockD < MIN_BUILDING_WIDTH) {
+          streetZ = blockEndZ + STREET_WIDTH;
+          continue;
+        }
+
+        // Fill this rectangular block with buildings along the long axis (Z)
+        let bz = streetZ;
+        while (bz < blockEndZ - MIN_BUILDING_WIDTH && buildingCount < 25) {
+          // Each building takes a slice of the block depth
+          const bDepth = random.range(MIN_BUILDING_WIDTH, Math.min(MAX_BUILDING_WIDTH, blockEndZ - bz));
+          const bWidth = actualBlockW; // Building fills full block width
+          const bHeight = heightForDistrict();
+
+          buildingCount = this.placeBuildingOnLot(
+            key, buildingCount, avenueX, bz, bWidth, bDepth,
+            bHeight, random, chunkX, chunkZ, collisionMeshes, isDowntown
+          );
+
+          bz += bDepth + BUILDING_GAP;
+        }
+
+        // ── SIDEWALK for this city block ──
+        // Raised concrete platform under the buildings, with 4-unit sidewalk overhang
+        const SW_OVERHANG = 12; // Extra-wide sidewalks: NYC-style with trees, lamps, benches
+        const swX = avenueX - SW_OVERHANG;
+        const swZ = streetZ - SW_OVERHANG;
+        const swW = actualBlockW + SW_OVERHANG * 2;
+        const swD = actualBlockD + SW_OVERHANG * 2;
+        const sidewalk = MeshBuilder.CreateBox(`sidewalk_${key}_${buildingCount}`, {
+          width: swW, height: SIDEWALK_HEIGHT, depth: swD
+        }, this.scene);
+        sidewalk.position = new Vector3(
+          swX + swW / 2,
+          SIDEWALK_HEIGHT / 2,
+          swZ + swD / 2
+        );
+        sidewalk.material = this.sidewalkMaterial;
+        sidewalk.receiveShadows = true;
+        sidewalk.isPickable = false;
+        sidewalk.freezeWorldMatrix();
+        collisionMeshes.push(sidewalk);
+
+        streetZ = blockEndZ + STREET_WIDTH;
+      }
+
+      avenueX = blockEndX + AVENUE_WIDTH;
+    }
+
+    // Add street light poles at avenue intersections
+    this.addStreetLights(worldX, worldZ, collisionMeshes);
+
+    // Populate street life (trees, crosswalks, hydrants) via thin instances
+    if (this.streetLife) {
+      this.streetLife.populateChunk(key, worldX, worldZ, this.hashCoords(chunkX, chunkZ));
     }
 
     this.chunks.set(key, {
@@ -445,195 +750,84 @@ export class City {
   }
 
   /**
-   * Creates a building with varied architecture based on style
+   * Places a building on a lot, filling the lot edge-to-edge.
+   * Returns updated buildingCount.
    */
-  private createBuilding(
-    chunkKey: string,
-    index: number,
-    style: BuildingStyle,
-    x: number, z: number,
-    width: number, depth: number, height: number,
-    random: SeededRandom,
-    chunkX: number, chunkZ: number
-  ): Mesh[] {
-    const meshes: Mesh[] = [];
-    const baseName = `building_${chunkKey}_${index}`;
-    const matIndex = Math.abs(chunkX + chunkZ + index) % this.buildingMaterials.length;
+  private placeBuildingOnLot(
+    chunkKey: string, buildingCount: number,
+    lotX: number, lotZ: number, lotW: number, lotD: number, height: number,
+    random: SeededRandom, chunkX: number, chunkZ: number,
+    collisionMeshes: Mesh[], isDowntown: boolean
+  ): number {
+    const meshes = this.createBuilding(
+      chunkKey, buildingCount, lotX, lotZ, lotW, lotD, height,
+      random, chunkX, chunkZ, isDowntown
+    );
 
-    switch (style) {
-      case BuildingStyle.Tower: {
-        // Tall thin tower with a wider base
-        const baseHeight = height * 0.2;
-        const towerHeight = height * 0.8;
-
-        // Base section
-        const base = MeshBuilder.CreateBox(
-          `${baseName}_base`,
-          { width: width, height: baseHeight, depth: depth },
-          this.scene
-        );
-        base.position = new Vector3(x, baseHeight / 2 + SIDEWALK_HEIGHT, z);
-        base.material = this.buildingMaterials[matIndex];
-        base.receiveShadows = true;
-        meshes.push(base);
-
-        // Tower section (thinner)
-        const tower = MeshBuilder.CreateBox(
-          `${baseName}_main`,
-          { width: width * 0.65, height: towerHeight, depth: depth * 0.65 },
-          this.scene
-        );
-        tower.position = new Vector3(x, baseHeight + towerHeight / 2 + SIDEWALK_HEIGHT, z);
-        tower.material = this.buildingMaterials[(matIndex + 1) % this.buildingMaterials.length];
-        tower.receiveShadows = true;
-        meshes.push(tower);
-        break;
+    for (const mesh of meshes) {
+      // Taller buildings cast shadows (up to 5 per chunk for performance)
+      if (buildingCount < 5 && height > 60) {
+        this.shadowGenerator.addShadowCaster(mesh);
       }
-
-      case BuildingStyle.Tiered: {
-        // Stepped building with setbacks
-        const numTiers = 2 + random.intRange(0, 2);
-        const tierHeight = height / numTiers;
-        let currentWidth = width;
-        let currentDepth = depth;
-
-        for (let t = 0; t < numTiers; t++) {
-          const tier = MeshBuilder.CreateBox(
-            `${baseName}_tier${t}${t === 0 ? '_main' : ''}`,
-            { width: currentWidth, height: tierHeight, depth: currentDepth },
-            this.scene
-          );
-          tier.position = new Vector3(
-            x,
-            t * tierHeight + tierHeight / 2 + SIDEWALK_HEIGHT,
-            z
-          );
-          tier.material = this.buildingMaterials[(matIndex + t) % this.buildingMaterials.length];
-          tier.receiveShadows = true;
-          meshes.push(tier);
-
-          currentWidth *= 0.75;
-          currentDepth *= 0.75;
-        }
-        break;
-      }
-
-      case BuildingStyle.LShape: {
-        // L-shaped building
-        const wingHeight = height * (0.6 + random.next() * 0.3);
-
-        // Main section
-        const main = MeshBuilder.CreateBox(
-          `${baseName}_main`,
-          { width: width, height: height, depth: depth * 0.6 },
-          this.scene
-        );
-        main.position = new Vector3(x, height / 2 + SIDEWALK_HEIGHT, z - depth * 0.2);
-        main.material = this.buildingMaterials[matIndex];
-        main.receiveShadows = true;
-        meshes.push(main);
-
-        // Wing section
-        const wing = MeshBuilder.CreateBox(
-          `${baseName}_wing`,
-          { width: width * 0.5, height: wingHeight, depth: depth * 0.6 },
-          this.scene
-        );
-        wing.position = new Vector3(
-          x + width * 0.25,
-          wingHeight / 2 + SIDEWALK_HEIGHT,
-          z + depth * 0.2
-        );
-        wing.material = this.buildingMaterials[(matIndex + 1) % this.buildingMaterials.length];
-        wing.receiveShadows = true;
-        meshes.push(wing);
-        break;
-      }
-
-      case BuildingStyle.Modern: {
-        // Modern building with rooftop features
-        const mainHeight = height * 0.9;
-
-        // Main building
-        const main = MeshBuilder.CreateBox(
-          `${baseName}_main`,
-          { width: width, height: mainHeight, depth: depth },
-          this.scene
-        );
-        main.position = new Vector3(x, mainHeight / 2 + SIDEWALK_HEIGHT, z);
-        main.material = this.buildingMaterials[matIndex];
-        main.receiveShadows = true;
-        meshes.push(main);
-
-        // Rooftop structure
-        const roofWidth = width * 0.4;
-        const roofHeight = height * 0.15;
-        const rooftop = MeshBuilder.CreateBox(
-          `${baseName}_roof`,
-          { width: roofWidth, height: roofHeight, depth: roofWidth },
-          this.scene
-        );
-        rooftop.position = new Vector3(
-          x + (random.next() - 0.5) * width * 0.3,
-          mainHeight + roofHeight / 2 + SIDEWALK_HEIGHT,
-          z + (random.next() - 0.5) * depth * 0.3
-        );
-        rooftop.material = this.rooftopMaterial;
-        rooftop.receiveShadows = true;
-        meshes.push(rooftop);
-        break;
-      }
-
-      case BuildingStyle.Classic:
-      default: {
-        // Standard box building with window strips
-        const main = MeshBuilder.CreateBox(
-          `${baseName}_main`,
-          { width: width, height: height, depth: depth },
-          this.scene
-        );
-        main.position = new Vector3(x, height / 2 + SIDEWALK_HEIGHT, z);
-        main.material = this.buildingMaterials[matIndex];
-        main.receiveShadows = true;
-        meshes.push(main);
-
-        // Add horizontal window strip for visual interest
-        if (height > 40) {
-          const stripHeight = 2;
-          const numStrips = Math.floor(height / 20);
-          for (let s = 1; s <= numStrips && s <= 3; s++) {
-            const strip = MeshBuilder.CreateBox(
-              `${baseName}_strip${s}`,
-              { width: width + 0.2, height: stripHeight, depth: depth + 0.2 },
-              this.scene
-            );
-            strip.position = new Vector3(
-              x,
-              (height * s / (numStrips + 1)) + SIDEWALK_HEIGHT,
-              z
-            );
-            strip.material = this.windowMaterial;
-            strip.receiveShadows = true;
-            meshes.push(strip);
-          }
-        }
-        break;
-      }
+      mesh.visibility = 0;
+      createCollisionBox(mesh, this.physicsManager);
+      collisionMeshes.push(mesh);
     }
 
-    return meshes;
+    return buildingCount + 1;
+  }
+
+  /**
+   * Creates a building that fills its lot. ONE mesh per building for performance.
+   * Visual variety comes from proportions, materials, and the voxel system on damage.
+   */
+  private createBuilding(
+    chunkKey: string, index: number,
+    lotX: number, lotZ: number, width: number, depth: number, height: number,
+    random: SeededRandom, chunkX: number, chunkZ: number, isDowntown: boolean
+  ): Mesh[] {
+    const baseName = `building_${chunkKey}_${index}`;
+    const matIndex = Math.abs(chunkX * 7 + chunkZ * 13 + index * 3) % this.buildingMaterials.length;
+    const cx = lotX + width / 2;
+    const cz = lotZ + depth / 2;
+
+    // Pick material - ALL buildings get varied colors.
+    // Tall buildings use the full material palette including glass, steel, white.
+    // Short buildings tend toward concrete, brick, warm tones.
+    const mat = this.buildingMaterials[matIndex];
+
+    // ONE mesh per building - fills the lot
+    const main = MeshBuilder.CreateBox(`${baseName}_main`, {
+      width, height, depth
+    }, this.scene);
+    main.position = new Vector3(cx, height / 2 + SIDEWALK_HEIGHT, cz);
+    main.material = mat;
+    main.receiveShadows = true;
+
+    return [main];
   }
 
   /**
    * Unloads a chunk
    */
+  // Callback for external systems to clean up when chunks unload
+  public onChunkUnload: ((chunkKey: string) => void) | null = null;
+
   private unloadChunk(key: string): void {
     const chunk = this.chunks.get(key);
     if (!chunk) return;
 
+    // Notify external systems to clean up
+    if (this.onChunkUnload) {
+      this.onChunkUnload(key);
+    }
+    // Remove street life thin instances for this chunk
+    if (this.streetLife) {
+      this.streetLife.removeChunk(key);
+    }
+
     // Dispose all meshes (buildings + sidewalk)
     for (const mesh of chunk.collisionMeshes) {
-      // Remove from shadow caster if it was added
       if (mesh.name.startsWith('building_')) {
         this.shadowGenerator.removeShadowCaster(mesh);
       }
@@ -658,7 +852,7 @@ export class City {
   public getSpawnPosition(): Vector3 {
     // Spawn on the road at the edge of chunk (0,0)
     // Buildings start at BUILDING_SPACING + 8 = 18, so x=5 is safe on the road
-    return new Vector3(5, 1.0, CHUNK_SIZE / 2);
+    return new Vector3(STREET_WIDTH / 2, 1.0, CHUNK_SIZE / 2);
   }
 
   /**

@@ -87,7 +87,7 @@ export class Atmosphere {
   private createSkyDome(): void {
     this.skyDome = MeshBuilder.CreateSphere(
       'atmosphereDome',
-      { diameter: 2800, segments: 32 },
+      { diameter: 2800, segments: 8 },
       this.scene
     );
     this.skyDome.infiniteDistance = true;
@@ -124,9 +124,8 @@ export class Atmosphere {
     sunMaterial.freeze();
     this.sunMesh.material = sunMaterial;
 
-    if (this.glowLayer) {
-      this.glowLayer.addIncludedOnlyMesh(this.sunMesh);
-    }
+    // Hide Atmosphere's sun - only scene.ts sunDisc is visible (one sun, not two)
+    this.sunMesh.setEnabled(false);
 
     this.sunGlow = MeshBuilder.CreateSphere(
       'sunGlow',
@@ -143,9 +142,8 @@ export class Atmosphere {
     glowMaterial.freeze();
     this.sunGlow.material = glowMaterial;
 
-    if (this.glowLayer) {
-      this.glowLayer.addIncludedOnlyMesh(this.sunGlow);
-    }
+    // Hide Atmosphere's glow too
+    this.sunGlow.setEnabled(false);
   }
 
   /**
@@ -323,76 +321,83 @@ export class Atmosphere {
     return cluster;
   }
 
+  // Pre-computed constants
+  private static readonly SUN_OFFSET_X = SUN_DISTANCE * 0.7;
+  private static readonly SUN_OFFSET_Y = SUN_DISTANCE * 0.8;
+  private static readonly SUN_OFFSET_Z = SUN_DISTANCE * 0.3;
+  private static readonly DISPERSE_RADIUS_SQ = CLOUD_DISPERSE_RADIUS * CLOUD_DISPERSE_RADIUS;
+  private static readonly CLOUD_UNLOAD_DIST_SQ = CLOUD_RENDER_DISTANCE * CLOUD_RENDER_DISTANCE * 1.5;
+
   /**
    * Updates cloud positions and manages cloud streaming
    */
   public update(playerPosition: Vector3, deltaTime: number, _playerVelocity?: Vector3, playerSpeed?: number): void {
     this.time += deltaTime;
 
-    // Update sun position relative to player
+    // Update sun position relative to player - no allocations
     if (this.sunMesh && this.sunGlow) {
-      const sunOffset = new Vector3(
-        SUN_DISTANCE * 0.7,
-        SUN_DISTANCE * 0.8,
-        SUN_DISTANCE * 0.3
-      );
-      this.sunMesh.position = playerPosition.add(sunOffset);
-      this.sunGlow.position = this.sunMesh.position.clone();
+      this.sunMesh.position.x = playerPosition.x + Atmosphere.SUN_OFFSET_X;
+      this.sunMesh.position.y = playerPosition.y + Atmosphere.SUN_OFFSET_Y;
+      this.sunMesh.position.z = playerPosition.z + Atmosphere.SUN_OFFSET_Z;
+      this.sunGlow.position.copyFrom(this.sunMesh.position);
     }
 
     const speed = playerSpeed ?? 0;
+    const canDisperse = speed > 30;
 
     // Update cloud clusters
     for (const cluster of this.cloudClusters) {
-      // Drift clouds slowly
-      cluster.basePosition.addInPlace(cluster.driftSpeed.scale(deltaTime));
+      // Drift clouds slowly - inline to avoid scale() allocation
+      cluster.basePosition.x += cluster.driftSpeed.x * deltaTime;
+      cluster.basePosition.y += cluster.driftSpeed.y * deltaTime;
+      cluster.basePosition.z += cluster.driftSpeed.z * deltaTime;
 
       // Update each puff with bobbing and dispersion
       for (const puff of cluster.puffs) {
         const bobY = Math.sin(this.time * puff.bobSpeed + puff.phase) * puff.bobAmount;
 
-        // Calculate base position
         const baseX = cluster.basePosition.x + puff.localOffset.x;
         const baseY = cluster.basePosition.y + puff.localOffset.y + bobY;
         const baseZ = cluster.basePosition.z + puff.localOffset.z;
 
-        // Check distance to player for dispersion
+        // Use squared distance to avoid sqrt unless needed for dispersion
         const dx = baseX - playerPosition.x;
         const dy = baseY - playerPosition.y;
         const dz = baseZ - playerPosition.z;
-        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        const distSq = dx * dx + dy * dy + dz * dz;
 
-        if (dist < CLOUD_DISPERSE_RADIUS && speed > 30) {
-          // Player is flying through - push cloud away
+        if (canDisperse && distSq < Atmosphere.DISPERSE_RADIUS_SQ) {
+          const dist = Math.sqrt(distSq);
           const disperseStrength = (1 - dist / CLOUD_DISPERSE_RADIUS) * (speed / 100);
 
-          // Push direction: away from player + scatter
           const pushX = dx + puff.scatterDirection.x * CLOUD_SCATTER_VARIANCE;
           const pushY = dy + puff.scatterDirection.y * CLOUD_SCATTER_VARIANCE;
           const pushZ = dz + puff.scatterDirection.z * CLOUD_SCATTER_VARIANCE;
-          const pushLen = Math.sqrt(pushX * pushX + pushY * pushY + pushZ * pushZ) || 1;
+          const pushLenSq = pushX * pushX + pushY * pushY + pushZ * pushZ;
+          const pushLen = pushLenSq > 0.001 ? Math.sqrt(pushLenSq) : 1;
 
-          // Apply force directly to offset (simpler physics)
           const force = CLOUD_DISPERSE_SPEED * disperseStrength * deltaTime;
-          puff.disperseOffset.x += (pushX / pushLen) * force;
-          puff.disperseOffset.y += (pushY / pushLen) * force;
-          puff.disperseOffset.z += (pushZ / pushLen) * force;
+          const invLen = force / pushLen;
+          puff.disperseOffset.x += pushX * invLen;
+          puff.disperseOffset.y += pushY * invLen;
+          puff.disperseOffset.z += pushZ * invLen;
 
-          // Shrink
           puff.disperseScale = Math.max(0.3, puff.disperseScale - disperseStrength * deltaTime);
         } else {
-          // Recover: spring back to original
           const recover = CLOUD_RECOVER_SPEED * deltaTime * 0.05;
-          puff.disperseOffset.x *= (1 - recover);
-          puff.disperseOffset.y *= (1 - recover);
-          puff.disperseOffset.z *= (1 - recover);
+          const decay = 1 - recover;
+          puff.disperseOffset.x *= decay;
+          puff.disperseOffset.y *= decay;
+          puff.disperseOffset.z *= decay;
           puff.disperseScale = Math.min(1, puff.disperseScale + recover * 0.5);
         }
 
-        // Limit max offset
-        const offsetLen = puff.disperseOffset.length();
-        if (offsetLen > 50) {
-          const scale = 50 / offsetLen;
+        // Limit max offset - use squared distance to skip sqrt when possible
+        const oLenSq = puff.disperseOffset.x * puff.disperseOffset.x
+          + puff.disperseOffset.y * puff.disperseOffset.y
+          + puff.disperseOffset.z * puff.disperseOffset.z;
+        if (oLenSq > 2500) { // 50^2
+          const scale = 50 / Math.sqrt(oLenSq);
           puff.disperseOffset.x *= scale;
           puff.disperseOffset.y *= scale;
           puff.disperseOffset.z *= scale;
@@ -404,28 +409,29 @@ export class Atmosphere {
         puff.mesh.position.z = baseZ + puff.disperseOffset.z;
 
         // Apply scale with dispersion
-        puff.mesh.scaling.x = puff.originalScale.x * puff.disperseScale;
-        puff.mesh.scaling.y = puff.originalScale.y * puff.disperseScale;
-        puff.mesh.scaling.z = puff.originalScale.z * puff.disperseScale;
+        const ds = puff.disperseScale;
+        puff.mesh.scaling.x = puff.originalScale.x * ds;
+        puff.mesh.scaling.y = puff.originalScale.y * ds;
+        puff.mesh.scaling.z = puff.originalScale.z * ds;
       }
 
       // Check if cluster is too far from player
-      const dx = cluster.basePosition.x - playerPosition.x;
-      const dz = cluster.basePosition.z - playerPosition.z;
-      const distSq = dx * dx + dz * dz;
+      const cdx = cluster.basePosition.x - playerPosition.x;
+      const cdz = cluster.basePosition.z - playerPosition.z;
+      const cDistSq = cdx * cdx + cdz * cdz;
 
-      if (distSq > CLOUD_RENDER_DISTANCE * CLOUD_RENDER_DISTANCE * 1.5) {
-        // Respawn cluster on opposite side of player
-        const angle = Math.atan2(dz, dx) + Math.PI;
+      if (cDistSq > Atmosphere.CLOUD_UNLOAD_DIST_SQ) {
+        const angle = Math.atan2(cdz, cdx) + Math.PI;
         const newRadius = CLOUD_RENDER_DISTANCE * 0.9;
         cluster.basePosition.x = playerPosition.x + Math.cos(angle) * newRadius;
         cluster.basePosition.z = playerPosition.z + Math.sin(angle) * newRadius;
         cluster.basePosition.y = CLOUD_HEIGHT_MIN + Math.random() * (CLOUD_HEIGHT_MAX - CLOUD_HEIGHT_MIN);
 
-        // Reset puff positions and dispersion
         for (const puff of cluster.puffs) {
-          puff.mesh.position = cluster.basePosition.add(puff.localOffset);
-          puff.disperseOffset = Vector3.Zero();
+          puff.mesh.position.x = cluster.basePosition.x + puff.localOffset.x;
+          puff.mesh.position.y = cluster.basePosition.y + puff.localOffset.y;
+          puff.mesh.position.z = cluster.basePosition.z + puff.localOffset.z;
+          puff.disperseOffset.setAll(0);
           puff.disperseScale = 1;
         }
       }

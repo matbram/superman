@@ -54,7 +54,28 @@ export class HoverState extends BasePlayerState {
     return null;
   }
 
+  // Double-tap LT tracking for super dive from hover
+  private lastDescendPressTime: number = 0;
+  private descendWasReleased: boolean = true;
+
   private checkTransitions(player: Player, input: InputState): PlayerStateType | null {
+    // ── DOUBLE-TAP LT → SUPER DIVE from hover ──
+    const now = performance.now();
+    if (input.descendTrigger > 0.3) {
+      if (this.descendWasReleased) {
+        if (now - this.lastDescendPressTime < 400 && this.lastDescendPressTime > 0) {
+          // DOUBLE TAP! Transition to Flight with dive flag
+          // Double tap confirmed - transition to flight with dive
+          player.setSuperDiveFlag(true);
+          return PlayerStateType.Flight;
+        }
+        this.lastDescendPressTime = now;
+        this.descendWasReleased = false;
+      }
+    } else if (input.descendTrigger < 0.15) {
+      this.descendWasReleased = true;
+    }
+
     // Transition to flight when pressing RT (flyTrigger)
     if (input.flyTrigger > 0.3) {
       return PlayerStateType.Flight;

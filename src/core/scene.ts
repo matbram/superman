@@ -18,6 +18,7 @@ export interface SceneContext {
   scene: Scene;
   camera: FreeCamera;
   sunLight: DirectionalLight;
+  ambientLight: HemisphericLight;
   shadowGenerator: ShadowGenerator;
 }
 
@@ -26,43 +27,52 @@ export interface SceneContext {
  */
 export function createScene(engine: Engine): SceneContext {
   const scene = new Scene(engine);
+  scene.autoClear = false;
+  scene.autoAnimate = false;
 
-  // Set background color (sky blue gradient effect)
-  scene.clearColor = new Color4(0.4, 0.6, 0.9, 1.0);
+  // Set background color - warm sunset sky
+  scene.clearColor = new Color4(0.95, 0.6, 0.3, 1.0);
 
-  // Enable fog for depth perception and speed sensation
+  // Atmospheric fog - golden sunset haze
   scene.fogMode = Scene.FOGMODE_EXP2;
-  scene.fogDensity = 0.0008;
-  scene.fogColor = new Color3(0.6, 0.7, 0.9);
+  scene.fogDensity = 0.00035;
+  scene.fogColor = new Color3(0.85, 0.65, 0.45); // Warm golden haze
 
-  // Create ambient light (hemisphere light)
+  // Ambient light - VERY low so sun is the dominant light source
+  // This creates realistic shadows - areas not hit by sun are dark
   const ambientLight = new HemisphericLight(
     'ambientLight',
     new Vector3(0, 1, 0),
     scene
   );
-  ambientLight.intensity = 0.6;
-  ambientLight.groundColor = new Color3(0.4, 0.4, 0.5);
+  ambientLight.intensity = 0.1;  // Very low - sun is the ONLY real light source
+  ambientLight.diffuse = new Color3(0.7, 0.75, 0.9);  // Subtle sky fill
+  ambientLight.groundColor = new Color3(0.15, 0.12, 0.18); // Dark shadow areas
 
-  // Create directional sun light for shadows
+  // Sun - the primary and dominant light source
   const sunLight = new DirectionalLight(
     'sunLight',
-    new Vector3(-0.5, -1, -0.5).normalize(),
+    new Vector3(-0.8, -0.3, -0.5).normalize(),
     scene
   );
-  sunLight.intensity = 0.7;
-  sunLight.position = new Vector3(100, 200, 100);
+  sunLight.intensity = 1.2;  // Bright - this IS the light
+  sunLight.diffuse = new Color3(1.0, 0.85, 0.6);
+  sunLight.specular = new Color3(1.0, 0.9, 0.7);
+  sunLight.position = new Vector3(500, 150, 300);
 
-  // Create shadow generator
-  const shadowGenerator = new ShadowGenerator(1024, sunLight);
+  // Shadow generator - dominant visual feature, buildings cast real shadows
+  const shadowGenerator = new ShadowGenerator(2048, sunLight);
   shadowGenerator.useBlurExponentialShadowMap = true;
-  shadowGenerator.blurKernel = 16;
-  shadowGenerator.setDarkness(0.4);
+  shadowGenerator.blurKernel = 32;
+  shadowGenerator.setDarkness(0.65);  // Dark shadows - sun is primary light
+  shadowGenerator.bias = 0.001;
+  shadowGenerator.normalBias = 0.02;
+  shadowGenerator.freezeShadowCastersBoundingInfo = true;
 
   // Create main camera (will be controlled by CameraController)
   const camera = new FreeCamera('mainCamera', new Vector3(0, 10, -20), scene);
-  camera.minZ = 0.5;  // Increased to reduce z-fighting
-  camera.maxZ = 2000;
+  camera.minZ = 0.5;
+  camera.maxZ = 4000; // See the whole city from high altitude
   camera.fov = 1.0;
 
   // Create procedural sky gradient
@@ -74,26 +84,57 @@ export function createScene(engine: Engine): SceneContext {
     scene,
     camera,
     sunLight,
+    ambientLight,
     shadowGenerator,
   };
 }
 
 /**
- * Creates a gradient sky effect using a large skybox
+ * Creates the sky dome and sun/glow meshes.
+ * DayNightCycle controls their colors and positions over time.
  */
 function createSkyGradient(scene: Scene): void {
+  // Sky dome
   const skybox = MeshBuilder.CreateSphere(
     'skyDome',
-    { diameter: 3000, segments: 16 },
+    { diameter: 3500, segments: 12 },
     scene
   );
   skybox.infiniteDistance = true;
-
   const skyMaterial = new StandardMaterial('skyMaterial', scene);
   skyMaterial.backFaceCulling = false;
   skyMaterial.disableLighting = true;
-  skyMaterial.emissiveColor = new Color3(0.5, 0.7, 1.0);
-
+  skyMaterial.emissiveColor = new Color3(0.3, 0.45, 0.75);
   skybox.material = skyMaterial;
   skybox.isPickable = false;
+
+  // Sun disc - MASSIVE, sits right on the horizon
+  const sun = MeshBuilder.CreateSphere(
+    'sunDisc',
+    { diameter: 400, segments: 16 },
+    scene
+  );
+  sun.infiniteDistance = true;
+  const sunMat = new StandardMaterial('sunMat', scene);
+  sunMat.disableLighting = true;
+  sunMat.emissiveColor = new Color3(1.0, 0.85, 0.4);
+  sun.material = sunMat;
+  sun.isPickable = false;
+  // Initial position - DayNightCycle will update this
+  sun.position = new Vector3(1500, 50, -500);
+
+  // Sun glow halo - subtle warm haze around the sun (NOT a second sun)
+  const sunGlow = MeshBuilder.CreateSphere(
+    'sunGlow',
+    { diameter: 600, segments: 8 },
+    scene
+  );
+  sunGlow.infiniteDistance = true;
+  const glowMat = new StandardMaterial('sunGlowMat', scene);
+  glowMat.disableLighting = true;
+  glowMat.emissiveColor = new Color3(1.0, 0.75, 0.4);
+  glowMat.alpha = 0.06; // Very subtle - just a warm haze, not a visible sphere
+  sunGlow.material = glowMat;
+  sunGlow.isPickable = false;
+  sunGlow.position = sun.position.clone();
 }

@@ -8,6 +8,7 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh';
+import { Diag } from '../core/DiagnosticLog';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
@@ -40,6 +41,11 @@ export class HeatVision {
 
   // Callbacks
   private onBuildingDamage: ((building: AbstractMesh, position: Vector3, damage: number) => void) | null = null;
+
+  // External systems (set from main.ts)
+  public voxelWorld: any = null;
+  public pedestrianSystem: any = null;
+  public trafficSystem: any = null;
 
   constructor(scene: Scene, physicsManager: PhysicsManager) {
     this.scene = scene;
@@ -185,24 +191,58 @@ export class HeatVision {
     let beamLength = BEAM_LENGTH;
     let hitPoint: Vector3 | null = null;
 
-    if (rayResult.hit && rayResult.mesh) {
+    // Try VoxelWorld DDA raycast first (accurate block-level targeting)
+    // Falls back to physics raycast for non-voxelized buildings
+    let hitBuilding = false;
+
+    if (this.voxelWorld) {
+      const voxelHit = this.voxelWorld.fullCollideRay
+        ? this.voxelWorld.fullCollideRay(eyePosition, aimDirection, BEAM_LENGTH, this.physicsManager)
+        : this.voxelWorld.collideRay(eyePosition, aimDirection, BEAM_LENGTH);
+      if (voxelHit.hit && voxelHit.building) {
+        beamLength = voxelHit.distance;
+        hitPoint = voxelHit.point;
+        hitBuilding = true;
+
+        this.damageAccumulator += DAMAGE_PER_SECOND * deltaTime;
+        if (this.damageAccumulator >= 30) { // Fire more frequently for responsiveness
+          this.voxelWorld.applyDamageAtGrid(
+            voxelHit.building, voxelHit.gridX, voxelHit.gridY, voxelHit.gridZ,
+            this.damageAccumulator * 2
+          );
+          this.damageAccumulator = 0;
+        }
+      }
+    }
+
+    // Fall back to mesh raycast (for non-voxelized buildings, ground, etc.)
+    if (!hitBuilding && rayResult.hit && rayResult.mesh) {
       beamLength = rayResult.distance;
       hitPoint = rayResult.point;
 
-      // Check if we hit a building or ground
-      if (rayResult.mesh.name.startsWith('building_') || rayResult.mesh.name.startsWith('ground')) {
-        // Accumulate damage - continuous stream
+      const meshName = rayResult.mesh.name;
+      const isTarget = meshName.startsWith('building_') || meshName.startsWith('ground');
+      if (isTarget) {
+        hitBuilding = true;
         this.damageAccumulator += DAMAGE_PER_SECOND * deltaTime;
-
-        // Deal damage frequently for massive destruction
-        if (this.damageAccumulator >= 50) {
+        if (this.damageAccumulator >= 30) {
           if (this.onBuildingDamage) {
-            // Pass high damage value to trigger full building destruction
             this.onBuildingDamage(rayResult.mesh, hitPoint, this.damageAccumulator * 2);
           }
           this.damageAccumulator = 0;
         }
       }
+    }
+
+    if (!hitBuilding) {
+      Diag.count('HeatVision', 'miss');
+    }
+
+    // Heat vision kills pedestrians and destroys vehicles along the beam path
+    if (hitPoint) {
+      const killRadius = 5;
+      if (this.pedestrianSystem) this.pedestrianSystem.killNear(hitPoint, killRadius);
+      if (this.trafficSystem) this.trafficSystem.destroyNear(hitPoint, killRadius);
     }
 
     // Position and orient beams from eyes
