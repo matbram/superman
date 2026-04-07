@@ -318,8 +318,9 @@ class Game {
     this.dayNightCycle.update(deltaTime);
 
     // Update traffic
-    this.traffic.update(deltaTime, playerPos);
-    this.pedestrians.update(deltaTime, playerPos);
+    const playerVel = this.player.getVelocity();
+    this.traffic.update(deltaTime, playerPos, playerSpeed, playerVel);
+    this.pedestrians.update(deltaTime, playerPos, playerSpeed, playerVel);
 
     // Update birds
     t0 = performance.now();

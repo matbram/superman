@@ -33,6 +33,8 @@ interface Vehicle {
   dirX: number;
   dirZ: number;
   speed: number;
+  knocked: boolean;
+  knockVelY: number; // Vertical velocity when knocked into the air
 }
 
 // Shared materials
@@ -125,7 +127,7 @@ export class TrafficSystem {
     ensureMaterials(scene);
   }
 
-  public update(deltaTime: number, playerPos: Vector3): void {
+  public update(deltaTime: number, playerPos: Vector3, playerSpeed: number = 0, playerVelocity?: Vector3): void {
     this.spawnTimer += deltaTime;
     if (this.spawnTimer >= SPAWN_INTERVAL && this.vehicles.length < MAX_VEHICLES) {
       this.spawnTimer = 0;
@@ -134,12 +136,52 @@ export class TrafficSystem {
 
     for (let i = this.vehicles.length - 1; i >= 0; i--) {
       const v = this.vehicles[i];
+
+      // Superman knockback - vehicles near Superman at speed get launched
+      const dx = v.x - playerPos.x, dz = v.z - playerPos.z;
+      const distSq = dx * dx + dz * dz;
+      const knockRadius = 6 + playerSpeed * 0.03;
+
+      if (!v.knocked && distSq < knockRadius * knockRadius && playerSpeed > 30) {
+        const dist = Math.sqrt(distSq) || 1;
+        const force = Math.min(40, playerSpeed * 0.4);
+        v.dirX = (dx / dist) * 0.8 + (playerVelocity ? playerVelocity.x * 0.01 : 0);
+        v.dirZ = (dz / dist) * 0.8 + (playerVelocity ? playerVelocity.z * 0.01 : 0);
+        v.speed = force;
+        v.knockVelY = 5 + force * 0.3; // Launch into the air!
+        v.knocked = true;
+      }
+
+      // Knocked vehicles tumble through the air
+      if (v.knocked) {
+        v.knockVelY -= 30 * deltaTime; // Gravity
+        v.root.position.y += v.knockVelY * deltaTime;
+        v.root.rotation.x += deltaTime * 3; // Tumble
+        v.root.rotation.z += deltaTime * 2;
+        v.speed *= (1 - deltaTime * 2);
+
+        // Hit the ground
+        if (v.root.position.y < 0) {
+          v.root.position.y = 0;
+          v.knockVelY = 0;
+          v.speed *= 0.3;
+        }
+
+        // Remove when stopped
+        if (v.speed < 0.5 && v.root.position.y <= 0.1) {
+          for (const m of v.meshes) m.dispose();
+          v.root.dispose();
+          this.vehicles.splice(i, 1);
+          continue;
+        }
+      }
+
       v.x += v.dirX * v.speed * deltaTime;
       v.z += v.dirZ * v.speed * deltaTime;
-      v.root.position.set(v.x, 0, v.z);
+      if (!v.knocked) v.root.position.set(v.x, 0, v.z);
+      else { v.root.position.x = v.x; v.root.position.z = v.z; }
 
-      const dx = v.x - playerPos.x, dz = v.z - playerPos.z;
-      if (dx * dx + dz * dz > DESPAWN_RADIUS * DESPAWN_RADIUS) {
+      if (distSq > DESPAWN_RADIUS * DESPAWN_RADIUS) {
         for (const m of v.meshes) m.dispose();
         v.root.dispose();
         this.vehicles.splice(i, 1);
@@ -206,6 +248,8 @@ export class TrafficSystem {
     this.vehicles.push({
       root, meshes, x, z, dirX, dirZ,
       speed: VEHICLE_SPEED * (0.7 + Math.random() * 0.6),
+      knocked: false,
+      knockVelY: 0,
     });
   }
 

@@ -31,6 +31,7 @@ interface Pedestrian {
   dirZ: number;
   speed: number;
   colorIndex: number;
+  knocked: boolean;
 }
 
 export class PedestrianSystem {
@@ -82,7 +83,7 @@ export class PedestrianSystem {
     this.headBuffer = new Float32Array(MAX_PEDESTRIANS * 16);
   }
 
-  public update(deltaTime: number, playerPos: Vector3): void {
+  public update(deltaTime: number, playerPos: Vector3, playerSpeed: number = 0, playerVelocity?: Vector3): void {
     // Spawn
     this.spawnTimer += deltaTime;
     if (this.spawnTimer >= SPAWN_INTERVAL && this.pedestrians.length < MAX_PEDESTRIANS) {
@@ -90,14 +91,39 @@ export class PedestrianSystem {
       this.trySpawn(playerPos);
     }
 
-    // Move + despawn
+    // Move + knockback + despawn
     for (let i = this.pedestrians.length - 1; i >= 0; i--) {
       const p = this.pedestrians[i];
+
+      // Superman knockback - nearby pedestrians get blown away
+      const dx = p.x - playerPos.x, dz = p.z - playerPos.z;
+      const distSq = dx * dx + dz * dz;
+      const knockRadius = 8 + playerSpeed * 0.05; // Bigger radius at higher speed
+
+      if (distSq < knockRadius * knockRadius && playerSpeed > 15) {
+        const dist = Math.sqrt(distSq) || 1;
+        const force = Math.min(30, playerSpeed * 0.3);
+        // Knocked in the direction away from Superman + Superman's velocity
+        p.dirX = (dx / dist) * 0.7 + (playerVelocity ? playerVelocity.x * 0.01 : 0);
+        p.dirZ = (dz / dist) * 0.7 + (playerVelocity ? playerVelocity.z * 0.01 : 0);
+        p.speed = force;
+        p.knocked = true;
+      }
+
+      // Knocked pedestrians slow down
+      if (p.knocked) {
+        p.speed *= (1 - deltaTime * 3);
+        if (p.speed < 0.5) {
+          // Remove knocked pedestrians after they stop
+          this.pedestrians.splice(i, 1);
+          continue;
+        }
+      }
+
       p.x += p.dirX * p.speed * deltaTime;
       p.z += p.dirZ * p.speed * deltaTime;
 
-      const dx = p.x - playerPos.x, dz = p.z - playerPos.z;
-      if (dx * dx + dz * dz > DESPAWN_RADIUS * DESPAWN_RADIUS) {
+      if (distSq > DESPAWN_RADIUS * DESPAWN_RADIUS) {
         this.pedestrians.splice(i, 1);
       }
     }
@@ -137,6 +163,7 @@ export class PedestrianSystem {
       dirX, dirZ,
       speed: WALK_SPEED * (0.7 + Math.random() * 0.6),
       colorIndex: Math.floor(Math.random() * this.bodyMeshes.length),
+      knocked: false,
     });
   }
 

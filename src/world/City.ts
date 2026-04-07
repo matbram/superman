@@ -114,6 +114,7 @@ export class City {
   private windowMaterial!: StandardMaterial;
   private streetLightMat!: StandardMaterial;
   private lampPoleMat!: StandardMaterial;
+  private laneMaterial!: StandardMaterial;
 
   // Street life system (trees, crosswalks, hydrants)
   public streetLife: import('./StreetLife').StreetLife | null = null;
@@ -256,6 +257,12 @@ export class City {
     this.lampPoleMat.diffuseColor = new Color3(0.25, 0.25, 0.25);
     this.lampPoleMat.specularColor = new Color3(0.1, 0.1, 0.1);
     this.lampPoleMat.freeze();
+
+    // White lane marking material
+    this.laneMaterial = new StandardMaterial('laneMat', this.scene);
+    this.laneMaterial.diffuseColor = new Color3(0.9, 0.9, 0.85);
+    this.laneMaterial.emissiveColor = new Color3(0.1, 0.1, 0.08);
+    this.laneMaterial.freeze();
   }
 
   /**
@@ -587,7 +594,7 @@ export class City {
 
     const collisionMeshes: Mesh[] = [];
 
-    // Create chunk ground (asphalt/road)
+    // Create chunk ground (dark asphalt road surface)
     const chunkGround = MeshBuilder.CreateGround(
       `ground_${key}`,
       { width: CHUNK_SIZE, height: CHUNK_SIZE },
@@ -597,22 +604,25 @@ export class City {
     chunkGround.material = this.groundMaterial;
     chunkGround.receiveShadows = true;
     chunkGround.isPickable = true;
-    chunkGround.freezeWorldMatrix();  // Static - never moves
+    chunkGround.freezeWorldMatrix();
     createCollisionBox(chunkGround, this.physicsManager);
     collisionMeshes.push(chunkGround);
 
-    // Single sidewalk platform (slightly raised, lighter than road)
-    const sidewalk = MeshBuilder.CreateBox(
-      `sidewalk_${key}`,
-      { width: CHUNK_SIZE, height: SIDEWALK_HEIGHT, depth: CHUNK_SIZE },
-      this.scene
-    );
-    sidewalk.position = new Vector3(worldX + halfChunk, SIDEWALK_HEIGHT / 2, worldZ + halfChunk);
-    sidewalk.material = this.sidewalkMaterial;
-    sidewalk.receiveShadows = true;
-    sidewalk.isPickable = false;
-    sidewalk.freezeWorldMatrix();
-    collisionMeshes.push(sidewalk);
+    // Road lane markings - white dashed center line on avenues
+    const avenueSpacing = BLOCK_WIDTH + AVENUE_WIDTH;
+    for (let ax = worldX + avenueSpacing * 0.5; ax < worldX + CHUNK_SIZE; ax += avenueSpacing) {
+      // Dashed white line down the center of each avenue
+      for (let lz = worldZ + 5; lz < worldZ + CHUNK_SIZE - 5; lz += 12) {
+        const lane = MeshBuilder.CreateBox(`lane_${key}`, {
+          width: 0.6, height: 0.05, depth: 5
+        }, this.scene);
+        lane.position = new Vector3(ax, 0.02, lz);
+        lane.material = this.laneMaterial;
+        lane.isPickable = false;
+        lane.freezeWorldMatrix();
+        collisionMeshes.push(lane);
+      }
+    }
 
     // ── NYC-STYLE STREET GRID ──
     // Avenues run N-S (along Z), streets run E-W (along X).
@@ -688,6 +698,27 @@ export class City {
 
           bz += bDepth + BUILDING_GAP;
         }
+
+        // ── SIDEWALK for this city block ──
+        // Raised concrete platform under the buildings, with 4-unit sidewalk overhang
+        const SW_OVERHANG = 4; // Sidewalk extends 4 units past building edges
+        const swX = avenueX - SW_OVERHANG;
+        const swZ = streetZ - SW_OVERHANG;
+        const swW = actualBlockW + SW_OVERHANG * 2;
+        const swD = actualBlockD + SW_OVERHANG * 2;
+        const sidewalk = MeshBuilder.CreateBox(`sidewalk_${key}_${buildingCount}`, {
+          width: swW, height: SIDEWALK_HEIGHT, depth: swD
+        }, this.scene);
+        sidewalk.position = new Vector3(
+          swX + swW / 2,
+          SIDEWALK_HEIGHT / 2,
+          swZ + swD / 2
+        );
+        sidewalk.material = this.sidewalkMaterial;
+        sidewalk.receiveShadows = true;
+        sidewalk.isPickable = false;
+        sidewalk.freezeWorldMatrix();
+        collisionMeshes.push(sidewalk);
 
         streetZ = blockEndZ + STREET_WIDTH;
       }
