@@ -156,6 +156,7 @@ class Game {
     this.alienShip.pedestrianSystem = this.pedestrians;
     this.alienShip.trafficSystem = this.traffic;
     this.alienShip.voxelWorld = this.voxelWorld;
+    this.alienShip.physicsManager = this.physicsManager;
 
     // Initialize birds
     this.birds = new Birds(this.sceneContext.scene);

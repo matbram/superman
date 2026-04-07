@@ -196,7 +196,9 @@ export class HeatVision {
     let hitBuilding = false;
 
     if (this.voxelWorld) {
-      const voxelHit = this.voxelWorld.collideRay(eyePosition, aimDirection, BEAM_LENGTH);
+      const voxelHit = this.voxelWorld.fullCollideRay
+        ? this.voxelWorld.fullCollideRay(eyePosition, aimDirection, BEAM_LENGTH, this.physicsManager)
+        : this.voxelWorld.collideRay(eyePosition, aimDirection, BEAM_LENGTH);
       if (voxelHit.hit && voxelHit.building) {
         beamLength = voxelHit.distance;
         hitPoint = voxelHit.point;

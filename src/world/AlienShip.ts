@@ -79,7 +79,8 @@ export class AlienShip {
   // External systems for attacks
   public pedestrianSystem: any = null;
   public trafficSystem: any = null;
-  public voxelWorld: any = null; // For DDA laser attacks on buildings
+  public voxelWorld: any = null;
+  public physicsManager: any = null; // For fullCollideRay to find non-voxelized buildings
 
   // Laser weapon state
   private laserBeams: Mesh[] = [];
@@ -553,14 +554,14 @@ export class AlienShip {
       for (let i = 0; i < angles; i++) {
         const angle = (i / angles) * Math.PI * 2;
         const dir = new Vector3(Math.cos(angle), 0, Math.sin(angle));
-        const hit = this.voxelWorld.collideRay(this.shipPosition, dir, SHIP_COLLISION_RADIUS);
+        const hit = this.voxelWorld.fullCollideRay(this.shipPosition, dir, SHIP_COLLISION_RADIUS, this.physicsManager);
         if (hit.hit && hit.building) {
           // MASSIVE damage - same power as Superman at max speed
           this.voxelWorld.applyDamageAtGrid(hit.building, hit.gridX, hit.gridY, hit.gridZ, 440);
         }
       }
       // Downward collision
-      const downHit = this.voxelWorld.collideRay(this.shipPosition, new Vector3(0, -1, 0), SHIP_COLLISION_RADIUS);
+      const downHit = this.voxelWorld.fullCollideRay(this.shipPosition, new Vector3(0, -1, 0), SHIP_COLLISION_RADIUS, this.physicsManager);
       if (downHit.hit && downHit.building) {
         this.voxelWorld.applyDamageAtGrid(downHit.building, downHit.gridX, downHit.gridY, downHit.gridZ, 440);
       }
@@ -657,15 +658,10 @@ export class AlienShip {
           this.laserTargetPos.z - this.shipPosition.z
         ).normalize();
 
-        const hit = this.voxelWorld.collideRay(this.shipPosition, direction, 500);
+        const hit = this.voxelWorld.fullCollideRay(this.shipPosition, direction, 500, this.physicsManager);
         if (hit.hit && hit.building) {
-          // Same explosive power as Superman's heat vision
-          this.voxelWorld.applyExplosiveDamage(
-            hit.building.originalMeshes?.[0] || null,
-            hit.point, 400
-          );
-          // Also direct grid damage for precision
-          this.voxelWorld.applyDamageAtGrid(hit.building, hit.gridX, hit.gridY, hit.gridZ, 400);
+          // Same destruction as Superman - direct grid damage at exact block
+          this.voxelWorld.applyDamageAtGrid(hit.building, hit.gridX, hit.gridY, hit.gridZ, 440);
         }
 
         // Kill NPCs at laser impact

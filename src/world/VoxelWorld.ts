@@ -185,8 +185,49 @@ export class VoxelWorld {
   // ── Grid-Based Collision ───────────────────────────────────────────
 
   /**
-   * Raycast through ALL voxelized buildings. Returns closest hit.
-   * This replaces scene.pickWithRay for building collision.
+   * Full raycast: checks BOTH voxelized buildings (DDA) AND non-voxelized
+   * building meshes (physics raycast). Voxelizes on first hit.
+   * This is what makes Superman's collision reliable - use it for UFO too.
+   */
+  public fullCollideRay(origin: Vector3, direction: Vector3, maxDist: number,
+    physicsManager?: PhysicsManager
+  ): CollisionResult {
+    // First check voxelized buildings via DDA (most accurate)
+    let closest = this.collideRay(origin, direction, maxDist);
+
+    // Also check non-voxelized buildings via physics raycast
+    if (physicsManager) {
+      const meshHit = physicsManager.raycast(origin, direction, maxDist);
+      if (meshHit.hit && meshHit.mesh && meshHit.distance < closest.distance) {
+        const meshName = meshHit.mesh.name || '';
+        if (meshName.startsWith('building_')) {
+          // Voxelize this building on first contact
+          const mesh = meshHit.mesh as Mesh;
+          const vb = this.voxelizeBuilding(mesh);
+
+          // Now do DDA into the freshly voxelized building
+          const voxelHit = vb.raycast(origin, direction, maxDist);
+          if (voxelHit.hit) {
+            closest = {
+              hit: true,
+              building: vb,
+              point: voxelHit.point,
+              normal: voxelHit.normal,
+              distance: voxelHit.distance,
+              gridX: voxelHit.gridX,
+              gridY: voxelHit.gridY,
+              gridZ: voxelHit.gridZ,
+            };
+          }
+        }
+      }
+    }
+
+    return closest;
+  }
+
+  /**
+   * Raycast through ONLY voxelized buildings. Returns closest hit.
    */
   public collideRay(origin: Vector3, direction: Vector3, maxDist: number): CollisionResult {
     let closest: CollisionResult = NO_COLLISION;
