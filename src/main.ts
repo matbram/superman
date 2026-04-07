@@ -96,6 +96,11 @@ class Game {
     // Initialize building damage system
     this.buildingDamage = new BuildingDamage(this.sceneContext.scene, this.physicsManager);
 
+    // Clean up voxelized buildings when chunks unload
+    this.city.onChunkUnload = (chunkKey: string) => {
+      this.buildingDamage.cleanupChunk(chunkKey);
+    };
+
     // Initialize alien ship (World Engine style gravity beam)
     this.alienShip = new AlienShip(this.sceneContext.scene);
 
@@ -105,22 +110,14 @@ class Game {
       (pos) => this.alienShip.getGravityAtPosition(pos)
     );
 
-    // Connect alien ship to damage buildings in beam zone
-    // Use horizontal distance check and direct impact damage for more reliable destruction
+    // Alien beam: only damages already-voxelized buildings (perf safety)
     this.alienShip.setOnBuildingDamage((position, radius, damage) => {
-      // Alien beam uses legacy damage only - does NOT voxelize buildings
-      // Voxelizing every building in beam radius every frame was destroying perf
       const buildings = this.city.getBuildings();
       for (const building of buildings) {
         const dx = building.position.x - position.x;
         const dz = building.position.z - position.z;
-        const horizontalDistSq = dx * dx + dz * dz;
-
-        if (horizontalDistSq < radius * radius) {
-          // Only damage already-voxelized buildings, skip others
-          if (this.buildingDamage.isVoxelized(building)) {
-            this.buildingDamage.applyImpactDamage(building, building.position, damage);
-          }
+        if (dx * dx + dz * dz < radius * radius && this.buildingDamage.isVoxelized(building)) {
+          this.buildingDamage.applyDamage(building, building.position, damage);
         }
       }
     });
@@ -139,26 +136,27 @@ class Game {
     // Set player spawn position
     this.player.setPosition(this.city.getSpawnPosition());
 
-    // Connect player shockwave to building damage system
+    // Shockwave: damage nearby buildings
     this.player.setOnBuildingDamage((position, radius, force) => {
       const buildings = this.city.getBuildings();
-      this.buildingDamage.applyShockwaveDamage(position, radius, force, buildings);
+      for (const building of buildings) {
+        const dx = building.position.x - position.x;
+        const dz = building.position.z - position.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < radius) {
+          this.buildingDamage.applyDamage(building, position, force * (1 - dist / radius) * 30);
+        }
+      }
     });
 
-    // Connect player building collision to damage system (from Player raycast)
+    // Player collision (sole collision damage trigger - no physics duplicate)
     this.player.setOnBuildingCollision((buildingMesh, impactPosition, speed) => {
-      this.buildingDamage.applyImpactDamage(buildingMesh, impactPosition, speed);
+      this.buildingDamage.applyDamage(buildingMesh, impactPosition, speed);
     });
 
-    // Also connect physics sphere sweep collision directly to damage system
-    // This ensures buildings always take damage even if Player raycast misses
-    this.physicsManager.onBuildingCollision = (mesh, point, speed) => {
-      this.buildingDamage.applyImpactDamage(mesh as Mesh, point, speed);
-    };
-
-    // Connect heat vision to damage system - voxelizes and punches holes
+    // Heat vision
     this.player.setOnHeatVisionDamage((building, position, damage) => {
-      this.buildingDamage.applyImpactDamage(building, position, damage);
+      this.buildingDamage.applyDamage(building as Mesh, position, damage);
     });
 
     // Initialize UI
@@ -247,18 +245,22 @@ class Game {
     t1 = performance.now();
     this.perfTimings.atmosphere += t1 - t0;
 
-    // Apply supersonic wake damage to nearby buildings (damages buildings on the sides)
+    // Supersonic wake: damage already-voxelized buildings near flight path
     t0 = performance.now();
     const playerSpeed = this.player.getCurrentSpeed();
     const playerPos = this.player.getPosition();
     if (playerSpeed > 80) {
+      const wakeRadius = 40 + (playerSpeed - 80) * 0.3;
+      const wakeRadiusSq = wakeRadius * wakeRadius;
       const buildings = this.city.getBuildings();
-      this.buildingDamage.applySupersonicWakeDamage(
-        playerPos,
-        this.player.getVelocity(),
-        playerSpeed,
-        buildings
-      );
+      for (const building of buildings) {
+        const dx = building.position.x - playerPos.x;
+        const dz = building.position.z - playerPos.z;
+        const distSq = dx * dx + dz * dz;
+        if (distSq < wakeRadiusSq && distSq > 64 && this.buildingDamage.isVoxelized(building)) {
+          this.buildingDamage.applyDamage(building, building.position, playerSpeed * 0.3);
+        }
+      }
     }
     t1 = performance.now();
     this.perfTimings.wakeDamage += t1 - t0;

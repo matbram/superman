@@ -834,7 +834,7 @@ export class Player {
    */
   private checkBuildingCollision(): void {
     // Only check when flying at significant speed
-    if (!this.isFlightMode || this.currentSpeed < 15) return;
+    if (!this.isFlightMode || this.currentSpeed < 10) return;
 
     // Prevent rapid-fire collision triggers
     const now = performance.now();
@@ -847,7 +847,7 @@ export class Player {
     const direction = velocity.clone().normalize();
 
     // Simple forward raycast - fast and reliable
-    const lookAhead = Math.max(4, this.currentSpeed * 0.1);
+    const lookAhead = Math.max(8, this.currentSpeed * 0.15);
 
     const result = this.physicsManager.raycast(
       this.physics.position,

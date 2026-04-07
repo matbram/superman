@@ -638,13 +638,20 @@ export class City {
   /**
    * Unloads a chunk
    */
+  // Callback for external systems to clean up when chunks unload
+  public onChunkUnload: ((chunkKey: string) => void) | null = null;
+
   private unloadChunk(key: string): void {
     const chunk = this.chunks.get(key);
     if (!chunk) return;
 
+    // Notify external systems (e.g., BuildingDamage) to clean up
+    if (this.onChunkUnload) {
+      this.onChunkUnload(key);
+    }
+
     // Dispose all meshes (buildings + sidewalk)
     for (const mesh of chunk.collisionMeshes) {
-      // Remove from shadow caster if it was added
       if (mesh.name.startsWith('building_')) {
         this.shadowGenerator.removeShadowCaster(mesh);
       }

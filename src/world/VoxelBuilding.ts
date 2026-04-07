@@ -420,6 +420,13 @@ export class VoxelBuilding {
   }
 
   /**
+   * Returns what fraction of blocks remain (0.0 = empty, 1.0 = full)
+   */
+  public getPercentRemaining(): number {
+    return this.instanceCount / Math.max(1, this.gridWidth * this.gridHeight * this.gridDepth);
+  }
+
+  /**
    * Returns the highest Y level that still has solid blocks
    */
   public getTopLevel(): number {

@@ -59,9 +59,6 @@ export class PhysicsManager {
   private accumulator: number = 0;
   private collisionMeshes: Set<AbstractMesh> = new Set();
 
-  // Direct building collision callback - triggers damage from physics sweep
-  public onBuildingCollision: ((mesh: AbstractMesh, point: Vector3, speed: number) => void) | null = null;
-
   constructor(scene: Scene, config?: Partial<PhysicsConfig>) {
     this.scene = scene;
     this.config = {
@@ -301,13 +298,8 @@ export class PhysicsManager {
           Diag.log('PhysicsHit', `${meshName.substring(0, 25)} spd=${speed.toFixed(0)} keep=${(keepRatio * 100).toFixed(0)}%`);
           character.velocity = velocity.scale(keepRatio);
           // Push forward past the broken surface (at least one voxel width = 4 units)
+          // Damage is handled by Player.checkBuildingCollision, not physics
           character.position.addInPlace(movementDir.scale(5));
-
-          // Trigger damage callback directly from physics hit
-          // This ensures damage fires even if checkBuildingCollision misses
-          if (this.onBuildingCollision && sweepResult.mesh) {
-            this.onBuildingCollision(sweepResult.mesh, sweepResult.point, speed);
-          }
         } else {
           // Non-building (ground, sidewalk): deflect away
           const pushForce = sweepResult.normal.scale(2);
