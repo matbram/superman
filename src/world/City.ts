@@ -396,52 +396,54 @@ export class City {
     createCollisionBox(sidewalk, this.physicsManager);
     collisionMeshes.push(sidewalk);
 
-    // Generate buildings on a proper city grid layout
-    // Streets run in a grid pattern with buildings filling the blocks
-    const STREET_WIDTH = 16;  // Width of streets between building rows
-    const BLOCK_DEPTH = 55;   // Depth of each city block (row of buildings)
+    // City block layout: buildings fill rectangular blocks separated by streets
+    // Each chunk is divided into a grid of city blocks with streets between them
+    const STREET_W = 10;     // Street width (narrow urban streets)
+    const BLOCK_SIZE_X = 55; // City block size along X (2-3 buildings wide)
+    const BLOCK_SIZE_Z = 55; // City block size along Z (2-3 buildings deep)
     let buildingCount = 0;
 
-    // Iterate over city blocks (rows separated by streets)
-    let currentX = worldX + STREET_WIDTH * 0.5;
-    const endX = worldX + CHUNK_SIZE - STREET_WIDTH * 0.5;
+    // Iterate over city blocks within this chunk
+    for (let blockX = worldX + STREET_W; blockX < worldX + CHUNK_SIZE - STREET_W && buildingCount < BUILDINGS_PER_CHUNK; blockX += BLOCK_SIZE_X + STREET_W) {
+      for (let blockZ = worldZ + STREET_W; blockZ < worldZ + CHUNK_SIZE - STREET_W && buildingCount < BUILDINGS_PER_CHUNK; blockZ += BLOCK_SIZE_Z + STREET_W) {
 
-    while (currentX < endX && buildingCount < BUILDINGS_PER_CHUNK) {
-      // Each block row has buildings packed along Z
-      let currentZ = worldZ + STREET_WIDTH * 0.5;
-      const endZ = worldZ + CHUNK_SIZE - STREET_WIDTH * 0.5;
-      const rowWidth = random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH);
+        // Fill this city block with buildings packed tightly
+        const blockEndX = Math.min(blockX + BLOCK_SIZE_X, worldX + CHUNK_SIZE - STREET_W);
+        const blockEndZ = Math.min(blockZ + BLOCK_SIZE_Z, worldZ + CHUNK_SIZE - STREET_W);
 
-      while (currentZ < endZ && buildingCount < BUILDINGS_PER_CHUNK) {
-        const bWidth = rowWidth + random.range(-4, 4);
-        const bDepth = random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH);
-        const bHeight = random.range(MIN_BUILDING_HEIGHT, MAX_BUILDING_HEIGHT);
+        let cx = blockX;
+        while (cx < blockEndX - MIN_BUILDING_WIDTH && buildingCount < BUILDINGS_PER_CHUNK) {
+          let cz = blockZ;
+          while (cz < blockEndZ - MIN_BUILDING_WIDTH && buildingCount < BUILDINGS_PER_CHUNK) {
+            const bWidth = random.range(MIN_BUILDING_WIDTH, Math.min(MAX_BUILDING_WIDTH, blockEndX - cx));
+            const bDepth = random.range(MIN_BUILDING_WIDTH, Math.min(MAX_BUILDING_WIDTH, blockEndZ - cz));
+            const bHeight = random.range(MIN_BUILDING_HEIGHT, MAX_BUILDING_HEIGHT);
 
-        const bx = currentX + bWidth / 2;
-        const bz = currentZ + bDepth / 2;
+            const bx = cx + bWidth / 2;
+            const bz = cz + bDepth / 2;
 
-        const style = random.intRange(0, 4) as BuildingStyle;
-        const buildingMeshes = this.createBuilding(
-          key, buildingCount, style,
-          bx, bz, bWidth, bDepth, bHeight,
-          random, chunkX, chunkZ
-        );
+            const style = random.intRange(0, 4) as BuildingStyle;
+            const buildingMeshes = this.createBuilding(
+              key, buildingCount, style,
+              bx, bz, bWidth, bDepth, bHeight,
+              random, chunkX, chunkZ
+            );
 
-        for (const mesh of buildingMeshes) {
-          if (buildingCount < 1 && mesh.name.includes('main')) {
-            this.shadowGenerator.addShadowCaster(mesh);
+            for (const mesh of buildingMeshes) {
+              if (buildingCount < 1 && mesh.name.includes('main')) {
+                this.shadowGenerator.addShadowCaster(mesh);
+              }
+              mesh.visibility = 0;
+              createCollisionBox(mesh, this.physicsManager);
+              collisionMeshes.push(mesh);
+            }
+
+            buildingCount++;
+            cz += bDepth + BUILDING_SPACING;
           }
-          mesh.visibility = 0;
-          createCollisionBox(mesh, this.physicsManager);
-          collisionMeshes.push(mesh);
+          cx += random.range(MIN_BUILDING_WIDTH, MAX_BUILDING_WIDTH) + BUILDING_SPACING;
         }
-
-        buildingCount++;
-        currentZ += bDepth + BUILDING_SPACING;
       }
-
-      // Next row: building width + street
-      currentX += rowWidth + STREET_WIDTH;
     }
 
     this.chunks.set(key, {
