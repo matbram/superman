@@ -91,11 +91,15 @@ export class FlightState extends BasePlayerState {
 
   private checkTransitions(player: Player, input: InputState): PlayerStateType | null {
     // SUPER DIVE: force landing at any speed when near ground
+    // SUPER DIVE: SLAM directly into ground - skip Landing state entirely
+    // Landing state gently decelerates. We want a violent impact.
     if (this.superDiving) {
       const height = player.getHeightAboveGround();
-      if (height < 15) {
+      if (height < 5) {
         this.superDiving = false;
-        return PlayerStateType.Landing;
+        // Store dive speed BEFORE transitioning (it will be used for impact force)
+        player.setSuperDiveSpeed(this.currentSpeed);
+        return PlayerStateType.Grounded; // Skip Landing → go straight to ground SLAM
       }
     }
 

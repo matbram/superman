@@ -572,11 +572,12 @@ export class Player {
     }
 
     // ── SUPERHERO LANDING ──
-    // When transitioning from Landing to Grounded, create dramatic ground impact
-    // Use the higher of current speed or stored dive speed for maximum impact
-    if (previousStateType === PlayerStateType.Landing && newStateType === PlayerStateType.Grounded) {
-      const landingSpeed = Math.max(previousSpeed, this.superDiveSpeed, 50);
-      this.triggerSuperheroLanding(landingSpeed);
+    // Triggers on ANY transition to Grounded with significant speed
+    if (newStateType === PlayerStateType.Grounded) {
+      const landingSpeed = Math.max(previousSpeed, this.superDiveSpeed, 0);
+      if (landingSpeed > 20) {
+        this.triggerSuperheroLanding(landingSpeed);
+      }
       this.superDiveSpeed = 0;
     }
 
@@ -592,11 +593,10 @@ export class Player {
    */
   private triggerSuperheroLanding(speed: number): void {
     const pos = this.physics.position.clone();
-    const impactForce = Math.max(1, speed / 20); // Scale with approach speed
+    const impactForce = Math.max(3, speed / 10); // Bigger scale for more drama
 
     // ── Camera effects ──
-    // Dramatic camera shake + slam effect
-    this.cameraController.addShake(Math.min(8, impactForce * 2));
+    this.cameraController.addShake(Math.min(12, impactForce * 1.5));
 
     // ── Ground crater shockwave rings ──
     // Multiple expanding rings at ground level (flat, horizontal)
@@ -610,7 +610,7 @@ export class Player {
     }
 
     // ── Ground crack / crater disc ──
-    const craterSize = 5 + impactForce * 4;
+    const craterSize = 8 + impactForce * 3;
     const crater = MeshBuilder.CreateDisc('crater', {
       radius: craterSize, tessellation: 12
     }, this.scene);
@@ -627,11 +627,11 @@ export class Player {
 
     // ── Ground debris blast ──
     // Chunks of ground/rubble fly outward from impact point
-    const debrisCount = Math.min(20, Math.floor(impactForce * 5));
+    const debrisCount = Math.min(35, Math.floor(impactForce * 3));
     for (let i = 0; i < debrisCount; i++) {
       const angle = (i / debrisCount) * Math.PI * 2 + Math.random() * 0.5;
-      const dist = 2 + Math.random() * 3;
-      const size = 0.5 + Math.random() * 1.5;
+      const dist = 2 + Math.random() * 5;
+      const size = 1 + Math.random() * 3;
 
       const chunk = MeshBuilder.CreateBox(`landing_debris_${i}`, {
         width: size * (0.5 + Math.random()),
@@ -650,10 +650,12 @@ export class Player {
       chunk.isPickable = false;
 
       // Animate debris flying outward + up then falling
-      const velX = Math.cos(angle) * (8 + impactForce * 3) + (Math.random() - 0.5) * 5;
-      const velY = 5 + Math.random() * impactForce * 4;
-      const velZ = Math.sin(angle) * (8 + impactForce * 3) + (Math.random() - 0.5) * 5;
-      const angVel = (Math.random() - 0.5) * 10;
+      // MASSIVE outward + upward velocity for cinematic debris blast
+      const outForce = 15 + impactForce * 2;
+      const velX = Math.cos(angle) * outForce + (Math.random() - 0.5) * 8;
+      const velY = 10 + Math.random() * impactForce * 3 + impactForce;
+      const velZ = Math.sin(angle) * outForce + (Math.random() - 0.5) * 8;
+      const angVel = (Math.random() - 0.5) * 15;
 
       // Simple physics animation via scene observer
       let lifetime = 0;
@@ -677,15 +679,15 @@ export class Player {
 
     // ── Dust cloud eruption ──
     // Massive dust ring expanding outward from impact
-    const dustSystem = new ParticleSystem('landingDust', 200, this.scene);
-    dustSystem.createConeEmitter(craterSize * 0.5, Math.PI / 3);
-    dustSystem.color1 = new Color4(0.6, 0.5, 0.35, 0.8);
-    dustSystem.color2 = new Color4(0.4, 0.35, 0.25, 0.6);
+    const dustSystem = new ParticleSystem('landingDust', 400, this.scene);
+    dustSystem.createConeEmitter(craterSize, Math.PI / 2.5);
+    dustSystem.color1 = new Color4(0.6, 0.5, 0.35, 0.9);
+    dustSystem.color2 = new Color4(0.4, 0.35, 0.25, 0.7);
     dustSystem.colorDead = new Color4(0.3, 0.25, 0.2, 0);
-    dustSystem.minSize = 3 + impactForce;
-    dustSystem.maxSize = 8 + impactForce * 2;
-    dustSystem.minLifeTime = 1.5;
-    dustSystem.maxLifeTime = 4;
+    dustSystem.minSize = 5 + impactForce * 0.5;
+    dustSystem.maxSize = 15 + impactForce;
+    dustSystem.minLifeTime = 2;
+    dustSystem.maxLifeTime = 6;
     dustSystem.direction1 = new Vector3(-craterSize, 3, -craterSize);
     dustSystem.direction2 = new Vector3(craterSize, 10 + impactForce * 2, craterSize);
     dustSystem.minEmitPower = 5 + impactForce * 2;
@@ -700,8 +702,8 @@ export class Player {
 
     // ── Building damage from landing impact ──
     if (this.onBuildingDamage) {
-      const radius = 20 + impactForce * 5;
-      this.onBuildingDamage(pos, radius, impactForce * 2);
+      const radius = 30 + impactForce * 4;
+      this.onBuildingDamage(pos, radius, impactForce * 3);
     }
   }
 
