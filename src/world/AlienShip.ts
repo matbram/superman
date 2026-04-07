@@ -673,6 +673,11 @@ export class AlienShip {
           }
         }
 
+        // Ground impact: damage buildings near the laser target + visual effects
+        if (this.onBuildingDamage) {
+          this.onBuildingDamage(this.laserTargetPos, 20, 500);
+        }
+
         // Kill NPCs at laser impact
         if (this.pedestrianSystem) this.pedestrianSystem.killNear(this.laserTargetPos, 10);
         if (this.trafficSystem) this.trafficSystem.destroyNear(this.laserTargetPos, 10);
