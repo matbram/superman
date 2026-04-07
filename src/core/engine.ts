@@ -9,9 +9,34 @@ import { Engine } from '@babylonjs/core/Engines/engine';
 const MAX_DELTA_TIME = 1 / 30; // Cap at ~30fps equivalent delta
 
 /**
+ * Tests whether the browser supports WebGL by attempting to create a context
+ */
+function isWebGLSupported(): boolean {
+  try {
+    const testCanvas = document.createElement('canvas');
+    return !!(
+      testCanvas.getContext('webgl2') || testCanvas.getContext('webgl')
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Creates and configures the Babylon.js engine
  */
 export function createEngine(canvas: HTMLCanvasElement): Engine {
+  if (!isWebGLSupported()) {
+    throw new Error(
+      'Your browser or device does not support WebGL, which is required to run this game.\n\n' +
+        'Try the following:\n' +
+        '- Update your browser to the latest version\n' +
+        '- Enable hardware acceleration in your browser settings\n' +
+        '- Try a different browser (Chrome, Firefox, or Edge)\n' +
+        '- Update your graphics drivers'
+    );
+  }
+
   // Create engine with antialiasing enabled
   const engine = new Engine(canvas, true, {
     preserveDrawingBuffer: true,

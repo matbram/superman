@@ -381,6 +381,19 @@ document.addEventListener('DOMContentLoaded', () => {
     new Game();
   } catch (error) {
     console.error('Failed to initialize game:', error);
-    alert('Failed to initialize game. Check console for details.');
+    const message =
+      error instanceof Error ? error.message : 'Unknown error occurred.';
+
+    // Show error in the instructions overlay instead of a generic alert
+    const instructions = document.getElementById('instructions');
+    if (instructions) {
+      instructions.innerHTML =
+        '<h1 style="color:#ff4444">Failed to Start Game</h1>' +
+        '<p style="white-space:pre-line;margin:20px 0;text-align:left">' +
+        message +
+        '</p>';
+    } else {
+      alert(message);
+    }
   }
 });
