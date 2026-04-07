@@ -15,15 +15,15 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import '@babylonjs/core/Meshes/thinInstanceMesh';
 
-const CLOUD_HEIGHT_MIN = 150;
-const CLOUD_HEIGHT_MAX = 350;
-const NUM_CLOUDS = 15;
-const VOXELS_PER_CLOUD = 30;   // Cube count per cloud
-const VOXEL_SIZE = 8;          // Size of each cloud cube
-const DISPERSE_RADIUS = 40;    // How close before voxels part
-const DISPERSE_FORCE = 80;     // How fast voxels fly apart
-const RECOVER_SPEED = 8;       // How fast voxels drift back
-const CLOUD_SPREAD = 500;      // How far clouds extend from origin
+const CLOUD_HEIGHT_MIN = 400;
+const CLOUD_HEIGHT_MAX = 550;
+const NUM_CLOUDS = 20;
+const VOXELS_PER_CLOUD = 60;   // More voxels per cloud for density
+const VOXEL_SIZE = 4;          // Smaller cubes look more cloud-like
+const DISPERSE_RADIUS = 50;    // How close before voxels part
+const DISPERSE_FORCE = 120;    // How fast voxels fly apart
+const RECOVER_SPEED = 5;       // How fast voxels drift back (slower = floatier)
+const CLOUD_SPREAD = 800;      // How far clouds extend from origin
 
 interface CloudVoxel {
   // Home position (where it wants to be)
@@ -57,10 +57,10 @@ export class VoxelClouds {
     }, scene);
 
     const mat = new StandardMaterial('cloudVoxelMat', scene);
-    mat.diffuseColor = new Color3(0.95, 0.96, 1.0);
-    mat.emissiveColor = new Color3(0.7, 0.75, 0.85);
+    mat.diffuseColor = new Color3(0.92, 0.93, 0.97);
+    mat.emissiveColor = new Color3(0.35, 0.38, 0.45); // Subtle - not blinding white
     mat.specularColor = new Color3(0, 0, 0);
-    mat.alpha = 0.6;
+    mat.alpha = 0.35; // More transparent - clouds are wispy
     mat.backFaceCulling = false;
     mat.freeze();
     this.cloudMesh.material = mat;
@@ -72,10 +72,10 @@ export class VoxelClouds {
       const cy = CLOUD_HEIGHT_MIN + Math.random() * (CLOUD_HEIGHT_MAX - CLOUD_HEIGHT_MIN);
       const cz = (Math.random() - 0.5) * CLOUD_SPREAD * 2;
 
-      // Each cloud is an elongated cluster of cubes
-      const cloudWidth = 40 + Math.random() * 60;
-      const cloudDepth = 30 + Math.random() * 50;
-      const cloudHeight = 10 + Math.random() * 15;
+      // Clouds are WIDE and FLAT (like real cumulus clouds)
+      const cloudWidth = 80 + Math.random() * 120;
+      const cloudDepth = 60 + Math.random() * 100;
+      const cloudHeight = 8 + Math.random() * 12; // Very flat
 
       for (let v = 0; v < VOXELS_PER_CLOUD; v++) {
         this.voxels.push({
@@ -84,7 +84,8 @@ export class VoxelClouds {
           homeZ: cz + (Math.random() - 0.5) * cloudDepth,
           offsetX: 0, offsetY: 0, offsetZ: 0,
           velX: 0, velY: 0, velZ: 0,
-          scale: 0.6 + Math.random() * 0.8,
+          // Vary scale: wider than tall for puffy look
+          scale: 0.5 + Math.random() * 1.0,
         });
       }
     }
