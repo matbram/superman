@@ -133,9 +133,9 @@ export class DayNightCycle {
   }
 
   public update(deltaTime: number): void {
-    // Advance time
-    this.timeOfDay += this.timeSpeed * deltaTime;
-    if (this.timeOfDay >= 24) this.timeOfDay -= 24;
+    // Frozen at golden hour sunset - no time progression
+    // The sunset lighting is the iconic Superman look
+    this.timeOfDay = 17.8;
 
     const t = this.timeOfDay;
 

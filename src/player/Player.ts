@@ -561,6 +561,131 @@ export class Player {
         this.spawnStopShockwave(previousSpeed);
       }
     }
+
+    // ── SUPERHERO LANDING ──
+    // When transitioning from Landing to Grounded, create dramatic ground impact
+    if (previousStateType === PlayerStateType.Landing && newStateType === PlayerStateType.Grounded) {
+      this.triggerSuperheroLanding(previousSpeed);
+    }
+  }
+
+  /**
+   * SUPERHERO LANDING - the iconic three-point landing.
+   * Creates crater effect, ground shockwave, massive debris blast, dust cloud.
+   */
+  private triggerSuperheroLanding(speed: number): void {
+    const pos = this.physics.position.clone();
+    const impactForce = Math.max(1, speed / 20); // Scale with approach speed
+
+    // ── Camera effects ──
+    // Dramatic camera shake + slam effect
+    this.cameraController.addShake(Math.min(8, impactForce * 2));
+
+    // ── Ground crater shockwave rings ──
+    // Multiple expanding rings at ground level (flat, horizontal)
+    const ringCount = Math.min(5, Math.ceil(impactForce));
+    for (let i = 0; i < ringCount; i++) {
+      const ring = this.createStopShockwaveRing();
+      ring.position.set(pos.x, 0.3, pos.z);
+      ring.rotation.x = Math.PI / 2; // Flat on ground
+      ring.scaling.setAll(0.5 + i * 0.3);
+      this.shockwaveRings.push(ring);
+    }
+
+    // ── Ground crack / crater disc ──
+    const craterSize = 5 + impactForce * 4;
+    const crater = MeshBuilder.CreateDisc('crater', {
+      radius: craterSize, tessellation: 12
+    }, this.scene);
+    crater.position.set(pos.x, 0.2, pos.z);
+    crater.rotation.x = Math.PI / 2;
+    const craterMat = new StandardMaterial('craterMat', this.scene);
+    craterMat.diffuseColor = new Color3(0.1, 0.1, 0.1);
+    craterMat.emissiveColor = new Color3(0.05, 0.03, 0.0);
+    craterMat.alpha = 0.6;
+    crater.material = craterMat;
+    crater.isPickable = false;
+    // Fade and shrink the crater over time
+    this.shockwaveRings.push(crater); // Reuse the shockwave cleanup system
+
+    // ── Ground debris blast ──
+    // Chunks of ground/rubble fly outward from impact point
+    const debrisCount = Math.min(20, Math.floor(impactForce * 5));
+    for (let i = 0; i < debrisCount; i++) {
+      const angle = (i / debrisCount) * Math.PI * 2 + Math.random() * 0.5;
+      const dist = 2 + Math.random() * 3;
+      const size = 0.5 + Math.random() * 1.5;
+
+      const chunk = MeshBuilder.CreateBox(`landing_debris_${i}`, {
+        width: size * (0.5 + Math.random()),
+        height: size * 0.4,
+        depth: size * (0.5 + Math.random()),
+      }, this.scene);
+      chunk.position.set(
+        pos.x + Math.cos(angle) * dist,
+        0.5 + Math.random(),
+        pos.z + Math.sin(angle) * dist
+      );
+
+      const debrisMat = new StandardMaterial(`ldm_${i}`, this.scene);
+      debrisMat.diffuseColor = new Color3(0.35, 0.3, 0.25);
+      chunk.material = debrisMat;
+      chunk.isPickable = false;
+
+      // Animate debris flying outward + up then falling
+      const velX = Math.cos(angle) * (8 + impactForce * 3) + (Math.random() - 0.5) * 5;
+      const velY = 5 + Math.random() * impactForce * 4;
+      const velZ = Math.sin(angle) * (8 + impactForce * 3) + (Math.random() - 0.5) * 5;
+      const angVel = (Math.random() - 0.5) * 10;
+
+      // Simple physics animation via scene observer
+      let lifetime = 0;
+      const obs = this.scene.onBeforeRenderObservable.add(() => {
+        const dt = this.scene.getEngine().getDeltaTime() / 1000;
+        lifetime += dt;
+        chunk.position.x += velX * dt;
+        chunk.position.y += (velY - 30 * lifetime) * dt; // Gravity
+        chunk.position.z += velZ * dt;
+        chunk.rotation.x += angVel * dt;
+        chunk.rotation.z += angVel * 0.7 * dt;
+
+        if (chunk.position.y < 0) chunk.position.y = 0;
+        if (lifetime > 3) {
+          chunk.dispose();
+          debrisMat.dispose();
+          this.scene.onBeforeRenderObservable.remove(obs);
+        }
+      });
+    }
+
+    // ── Dust cloud eruption ──
+    // Massive dust ring expanding outward from impact
+    const dustSystem = new ParticleSystem('landingDust', 200, this.scene);
+    dustSystem.createConeEmitter(craterSize * 0.5, Math.PI / 3);
+    dustSystem.color1 = new Color4(0.6, 0.5, 0.35, 0.8);
+    dustSystem.color2 = new Color4(0.4, 0.35, 0.25, 0.6);
+    dustSystem.colorDead = new Color4(0.3, 0.25, 0.2, 0);
+    dustSystem.minSize = 3 + impactForce;
+    dustSystem.maxSize = 8 + impactForce * 2;
+    dustSystem.minLifeTime = 1.5;
+    dustSystem.maxLifeTime = 4;
+    dustSystem.direction1 = new Vector3(-craterSize, 3, -craterSize);
+    dustSystem.direction2 = new Vector3(craterSize, 10 + impactForce * 2, craterSize);
+    dustSystem.minEmitPower = 5 + impactForce * 2;
+    dustSystem.maxEmitPower = 15 + impactForce * 3;
+    dustSystem.emitter = new Vector3(pos.x, 0.5, pos.z);
+    dustSystem.emitRate = 150;
+    dustSystem.blendMode = ParticleSystem.BLENDMODE_STANDARD;
+    dustSystem.gravity = new Vector3(0, -3, 0);
+    dustSystem.start();
+    setTimeout(() => { dustSystem.emitRate = 0; }, 400);
+    setTimeout(() => { dustSystem.dispose(); }, 5000);
+
+    // ── Building damage from landing impact ──
+    if (this.onBuildingDamage) {
+      const radius = 20 + impactForce * 5;
+      this.onBuildingDamage(pos, radius, impactForce * 2);
+    }
   }
 
   /**
