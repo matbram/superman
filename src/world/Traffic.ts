@@ -13,7 +13,7 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 
-const MAX_VEHICLES = 60;
+const MAX_VEHICLES = 80;
 const VEHICLE_SPEED = 14;
 const SPAWN_RADIUS = 250;
 const DESPAWN_RADIUS = 350;
@@ -212,9 +212,11 @@ export class TrafficSystem {
       const avenueIndex = Math.round((localX - AVENUE_WIDTH * 0.5) / avenueSpacing);
       x = chunkOriginX + AVENUE_WIDTH * 0.5 + avenueIndex * avenueSpacing;
 
-      // Add lane offset (drive on one side of the avenue)
-      const lane = (Math.random() > 0.5 ? 1 : -1) * (AVENUE_WIDTH * 0.2);
-      x += lane;
+      // Lane offset: stay within the road surface (not on sidewalks)
+      // Road is AVENUE_WIDTH wide, sidewalks are 12 units on each side
+      // So driveable area is center ± (AVENUE_WIDTH/2 - 12) = ±8
+      const laneOffset = (Math.random() > 0.5 ? 1 : -1) * (3 + Math.random() * 5);
+      x += laneOffset;
 
       z = rawZ;
       dirX = 0;
@@ -227,7 +229,8 @@ export class TrafficSystem {
       const streetIndex = Math.round((localZ - STREET_WIDTH * 0.5) / streetSpacing);
       z = chunkOriginZ + STREET_WIDTH * 0.5 + streetIndex * streetSpacing;
 
-      const lane = (Math.random() > 0.5 ? 1 : -1) * (STREET_WIDTH * 0.2);
+      // Stay within cross street road surface (narrower, ±4 from center)
+      const lane = (Math.random() > 0.5 ? 1 : -1) * (2 + Math.random() * 3);
       z += lane;
 
       x = rawX;

@@ -138,17 +138,20 @@ export class PedestrianSystem {
     const rawX = playerPos.x + Math.cos(angle) * dist;
     const rawZ = playerPos.z + Math.sin(angle) * dist;
 
-    // Snap to SIDEWALK (not road!) next to nearest avenue
+    // Snap to SIDEWALK using chunk-aligned avenue positions
     const avenueSpacing = BLOCK_WIDTH + AVENUE_WIDTH;
-    const nearestAvenue = Math.round(rawX / avenueSpacing) * avenueSpacing;
+    const chunkOriginX = Math.floor(rawX / 200) * 200; // CHUNK_SIZE = 200
+    const localX = rawX - chunkOriginX;
+    const avenueIndex = Math.round((localX - AVENUE_WIDTH * 0.5) / avenueSpacing);
+    const avenueCenter = chunkOriginX + AVENUE_WIDTH * 0.5 + avenueIndex * avenueSpacing;
 
-    // Walk on the sidewalk: 4-7 units from road edge (inside 8-unit sidewalk)
+    // Place on sidewalk: AVENUE_WIDTH/2 + 2 to + 8 (on the 12-unit raised sidewalk)
     const side = Math.random() > 0.5 ? -1 : 1;
-    const sidewalkOffset = AVENUE_WIDTH * 0.5 + 3 + Math.random() * 3; // Past the road edge, on sidewalk
-    const x = nearestAvenue + side * sidewalkOffset;
+    const sidewalkOffset = AVENUE_WIDTH * 0.5 + 2 + Math.random() * 6;
+    const x = avenueCenter + side * sidewalkOffset;
     const z = rawZ;
 
-    // Pedestrians always walk ALONG sidewalks (parallel to avenue), never across streets
+    // Pedestrians walk ALONG sidewalks (parallel to avenue)
     const dirX = 0;
     const dirZ = Math.random() > 0.5 ? 1 : -1;
 
