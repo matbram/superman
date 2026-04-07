@@ -149,10 +149,16 @@ class Game {
       }
     });
 
-    // Player collision (sole collision damage trigger - no physics duplicate)
+    // Player collision (backup raycast trigger - catches grazing hits)
     this.player.setOnBuildingCollision((buildingMesh, impactPosition, speed) => {
       this.buildingDamage.applyDamage(buildingMesh, impactPosition, speed);
     });
+
+    // Physics collision (primary trigger - fires BEFORE push, zero lag)
+    // Per-mesh 80ms cooldown in applyDamage prevents double-counting
+    this.physicsManager.onBuildingCollision = (mesh, point, speed) => {
+      this.buildingDamage.applyDamage(mesh as Mesh, point, speed);
+    };
 
     // Heat vision
     this.player.setOnHeatVisionDamage((building, position, damage) => {

@@ -855,28 +855,26 @@ export class Player {
       lookAhead
     );
 
-    // Also cast rays slightly to the sides for wider detection
+    // Cast rays to sides AND vertically for wider detection
     let hitResult = result;
     if (!result.hit || result.distance > PLAYER_RADIUS * 4) {
-      // Try side rays
       const right = Vector3.Cross(direction, Vector3.Up()).normalize();
-      const leftRay = this.physicsManager.raycast(
-        this.physics.position.add(right.scale(-PLAYER_RADIUS)),
-        direction,
-        lookAhead
-      );
-      const rightRay = this.physicsManager.raycast(
-        this.physics.position.add(right.scale(PLAYER_RADIUS)),
-        direction,
-        lookAhead
-      );
+      const offsets = [
+        right.scale(-PLAYER_RADIUS),      // left
+        right.scale(PLAYER_RADIUS),       // right
+        new Vector3(0, PLAYER_RADIUS, 0),  // up
+        new Vector3(0, -PLAYER_RADIUS, 0), // down
+      ];
 
-      // Use closest hit
-      if (leftRay.hit && leftRay.distance < (hitResult.distance || Infinity)) {
-        hitResult = leftRay;
-      }
-      if (rightRay.hit && rightRay.distance < (hitResult.distance || Infinity)) {
-        hitResult = rightRay;
+      for (const offset of offsets) {
+        const ray = this.physicsManager.raycast(
+          this.physics.position.add(offset),
+          direction,
+          lookAhead
+        );
+        if (ray.hit && ray.distance < (hitResult.distance || Infinity)) {
+          hitResult = ray;
+        }
       }
     }
 

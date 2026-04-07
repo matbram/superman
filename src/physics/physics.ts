@@ -59,6 +59,9 @@ export class PhysicsManager {
   private accumulator: number = 0;
   private collisionMeshes: Set<AbstractMesh> = new Set();
 
+  // Building collision callback - triggers damage immediately at collision point
+  public onBuildingCollision: ((mesh: AbstractMesh, point: Vector3, speed: number) => void) | null = null;
+
   constructor(scene: Scene, config?: Partial<PhysicsConfig>) {
     this.scene = scene;
     this.config = {
@@ -297,8 +300,15 @@ export class PhysicsManager {
           const keepRatio = speed > 80 ? 0.92 : speed > 40 ? 0.85 : 0.75;
           Diag.log('PhysicsHit', `${meshName.substring(0, 25)} spd=${speed.toFixed(0)} keep=${(keepRatio * 100).toFixed(0)}%`);
           character.velocity = velocity.scale(keepRatio);
-          // Push forward past the broken surface (at least one voxel width = 4 units)
-          // Damage is handled by Player.checkBuildingCollision, not physics
+
+          // Apply damage IMMEDIATELY at the collision point BEFORE pushing forward.
+          // This eliminates the visible lag where Superman passes through first
+          // and the building breaks behind him.
+          if (this.onBuildingCollision && sweepResult.mesh) {
+            this.onBuildingCollision(sweepResult.mesh, character.position.clone(), speed);
+          }
+
+          // THEN push forward past the now-broken surface
           character.position.addInPlace(movementDir.scale(5));
         } else {
           // Non-building (ground, sidewalk): deflect away
