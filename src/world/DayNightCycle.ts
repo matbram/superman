@@ -102,7 +102,7 @@ export class DayNightCycle {
     // Find meshes created by scene.ts (NOT creating duplicates)
     this.skyMaterial = (scene.getMeshByName('skyDome')?.material as StandardMaterial) || null!;
     this.sunMesh = scene.getMeshByName('sunDisc') as Mesh;
-    this.sunGlowMesh = scene.getMeshByName('sunGlow') as Mesh;
+    this.sunGlowMesh = scene.getMeshByName('sunGlow') as Mesh; // May be null - that's fine
 
     // Create moon mesh
     this.moonMesh = MeshBuilder.CreateSphere('moonDisc', {
@@ -181,7 +181,7 @@ export class DayNightCycle {
     if (this.skyMaterial) {
       this.skyMaterial.emissiveColor.set(skyColor[0], skyColor[1], skyColor[2]);
     }
-    this.scene.clearColor.set(skyColor[0], skyColor[1], skyColor[2], 1.0);
+    // Don't override clearColor - Atmosphere's sky dome handles the sky visual
 
     // ── Interpolate fog ──
     const fogColor = this.interpolateKeyframes(FOG_COLORS, t);

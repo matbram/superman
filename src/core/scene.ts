@@ -31,7 +31,8 @@ export function createScene(engine: Engine): SceneContext {
   scene.autoAnimate = false;
 
   // Set background color - warm sunset sky
-  scene.clearColor = new Color4(0.95, 0.6, 0.3, 1.0);
+  // Dark blue background - the Atmosphere sky dome renders over this
+  scene.clearColor = new Color4(0.2, 0.35, 0.65, 1.0);
 
   // Atmospheric fog - golden sunset haze
   scene.fogMode = Scene.FOGMODE_EXP2;
@@ -90,51 +91,21 @@ export function createScene(engine: Engine): SceneContext {
 }
 
 /**
- * Creates the sky dome and sun/glow meshes.
- * DayNightCycle controls their colors and positions over time.
+ * Creates sun disc only. Sky dome is handled by Atmosphere.ts.
+ * DayNightCycle controls the sun position.
  */
 function createSkyGradient(scene: Scene): void {
-  // Sky dome
-  const skybox = MeshBuilder.CreateSphere(
-    'skyDome',
-    { diameter: 3500, segments: 12 },
-    scene
-  );
-  skybox.infiniteDistance = true;
-  const skyMaterial = new StandardMaterial('skyMaterial', scene);
-  skyMaterial.backFaceCulling = false;
-  skyMaterial.disableLighting = true;
-  skyMaterial.emissiveColor = new Color3(0.3, 0.45, 0.75);
-  skybox.material = skyMaterial;
-  skybox.isPickable = false;
-
-  // Sun disc - MASSIVE, sits right on the horizon
+  // Sun disc - golden, positioned by DayNightCycle
   const sun = MeshBuilder.CreateSphere(
     'sunDisc',
-    { diameter: 400, segments: 16 },
+    { diameter: 250, segments: 12 },
     scene
   );
   sun.infiniteDistance = true;
   const sunMat = new StandardMaterial('sunMat', scene);
   sunMat.disableLighting = true;
-  sunMat.emissiveColor = new Color3(1.0, 0.85, 0.4);
+  sunMat.emissiveColor = new Color3(1.0, 0.9, 0.5);
   sun.material = sunMat;
   sun.isPickable = false;
-  // Initial position - DayNightCycle will update this
-  sun.position = new Vector3(1500, 50, -500);
-
-  // Sun glow - very subtle, barely visible warm haze
-  const sunGlow = MeshBuilder.CreateSphere(
-    'sunGlow',
-    { diameter: 300, segments: 6 },
-    scene
-  );
-  sunGlow.infiniteDistance = true;
-  const glowMat = new StandardMaterial('sunGlowMat', scene);
-  glowMat.disableLighting = true;
-  glowMat.emissiveColor = new Color3(1.0, 0.85, 0.5);
-  glowMat.alpha = 0.03; // Nearly invisible - just a hint of warmth
-  sunGlow.material = glowMat;
-  sunGlow.isPickable = false;
-  sunGlow.position = sun.position.clone();
+  sun.position = new Vector3(1500, 400, -500);
 }
