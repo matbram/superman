@@ -298,17 +298,17 @@ class Game {
     t1 = performance.now();
     this.perfTimings.atmosphere += t1 - t0;
 
+    // Supersonic wake: damage already-voxelized buildings near flight path
+    t0 = performance.now();
+    const playerSpeed = this.player.getCurrentSpeed();
+    const playerPos = this.player.getPosition();
+
     // Update voxel clouds - pass disperser positions (Superman + UFO)
     const dispersers: Vector3[] = [playerPos];
     const ufoZone = this.alienShip.getGravityZone();
     if (ufoZone) dispersers.push(new Vector3(ufoZone.center.x, 120, ufoZone.center.z));
     this.voxelClouds.update(deltaTime, dispersers);
     this.voxelClouds.recenter(playerPos);
-
-    // Supersonic wake: damage already-voxelized buildings near flight path
-    t0 = performance.now();
-    const playerSpeed = this.player.getCurrentSpeed();
-    const playerPos = this.player.getPosition();
     if (playerSpeed > 80) {
       const wakeRadius = 40 + (playerSpeed - 80) * 0.3;
       const wakeRadiusSq = wakeRadius * wakeRadius;
