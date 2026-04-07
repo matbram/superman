@@ -7,6 +7,7 @@ import { createEngine, startRenderLoop } from './core/engine';
 import { createScene } from './core/scene';
 import { InputManager } from './input/inputManager';
 import { PhysicsManager } from './physics/physics';
+import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { Player } from './player/Player';
 import { City } from './world/City';
 import { Atmosphere } from './world/Atmosphere';
@@ -144,10 +145,16 @@ class Game {
       this.buildingDamage.applyShockwaveDamage(position, radius, force, buildings);
     });
 
-    // Connect player building collision to damage system
+    // Connect player building collision to damage system (from Player raycast)
     this.player.setOnBuildingCollision((buildingMesh, impactPosition, speed) => {
       this.buildingDamage.applyImpactDamage(buildingMesh, impactPosition, speed);
     });
+
+    // Also connect physics sphere sweep collision directly to damage system
+    // This ensures buildings always take damage even if Player raycast misses
+    this.physicsManager.onBuildingCollision = (mesh, point, speed) => {
+      this.buildingDamage.applyImpactDamage(mesh as Mesh, point, speed);
+    };
 
     // Connect heat vision to damage system - voxelizes and punches holes
     this.player.setOnHeatVisionDamage((building, position, damage) => {
