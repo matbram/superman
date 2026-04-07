@@ -15,25 +15,25 @@ import { PhysicsManager, createCollisionBox } from '../physics/physics';
 
 // Chunk and city generation constants
 const CHUNK_SIZE = 200;
-const LOAD_RADIUS = 5;
-const UNLOAD_DISTANCE = 6;
+const LOAD_RADIUS = 4;
+const UNLOAD_DISTANCE = 5;
 const CHUNKS_PER_FRAME = 2;
 
 const ENABLE_CITY_PERF_LOGGING = false;
 const CITY_PERF_LOG_INTERVAL = 2000;
 
-// Street grid
-const STREET_WIDTH = 8;         // Narrow urban streets
-const BLOCK_MIN = 30;           // Minimum city block dimension
-const BLOCK_MAX = 60;           // Maximum city block dimension
+// Street grid - wide enough to fly through, narrow enough to feel urban
+const STREET_WIDTH = 12;
+const BLOCK_MIN = 40;           // Bigger blocks = fewer, larger buildings
+const BLOCK_MAX = 80;
 const SIDEWALK_HEIGHT = 0.15;
-const BUILDING_GAP = 1;         // Tiny gap between buildings in same block
+const BUILDING_GAP = 2;
 
-// Building size ranges (wide footprints, reasonable heights)
-const MIN_BUILDING_HEIGHT = 15;
+// Building sizes - wide footprints, proportional heights
+const MIN_BUILDING_HEIGHT = 20;
 const MAX_BUILDING_HEIGHT = 150;
-const MIN_BUILDING_WIDTH = 12;
-const MAX_BUILDING_WIDTH = 50;
+const MIN_BUILDING_WIDTH = 15;
+const MAX_BUILDING_WIDTH = 60;
 
 // Building styles now chosen automatically based on lot size, height, and district
 
@@ -463,8 +463,9 @@ export class City {
         if (actualLotW >= MIN_BUILDING_WIDTH && actualLotD >= MIN_BUILDING_WIDTH) {
           // Decide how to fill this lot: 1 big building or 2-4 smaller ones
           const lotArea = actualLotW * actualLotD;
-          const splitCount = lotArea > 1500 ? random.intRange(2, 4) :
-                            lotArea > 800 ? random.intRange(1, 3) : 1;
+          // Prefer fewer larger buildings. Only split very large lots.
+          const splitCount = lotArea > 3000 ? random.intRange(2, 3) :
+                            lotArea > 2000 ? random.intRange(1, 2) : 1;
 
           if (splitCount === 1) {
             // Single building fills the lot
@@ -550,167 +551,38 @@ export class City {
   }
 
   /**
-   * Creates a building that fills its lot.
-   * Style is chosen based on height, footprint, and district.
+   * Creates a building that fills its lot. ONE mesh per building for performance.
+   * Visual variety comes from proportions, materials, and the voxel system on damage.
    */
   private createBuilding(
     chunkKey: string, index: number,
     lotX: number, lotZ: number, width: number, depth: number, height: number,
     random: SeededRandom, chunkX: number, chunkZ: number, isDowntown: boolean
   ): Mesh[] {
-    const meshes: Mesh[] = [];
     const baseName = `building_${chunkKey}_${index}`;
     const matIndex = Math.abs(chunkX * 7 + chunkZ * 13 + index * 3) % this.buildingMaterials.length;
-    const cx = lotX + width / 2;   // Center X
-    const cz = lotZ + depth / 2;   // Center Z
-    const mat = this.buildingMaterials[matIndex];
-    const mat2 = this.buildingMaterials[(matIndex + 3) % this.buildingMaterials.length];
+    const cx = lotX + width / 2;
+    const cz = lotZ + depth / 2;
 
-    // Choose style based on building characteristics
-    const isTall = height > 80;
-    const isMedium = height > 40;
-    const isWide = width > 30 && depth > 30;
-    const styleRoll = random.next();
-
-    if (isTall && styleRoll < 0.35) {
-      // ── SETBACK TOWER ── (tall buildings with Art Deco style setbacks)
-      const baseH = height * 0.35;
-      const midH = height * 0.35;
-      const topH = height * 0.3;
-
-      // Base fills the lot
-      const base = MeshBuilder.CreateBox(`${baseName}_base`, {
-        width, height: baseH, depth
-      }, this.scene);
-      base.position = new Vector3(cx, baseH / 2 + SIDEWALK_HEIGHT, cz);
-      base.material = mat; base.receiveShadows = true;
-      meshes.push(base);
-
-      // Mid section (75% of footprint)
-      const midW = width * 0.75, midD = depth * 0.75;
-      const mid = MeshBuilder.CreateBox(`${baseName}_mid`, {
-        width: midW, height: midH, depth: midD
-      }, this.scene);
-      mid.position = new Vector3(cx, baseH + midH / 2 + SIDEWALK_HEIGHT, cz);
-      mid.material = mat2; mid.receiveShadows = true;
-      meshes.push(mid);
-
-      // Top tower (50% of footprint)
-      const topW = width * 0.5, topD = depth * 0.5;
-      const top = MeshBuilder.CreateBox(`${baseName}_main`, {
-        width: topW, height: topH, depth: topD
-      }, this.scene);
-      top.position = new Vector3(cx, baseH + midH + topH / 2 + SIDEWALK_HEIGHT, cz);
-      top.material = isDowntown ? this.buildingMaterials[8] : mat; // Glass for downtown
-      top.receiveShadows = true;
-      meshes.push(top);
-
-    } else if (isTall && styleRoll < 0.7) {
-      // ── GLASS TOWER ── (modern skyscraper, fills lot, glass material)
-      const main = MeshBuilder.CreateBox(`${baseName}_main`, {
-        width, height, depth
-      }, this.scene);
-      main.position = new Vector3(cx, height / 2 + SIDEWALK_HEIGHT, cz);
-      main.material = isDowntown ? this.buildingMaterials[8] : mat; // Glass
-      main.receiveShadows = true;
-      meshes.push(main);
-
-      // Crown/antenna
-      if (height > 100 && random.next() > 0.5) {
-        const crownH = height * 0.08;
-        const crown = MeshBuilder.CreateBox(`${baseName}_roof`, {
-          width: width * 0.3, height: crownH, depth: depth * 0.3
-        }, this.scene);
-        crown.position = new Vector3(cx, height + crownH / 2 + SIDEWALK_HEIGHT, cz);
-        crown.material = this.rooftopMaterial;
-        crown.receiveShadows = true;
-        meshes.push(crown);
-      }
-
-    } else if (isMedium && isWide) {
-      // ── U-SHAPE ── (courtyard building, common in cities)
-      const wallThickness = Math.max(8, width * 0.3);
-
-      // Back wall (full width)
-      const back = MeshBuilder.CreateBox(`${baseName}_main`, {
-        width, height, depth: wallThickness
-      }, this.scene);
-      back.position = new Vector3(cx, height / 2 + SIDEWALK_HEIGHT, lotZ + wallThickness / 2);
-      back.material = mat; back.receiveShadows = true;
-      meshes.push(back);
-
-      // Left wing
-      const wingH = height * (0.6 + random.next() * 0.3);
-      const left = MeshBuilder.CreateBox(`${baseName}_wing`, {
-        width: wallThickness, height: wingH, depth: depth - wallThickness
-      }, this.scene);
-      left.position = new Vector3(lotX + wallThickness / 2, wingH / 2 + SIDEWALK_HEIGHT, lotZ + wallThickness + (depth - wallThickness) / 2);
-      left.material = mat2; left.receiveShadows = true;
-      meshes.push(left);
-
-      // Right wing
-      const rightH = height * (0.6 + random.next() * 0.3);
-      const right = MeshBuilder.CreateBox(`${baseName}_ext`, {
-        width: wallThickness, height: rightH, depth: depth - wallThickness
-      }, this.scene);
-      right.position = new Vector3(lotX + width - wallThickness / 2, rightH / 2 + SIDEWALK_HEIGHT, lotZ + wallThickness + (depth - wallThickness) / 2);
-      right.material = mat; right.receiveShadows = true;
-      meshes.push(right);
-
-    } else if (isMedium) {
-      // ── PODIUM + TOWER ── (wide base with narrower tower on top)
-      const podiumH = Math.min(25, height * 0.3);
-      const towerH = height - podiumH;
-
-      // Podium fills lot
-      const podium = MeshBuilder.CreateBox(`${baseName}_base`, {
-        width, height: podiumH, depth
-      }, this.scene);
-      podium.position = new Vector3(cx, podiumH / 2 + SIDEWALK_HEIGHT, cz);
-      podium.material = mat; podium.receiveShadows = true;
-      meshes.push(podium);
-
-      // Tower offset to one side
-      const towerW = width * (0.5 + random.next() * 0.3);
-      const towerD = depth * (0.5 + random.next() * 0.3);
-      const offsetDir = random.next() > 0.5 ? 1 : -1;
-      const tower = MeshBuilder.CreateBox(`${baseName}_main`, {
-        width: towerW, height: towerH, depth: towerD
-      }, this.scene);
-      tower.position = new Vector3(
-        cx + offsetDir * (width - towerW) * 0.25,
-        podiumH + towerH / 2 + SIDEWALK_HEIGHT,
-        cz
-      );
-      tower.material = mat2; tower.receiveShadows = true;
-      meshes.push(tower);
-
+    // Pick material based on district
+    let mat: StandardMaterial;
+    if (isDowntown && height > 60) {
+      mat = this.buildingMaterials[8]; // Glass for downtown towers
+    } else if (isDowntown) {
+      mat = this.buildingMaterials[matIndex < 5 ? matIndex : 8];
     } else {
-      // ── LOW-RISE ── (simple box fills the lot, with window bands)
-      const main = MeshBuilder.CreateBox(`${baseName}_main`, {
-        width, height, depth
-      }, this.scene);
-      main.position = new Vector3(cx, height / 2 + SIDEWALK_HEIGHT, cz);
-      main.material = mat; main.receiveShadows = true;
-      meshes.push(main);
-
-      // Window band on taller low-rises
-      if (height > 20) {
-        const bandH = 1.5;
-        const numBands = Math.min(3, Math.floor(height / 12));
-        for (let b = 1; b <= numBands; b++) {
-          const band = MeshBuilder.CreateBox(`${baseName}_strip${b}`, {
-            width: width + 0.3, height: bandH, depth: depth + 0.3
-          }, this.scene);
-          band.position = new Vector3(cx, height * b / (numBands + 1) + SIDEWALK_HEIGHT, cz);
-          band.material = this.windowMaterial;
-          band.receiveShadows = true;
-          meshes.push(band);
-        }
-      }
+      mat = this.buildingMaterials[matIndex];
     }
 
-    return meshes;
+    // ONE mesh per building - fills the lot
+    const main = MeshBuilder.CreateBox(`${baseName}_main`, {
+      width, height, depth
+    }, this.scene);
+    main.position = new Vector3(cx, height / 2 + SIDEWALK_HEIGHT, cz);
+    main.material = mat;
+    main.receiveShadows = true;
+
+    return [main];
   }
 
   /**
