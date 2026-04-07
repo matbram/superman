@@ -127,21 +127,25 @@ export class BuildingDamage {
     const vb = this.getVoxelBuilding(mesh);
     if (!vb) return true; // Not voxelized → treat as solid wall
 
-    // Check a small area around the position (Superman's radius)
     const grid = vb.worldToGrid(worldPos);
-    if (!grid) return false; // Outside grid → hole
+    if (!grid) {
+      // Position is outside the voxel grid bounds.
+      // This can happen at the edges. Check if the building has ANY blocks
+      // remaining - if so, treat as solid (Superman is at the edge of a real building).
+      return vb.getPercentRemaining() > 0.05;
+    }
 
-    // Check 3x3x3 area around impact point
+    // Check 3x3x3 area around the grid position for any solid block
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
         for (let dz = -1; dz <= 1; dz++) {
           if (vb.isSolid(grid.x + dx, grid.y + dy, grid.z + dz)) {
-            return true; // At least one solid block nearby
+            return true;
           }
         }
       }
     }
-    return false; // All blocks removed → it's a hole
+    return false; // All nearby blocks removed → it's a hole
   }
 
   // ── Single Damage Entry Point ──────────────────────────────────────

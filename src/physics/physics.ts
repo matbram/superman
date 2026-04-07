@@ -298,32 +298,33 @@ export class PhysicsManager {
         if (isBuilding && sweepResult.mesh) {
           const speed = velocity.length();
 
-          // Check if there are solid voxel blocks at the collision point.
-          // If blocks exist → stop Superman, break them, he pushes through next frame.
-          // If no blocks (hole from previous damage) → let Superman fly through freely.
-          const collisionPoint = character.position.clone();
+          // Probe INTO the building to check for solid voxel blocks.
+          // character.position is 0.05 units BEFORE the surface (safe buffer).
+          // We must check 1-2 units INTO the building along movement direction
+          // to actually hit the voxel grid, not the empty space outside it.
+          const probePoint = character.position.add(movementDir.scale(2));
           const hasSolid = this.hasSolidBlocksAt
-            ? this.hasSolidBlocksAt(sweepResult.mesh, collisionPoint)
-            : true; // Default: treat as solid if no checker
+            ? this.hasSolidBlocksAt(sweepResult.mesh, probePoint)
+            : true;
 
           if (hasSolid) {
-            // Solid blocks exist: STOP Superman, apply damage to break them.
+            // Solid blocks exist: STOP Superman, break the blocks.
             const keepRatio = speed > 80 ? 0.92 : speed > 40 ? 0.85 : 0.75;
             Diag.log('PhysicsHit', `${meshName.substring(0, 25)} spd=${speed.toFixed(0)} SOLID`);
             character.velocity = velocity.scale(keepRatio);
 
-            // Apply damage at collision point to break the blocks
+            // Apply damage at the probe point (where blocks actually are)
             if (this.onBuildingCollision) {
-              this.onBuildingCollision(sweepResult.mesh, collisionPoint, speed);
+              this.onBuildingCollision(sweepResult.mesh, probePoint, speed);
             }
 
-            // Push forward just past the broken surface (one voxel layer)
+            // Push forward past the broken surface
             character.position.addInPlace(movementDir.scale(5));
           } else {
-            // No solid blocks: it's a hole! Let Superman through freely.
+            // No solid blocks at probe point: it's a hole, fly through freely.
             Diag.log('PhysicsHit', `${meshName.substring(0, 25)} spd=${speed.toFixed(0)} HOLE`);
             character.position = targetPosition;
-            character.velocity = velocity; // No speed loss through holes
+            character.velocity = velocity;
           }
         } else if (!isBuilding) {
           // Non-building (ground, sidewalk): deflect away
